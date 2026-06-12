@@ -1,0 +1,166 @@
+// POC ERP Clínica Estética — Fase 1
+// Agenda por cabinas + recordatorios WhatsApp.
+//
+// Nota: SQLite (vía Prisma) NO soporta `enum`. Los campos que en el spec
+// son enums se modelan como `String` con un valor por defecto y se validan
+// en la capa de aplicación (ver lib/enums.ts). El modelo incluye `clinicId`
+// en todas las tablas para facilitar la evolución futura a multi-tenant.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Clinic {
+  id                   String   @id @default(cuid())
+  name                 String
+  taxId                String?
+  address              String?
+  phone                String?
+  email                String?
+  timezone             String   @default("Europe/Madrid")
+  openingTime          String   @default("09:00")
+  closingTime          String   @default("20:00")
+  whatsappEnabled      Boolean  @default(false)
+  whatsappTemplateName String?  @default("appointment_reminder_es")
+  whatsappTemplateLang String?  @default("es")
+  reminderHoursBefore  Int      @default(24)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  users        User[]
+  cabins       Cabin[]
+  customers    Customer[]
+  services     Service[]
+  appointments Appointment[]
+}
+
+// role: "ADMIN" | "WORKER"
+model User {
+  id           String   @id @default(cuid())
+  clinicId     String
+  clinic       Clinic   @relation(fields: [clinicId], references: [id])
+  name         String
+  email        String?  @unique
+  passwordHash String?
+  phone        String?
+  role         String   @default("WORKER")
+  active       Boolean  @default(true)
+  color        String?  @default("#3C54A4")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  appointments Appointment[]
+}
+
+model Cabin {
+  id          String   @id @default(cuid())
+  clinicId    String
+  clinic      Clinic   @relation(fields: [clinicId], references: [id])
+  name        String
+  description String?
+  active      Boolean  @default(true)
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  appointments Appointment[]
+}
+
+model Customer {
+  id            String   @id @default(cuid())
+  clinicId      String
+  clinic        Clinic   @relation(fields: [clinicId], references: [id])
+  firstName     String
+  lastName      String?
+  phone         String
+  email         String?
+  notes         String?
+  whatsappOptIn Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  appointments     Appointment[]
+  whatsappMessages WhatsappMessage[]
+}
+
+model Service {
+  id              String   @id @default(cuid())
+  clinicId        String
+  clinic          Clinic   @relation(fields: [clinicId], references: [id])
+  name            String
+  description     String?
+  durationMinutes Int
+  priceCents      Int
+  active          Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  appointments Appointment[]
+}
+
+// status: PENDING | CONFIRMED | CANCELLED | DONE | NO_SHOW
+// reminderStatus: NOT_SCHEDULED | PENDING | SENDING | SENT | FAILED | DELIVERED | READ
+model Appointment {
+  id                String    @id @default(cuid())
+  clinicId          String
+  clinic            Clinic    @relation(fields: [clinicId], references: [id])
+  customerId        String
+  customer          Customer  @relation(fields: [customerId], references: [id])
+  serviceId         String
+  service           Service   @relation(fields: [serviceId], references: [id])
+  workerId          String
+  worker            User      @relation(fields: [workerId], references: [id])
+  cabinId           String
+  cabin             Cabin     @relation(fields: [cabinId], references: [id])
+  startAt           DateTime
+  endAt             DateTime
+  durationMinutes   Int
+  status            String    @default("PENDING")
+  reminderStatus    String    @default("NOT_SCHEDULED")
+  notes             String?
+  cancelledAt       DateTime?
+  cancelledByUserId String?
+  cancelReason      String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  whatsappMessages WhatsappMessage[]
+
+  @@index([clinicId, startAt])
+  @@index([clinicId, cabinId, startAt])
+  @@index([clinicId, workerId, startAt])
+}
+
+// direction: OUTBOUND | INBOUND
+// status: PENDING | SENT | FAILED | DELIVERED | READ | RECEIVED
+model WhatsappMessage {
+  id                String       @id @default(cuid())
+  clinicId          String
+  appointmentId     String?
+  appointment       Appointment? @relation(fields: [appointmentId], references: [id])
+  customerId        String?
+  customer          Customer?    @relation(fields: [customerId], references: [id])
+  direction         String
+  toPhone           String?
+  fromPhone         String?
+  templateName      String?
+  templateLanguage  String?
+  providerMessageId String?
+  status            String       @default("PENDING")
+  payloadJson       String?
+  responseJson      String?
+  errorCode         String?
+  errorMessage      String?
+  sentAt            DateTime?
+  receivedAt        DateTime?
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+
+  @@index([clinicId, appointmentId])
+  @@index([providerMessageId])
+}

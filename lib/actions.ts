@@ -161,13 +161,17 @@ export async function sendReminder(appointmentId: string): Promise<ActionResult>
 export async function saveCustomer(id: string | null, fd: FormData): Promise<ActionResult> {
   try {
     const clinicId = await getActiveClinicId()
+    const birthDateRaw = optStr(fd, "birthDate")
     const data = {
       firstName: str(fd, "firstName"),
       lastName: optStr(fd, "lastName"),
       phone: str(fd, "phone"),
+      phone2: optStr(fd, "phone2"),
       email: optStr(fd, "email"),
+      birthDate: birthDateRaw ? new Date(birthDateRaw) : null,
       notes: optStr(fd, "notes"),
       whatsappOptIn: bool(fd, "whatsappOptIn"),
+      active: bool(fd, "active"),
     }
     if (id) {
       await prisma.customer.update({ where: { id }, data })
@@ -314,6 +318,7 @@ export async function updateClinic(fd: FormData): Promise<ActionResult> {
         whatsappTemplateName: optStr(fd, "whatsappTemplateName"),
         whatsappTemplateLang: optStr(fd, "whatsappTemplateLang") || "es",
         reminderHoursBefore: int(fd, "reminderHoursBefore", 24),
+        inactivityWarningDays: int(fd, "inactivityWarningDays", 180),
       },
     })
     revalidateAll()

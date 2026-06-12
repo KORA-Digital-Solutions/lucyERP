@@ -29,6 +29,7 @@ model Clinic {
   whatsappTemplateName String?  @default("appointment_reminder_es")
   whatsappTemplateLang String?  @default("es")
   reminderHoursBefore  Int      @default(24)
+  inactivityWarningDays Int     @default(180)
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
 
@@ -72,17 +73,20 @@ model Cabin {
 }
 
 model Customer {
-  id            String   @id @default(cuid())
+  id            String    @id @default(cuid())
   clinicId      String
-  clinic        Clinic   @relation(fields: [clinicId], references: [id])
+  clinic        Clinic    @relation(fields: [clinicId], references: [id])
   firstName     String
   lastName      String?
   phone         String
+  phone2        String?
   email         String?
+  birthDate     DateTime?
   notes         String?
-  whatsappOptIn Boolean  @default(true)
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  whatsappOptIn Boolean   @default(true)
+  active        Boolean   @default(true)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 
   appointments     Appointment[]
   whatsappMessages WhatsappMessage[]

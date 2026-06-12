@@ -36,11 +36,10 @@ export default function LoginPage() {
         <div className="space-y-6">
           <blockquote className="space-y-2">
             <p className="text-lg leading-relaxed">
-              &ldquo;LuciaERP ha transformado la manera en que gestionamos nuestro negocio. 
-              La agenda, los clientes y la facturación, todo en un solo lugar.&rdquo;
+              &ldquo;Sencillamente... lo que tu piel necesita&rdquo;
             </p>
             <footer className="text-sm text-sidebar-muted">
-              Carlos Rodríguez — Director, Clínica Dental Sonrisa
+              Centro de Estética Lucía
             </footer>
           </blockquote>
         </div>

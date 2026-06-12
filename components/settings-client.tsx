@@ -24,6 +24,7 @@ interface ClinicData {
   whatsappTemplateName: string | null
   whatsappTemplateLang: string | null
   reminderHoursBefore: number
+  inactivityWarningDays: number
 }
 
 export function SettingsClient({
@@ -143,6 +144,30 @@ export function SettingsClient({
               <div className="space-y-2">
                 <Label htmlFor="reminderHoursBefore">Antelación (horas)</Label>
                 <Input id="reminderHoursBefore" name="reminderHoursBefore" type="number" min={1} defaultValue={clinic.reminderHoursBefore} />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Clientes</CardTitle>
+            <CardDescription>Configuración del módulo de gestión de clientes</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="grid gap-4 sm:grid-cols-3">
+              <div className="space-y-2">
+                <Label htmlFor="inactivityWarningDays">Días sin visita para mostrar aviso</Label>
+                <Input
+                  id="inactivityWarningDays"
+                  name="inactivityWarningDays"
+                  type="number"
+                  min={1}
+                  defaultValue={clinic.inactivityWarningDays}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Muestra un icono de alerta en los clientes que llevan más días sin visita.
+                </p>
               </div>
             </div>
           </CardContent>

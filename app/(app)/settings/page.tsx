@@ -26,6 +26,7 @@ export default async function SettingsPage() {
         whatsappTemplateName: clinic.whatsappTemplateName,
         whatsappTemplateLang: clinic.whatsappTemplateLang,
         reminderHoursBefore: clinic.reminderHoursBefore,
+        inactivityWarningDays: clinic.inactivityWarningDays,
       }}
       whatsappConfigured={isWhatsappConfigured()}
       cabinCount={cabinCount}

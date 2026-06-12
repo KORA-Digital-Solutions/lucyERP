@@ -76,5 +76,7 @@ export function normalizePhone(phone: string, defaultCountry = "34"): string {
 }
 
 export function isValidPhone(phone: string): boolean {
-  return /^\+\d{8,15}$/.test(normalizePhone(phone))
+  if (!phone.trim()) return false
+  return /^\+?\d{9,15}$/.test(normalizePhone(phone).replace("+", "")) ||
+    /^\+\d{8,15}$/.test(normalizePhone(phone))
 }

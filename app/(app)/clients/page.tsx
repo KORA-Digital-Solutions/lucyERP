@@ -6,30 +6,45 @@ export const dynamic = "force-dynamic"
 
 export default async function ClientsPage() {
   const clinic = await getActiveClinic()
+  const inactivityWarningDays = clinic.inactivityWarningDays ?? 180
   const customers = await prisma.customer.findMany({
     where: { clinicId: clinic.id },
     orderBy: { firstName: "asc" },
     include: {
       appointments: {
-        where: { startAt: { gte: new Date() }, status: { in: ["PENDING", "CONFIRMED"] } },
-        orderBy: { startAt: "asc" },
+        where: { status: { in: ["DONE", "CONFIRMED", "PENDING"] } },
+        orderBy: { startAt: "desc" },
         take: 1,
       },
     },
   })
 
-  const rows: ClientRow[] = customers.map((c) => ({
-    id: c.id,
-    firstName: c.firstName,
-    lastName: c.lastName,
-    phone: c.phone,
-    email: c.email,
-    notes: c.notes,
-    whatsappOptIn: c.whatsappOptIn,
-    nextAppointment: c.appointments[0]
-      ? c.appointments[0].startAt.toLocaleString("es-ES", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })
-      : null,
-  }))
+  const now = new Date()
 
-  return <ClientsClient rows={rows} />
+  const rows: ClientRow[] = customers.map((c) => {
+    const lastAppt = c.appointments[0] ?? null
+    const lastApptDate = lastAppt ? lastAppt.startAt : null
+    const daysSince = lastApptDate
+      ? Math.floor((now.getTime() - lastApptDate.getTime()) / 86_400_000)
+      : null
+
+    return {
+      id: c.id,
+      firstName: c.firstName,
+      lastName: c.lastName,
+      phone: c.phone,
+      phone2: c.phone2,
+      email: c.email,
+      birthDate: c.birthDate ? c.birthDate.toISOString().slice(0, 10) : null,
+      notes: c.notes,
+      whatsappOptIn: c.whatsappOptIn,
+      active: c.active ?? true,
+      lastAppointment: lastApptDate
+        ? lastApptDate.toLocaleString("es-ES", { day: "2-digit", month: "short", year: "numeric" })
+        : null,
+      daysSinceLastAppt: daysSince,
+    }
+  })
+
+  return <ClientsClient rows={rows} inactivityWarningDays={inactivityWarningDays} />
 }

@@ -100,20 +100,26 @@ export function AppointmentPanel({
   const isEdit = Boolean(appointment)
   const [loading, setLoading] = useState(false)
 
-  const [customerId, setCustomerId] = useState("")
-  const [serviceId, setServiceId] = useState("")
-  const [workerId, setWorkerId] = useState("")
-  const [cabinId, setCabinId] = useState("")
-  const [date, setDate] = useState(defaultDate)
-  const [time, setTime] = useState("10:00")
-  const [duration, setDuration] = useState(60)
-  const [endTime, setEndTime] = useState("11:00")
-  const [status, setStatus] = useState("PENDING")
-  const [notes, setNotes] = useState("")
-  const [customDuration, setCustomDuration] = useState(false)
+  const initTime = appointment ? appointment.time : (defaultTime ?? "10:00")
+  const initDuration = appointment ? appointment.durationMinutes : 60
+  const initCabinId = appointment ? appointment.cabinId : (defaultCabinId ?? cabins[0]?.id ?? "")
+
+  const [customerId, setCustomerId] = useState(appointment?.customerId ?? "")
+  const [serviceId, setServiceId] = useState(appointment?.serviceId ?? "")
+  const [workerId, setWorkerId] = useState(appointment?.workerId ?? workers[0]?.id ?? "")
+  const [cabinId, setCabinId] = useState(initCabinId)
+  const [date, setDate] = useState(appointment?.date ?? defaultDate)
+  const [time, setTime] = useState(initTime)
+  const [duration, setDuration] = useState(initDuration)
+  const [endTime, setEndTime] = useState(minToTime(timeToMin(initTime) + initDuration))
+  const [status, setStatus] = useState(appointment?.status ?? "PENDING")
+  const [notes, setNotes] = useState(appointment?.notes ?? "")
+  const [customDuration, setCustomDuration] = useState(Boolean(appointment))
 
   // Buscador de cliente
-  const [query, setQuery] = useState("")
+  const [query, setQuery] = useState(
+    appointment ? (customers.find((c) => c.id === appointment.customerId)?.label ?? "") : ""
+  )
   const [showResults, setShowResults] = useState(false)
   const searchRef = useRef<HTMLDivElement>(null)
 
@@ -176,16 +182,6 @@ export function AppointmentPanel({
   }, [query, customers])
 
   const endError = timeToMin(endTime) <= timeToMin(time)
-
-  // Opciones del selector de hora (cada 15 min dentro del horario del centro).
-  function buildTimeOptions(extra: string) {
-    const set = new Set<string>()
-    for (let m = openingMinutes; m <= closingMinutes; m += 15) set.add(minToTime(m))
-    if (extra) set.add(extra) // incluye el valor actual aunque no caiga en la rejilla
-    return Array.from(set).sort()
-  }
-  const startOptions = useMemo(() => buildTimeOptions(time), [openingMinutes, closingMinutes, time])
-  const endOptions = useMemo(() => buildTimeOptions(endTime), [openingMinutes, closingMinutes, endTime])
 
   // --- Sincronización duración <-> hora fin ---
   function onChangeStart(t: string) {
@@ -376,19 +372,11 @@ export function AppointmentPanel({
           </div>
           <div className="space-y-2">
             <Label>Hora inicio</Label>
-            <Select value={time} onValueChange={onChangeStart}>
-              <SelectTrigger>
-                <Clock className="mr-2 h-4 w-4 text-muted-foreground" />
-                <SelectValue placeholder="--:--" />
-              </SelectTrigger>
-              <SelectContent className="max-h-60">
-                {startOptions.map((t) => (
-                  <SelectItem key={t} value={t}>
-                    {t}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <Input
+              type="time"
+              value={time}
+              onChange={(e) => e.target.value && onChangeStart(e.target.value)}
+            />
           </div>
         </div>
 
@@ -406,19 +394,12 @@ export function AppointmentPanel({
           </div>
           <div className="space-y-2">
             <Label>Hora fin</Label>
-            <Select value={endTime} onValueChange={onChangeEnd}>
-              <SelectTrigger className={endError ? "border-[#EA4335] focus-visible:ring-[#EA4335]" : ""}>
-                <Clock className="mr-2 h-4 w-4 text-muted-foreground" />
-                <SelectValue placeholder="--:--" />
-              </SelectTrigger>
-              <SelectContent className="max-h-60">
-                {endOptions.map((t) => (
-                  <SelectItem key={t} value={t}>
-                    {t}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <Input
+              type="time"
+              value={endTime}
+              onChange={(e) => e.target.value && onChangeEnd(e.target.value)}
+              className={endError ? "border-[#EA4335] focus-visible:ring-[#EA4335]" : ""}
+            />
           </div>
         </div>
         {endError ? (

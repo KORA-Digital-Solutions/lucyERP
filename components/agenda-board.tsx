@@ -287,17 +287,21 @@ export function AgendaBoard({
                                 )}
                                 style={{ top, height, borderLeftColor: a.workerColor }}
                               >
-                                <p className="truncate text-xs font-semibold">
-                                  [{a.workerName}] {a.serviceName}
-                                </p>
-                                <p className="truncate text-xs">{a.customerName}</p>
-                                <p className="truncate text-[11px] opacity-80">
-                                  {a.startLabel}–{a.endLabel} · {a.durationMinutes} min
-                                </p>
-                                <div className="mt-0.5 flex items-center gap-1 text-[11px]">
-                                  <span className={cn("inline-block h-2 w-2 rounded-full", meta.dot)} />
-                                  {meta.label}
-                                  {reminded && <MessageCircle className="h-3 w-3 text-[#1E6B34]" />}
+                                <div className="flex items-baseline justify-between gap-1">
+                                  <p className="truncate text-xs font-semibold">
+                                    [{a.workerName}] {a.serviceName}
+                                  </p>
+                                  <p className="shrink-0 text-[11px] opacity-80">
+                                    {a.startLabel}–{a.endLabel} · {a.durationMinutes} min
+                                  </p>
+                                </div>
+                                <div className="flex items-center justify-between gap-1">
+                                  <p className="truncate text-xs">{a.customerName}</p>
+                                  <div className="flex shrink-0 items-center gap-1 text-[11px]">
+                                    <span className={cn("inline-block h-2 w-2 rounded-full", meta.dot)} />
+                                    {meta.label}
+                                    {reminded && <MessageCircle className="h-3 w-3 text-[#1E6B34]" />}
+                                  </div>
                                 </div>
                               </button>
                             )
@@ -323,6 +327,7 @@ export function AgendaBoard({
 
         {panelOpen && (
           <AppointmentPanel
+            key={editing?.id ?? "new"}
             customers={customers}
             services={services}
             workers={workers}

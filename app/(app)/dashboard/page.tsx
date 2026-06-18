@@ -1,5 +1,5 @@
 import Link from "next/link"
-import { Calendar, Clock, AlertTriangle, CheckCircle2, ArrowRight, MessageCircle, Package } from "lucide-react"
+import { Calendar, Clock, AlertTriangle, CheckCircle2, ArrowRight, MessageCircle, Package, ShoppingCart } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { KPICard } from "@/components/kpi-card"
@@ -16,7 +16,7 @@ export default async function DashboardPage() {
   const { start, end } = dayRange(today)
   const now = new Date()
 
-  const [todays, pending, failed, upcoming, lowStockProducts] = await Promise.all([
+  const [todays, pending, failed, upcoming, lowStockProducts, todaySales] = await Promise.all([
     prisma.appointment.findMany({
       where: { clinicId: clinic.id, startAt: { gte: start, lte: end }, status: { not: "CANCELLED" } },
       include: { customer: true, service: true, worker: true },
@@ -38,9 +38,17 @@ export default async function DashboardPage() {
       where: { clinicId: clinic.id, active: true, stockMin: { gt: 0 } },
       orderBy: { name: "asc" },
     }).then((ps) => ps.filter((p) => p.stock <= p.stockMin)),
+    prisma.sale.findMany({
+      where: { clinicId: clinic.id, createdAt: { gte: start, lte: end } },
+      select: { totalCents: true, paymentMethod: true, saleType: true },
+    }),
   ])
 
   const confirmed = todays.filter((a) => a.status === "CONFIRMED").length
+  const todaySalesTotal = todaySales.reduce((s, x) => s + x.totalCents, 0)
+  const todayCash = todaySales.filter((x) => x.paymentMethod === "CASH").reduce((s, x) => s + x.totalCents, 0)
+  const todayCard = todaySales.filter((x) => x.paymentMethod === "CARD").reduce((s, x) => s + x.totalCents, 0)
+  const fmtEur = (c: number) => (c / 100).toLocaleString("es-ES", { style: "currency", currency: "EUR" })
 
   return (
     <div className="p-8 space-y-8">
@@ -125,6 +133,40 @@ export default async function DashboardPage() {
           </CardContent>
         </Card>
       </div>
+
+      {todaySales.length > 0 && (
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <div className="flex items-center gap-2">
+              <ShoppingCart className="h-4 w-4 text-muted-foreground" />
+              <CardTitle className="text-base font-medium">Ventas de hoy</CardTitle>
+            </div>
+            <Button variant="ghost" size="sm" asChild>
+              <Link href="/sales">Ver ventas <ArrowRight className="ml-1 h-4 w-4" /></Link>
+            </Button>
+          </CardHeader>
+          <CardContent>
+            <div className="flex gap-8 text-sm">
+              <div>
+                <p className="text-muted-foreground">Total</p>
+                <p className="text-2xl font-semibold">{fmtEur(todaySalesTotal)}</p>
+              </div>
+              <div>
+                <p className="text-muted-foreground">Efectivo</p>
+                <p className="text-xl font-medium">{fmtEur(todayCash)}</p>
+              </div>
+              <div>
+                <p className="text-muted-foreground">Tarjeta</p>
+                <p className="text-xl font-medium">{fmtEur(todayCard)}</p>
+              </div>
+              <div>
+                <p className="text-muted-foreground">Nº ventas</p>
+                <p className="text-xl font-medium">{todaySales.length}</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {lowStockProducts.length > 0 && (
         <Card className="border-orange-200 bg-orange-50/50">

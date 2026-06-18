@@ -492,7 +492,7 @@ export async function addStockMovement(
 /* --------------------------------- VENTAS -------------------------------- */
 
 export type SaleLineInput = {
-  type: "SERVICE" | "PRODUCT"
+  type: "SERVICE" | "PRODUCT" | "GIFT_CARD"
   serviceId?: string
   productId?: string
   description: string
@@ -509,6 +509,7 @@ export async function createSale(
   paymentMethod: "CARD" | "CASH" | "BALANCE" | "DEBT",
   lines: SaleLineInput[],
   notes: string | null,
+  giftCardRecipientId?: string | null,
 ): Promise<ActionResult> {
   try {
     const session = await getSession()
@@ -584,15 +585,21 @@ export async function createSale(
         })
       }
 
-      // Movimientos de saldo/deuda del cliente
-      if (customerId) {
-        if (saleType === "GIFT_CARD") {
-          // Tarjeta regalo: abono de saldo al cliente
+      // Tarjetas regalo: abono de saldo al destinatario
+      const giftCardLines = lines.filter((l) => l.type === "GIFT_CARD")
+      const recipientId = giftCardRecipientId ?? null
+      for (const gc of giftCardLines) {
+        if (recipientId) {
           await tx.customerBalanceMovement.create({
-            data: { clinicId, customerId, userId: session.userId, type: "GIFT_CARD_IN", amountCents: totalCents, saleId: s.id, notes: "Tarjeta regalo" },
+            data: { clinicId, customerId: recipientId, userId: session.userId, type: "GIFT_CARD_IN", amountCents: gc.totalCents, saleId: s.id, notes: gc.description },
           })
-          await tx.customer.update({ where: { id: customerId }, data: { balanceCents: { increment: totalCents } } })
-        } else if (paymentMethod === "BALANCE") {
+          await tx.customer.update({ where: { id: recipientId }, data: { balanceCents: { increment: gc.totalCents } } })
+        }
+      }
+
+      // Movimientos de saldo/deuda del cliente comprador
+      if (customerId && saleType !== "GIFT_CARD") {
+        if (paymentMethod === "BALANCE") {
           const used = Math.min(paidCents, totalCents)
           await tx.customerBalanceMovement.create({
             data: { clinicId, customerId, userId: session.userId, type: "BALANCE_USED", amountCents: -used, saleId: s.id, notes: null },
@@ -610,6 +617,7 @@ export async function createSale(
           })
         }
       }
+
 
       // Actualizar caja del día
       const today = new Date().toISOString().slice(0, 10)
@@ -733,6 +741,36 @@ export async function closeCashRegister(
   } catch (e) {
     return { ok: false, error: errMsg(e) }
   }
+}
+
+/* ---------------------------- FICHA CLIENTE ------------------------------ */
+
+export async function getClientProfile(customerId: string) {
+  const [customer, movements, recentSales] = await Promise.all([
+    prisma.customer.findUnique({
+      where: { id: customerId },
+      select: {
+        id: true, firstName: true, lastName: true,
+        phone: true, email: true, notes: true, balanceCents: true,
+      },
+    }),
+    prisma.customerBalanceMovement.findMany({
+      where: { customerId },
+      include: { user: { select: { name: true, lastName: true } } },
+      orderBy: { createdAt: "desc" },
+      take: 30,
+    }),
+    prisma.sale.findMany({
+      where: { customerId },
+      include: {
+        lines: { select: { description: true, totalCents: true, type: true } },
+        user: { select: { name: true } },
+      },
+      orderBy: { createdAt: "desc" },
+      take: 15,
+    }),
+  ])
+  return { customer, movements, recentSales }
 }
 
 function errMsg(e: unknown): string {

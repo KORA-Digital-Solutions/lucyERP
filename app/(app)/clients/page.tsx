@@ -39,6 +39,7 @@ export default async function ClientsPage() {
       notes: c.notes,
       whatsappOptIn: c.whatsappOptIn,
       active: c.active ?? true,
+      balanceCents: c.balanceCents,
       lastAppointment: lastApptDate
         ? lastApptDate.toLocaleString("es-ES", { day: "2-digit", month: "short", year: "numeric" })
         : null,

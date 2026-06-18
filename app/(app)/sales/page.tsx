@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic"
 export default async function SalesPage() {
   const clinic = await getActiveClinic()
 
-  const [sales, customers, services, products] = await Promise.all([
+  const [sales, customers, services, products, workers] = await Promise.all([
     prisma.sale.findMany({
       where: { clinicId: clinic.id },
       include: { customer: true, user: true, lines: true },
@@ -16,7 +16,7 @@ export default async function SalesPage() {
     }),
     prisma.customer.findMany({
       where: { clinicId: clinic.id, active: true },
-      orderBy: { firstName: "asc" },
+      orderBy: [{ lastName: "asc" }, { firstName: "asc" }],
     }),
     prisma.service.findMany({
       where: { clinicId: clinic.id, active: true },
@@ -26,14 +26,19 @@ export default async function SalesPage() {
       where: { clinicId: clinic.id, active: true },
       orderBy: { name: "asc" },
     }),
+    prisma.user.findMany({
+      where: { clinicId: clinic.id, active: true },
+      orderBy: { name: "asc" },
+    }),
   ])
 
   return (
     <SalesClient
       sales={sales as any}
-      customers={customers}
+      customers={customers as any}
       services={services as any}
       products={products}
+      workers={workers}
     />
   )
 }

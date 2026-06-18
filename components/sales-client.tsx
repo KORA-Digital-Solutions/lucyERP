@@ -1,40 +1,29 @@
 "use client"
 
-import { useState, useMemo } from "react"
-import { ShoppingCart, Plus, Search, CreditCard, Banknote, Wallet, AlertCircle, Trash2, Gift } from "lucide-react"
+import { useState, useMemo, useRef, useEffect } from "react"
+import {
+  ArrowLeft, Plus, Search, CreditCard, Banknote, AlertCircle,
+  Trash2, Gift, ShoppingCart, X, Clock, Wallet, Scissors, Package,
+} from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-} from "@/components/ui/dialog"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
+import { Card, CardContent } from "@/components/ui/card"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { createSale, payDebt, type SaleLineInput } from "@/lib/actions"
+import { cn } from "@/lib/utils"
 
-type Customer = { id: string; firstName: string; lastName: string | null; balanceCents: number }
-type Service = { id: string; name: string; priceCents: number; pricingType: string; pricePerMinuteCents: number | null; durationMinutes: number }
-type Product = { id: string; name: string; priceCents: number; stock: number }
+/* ─── Types ─────────────────────────────────────────────────────────────── */
+
+type Customer = { id: string; firstName: string; lastName: string | null; phone: string; balanceCents: number }
+type Worker   = { id: string; name: string; lastName: string | null; color: string | null }
+type Service  = { id: string; name: string; priceCents: number; pricingType: string; pricePerMinuteCents: number | null; durationMinutes: number }
+type Product  = { id: string; name: string; priceCents: number; stock: number }
 type SaleLine = { id: string; type: string; description: string; quantity: number; unitPriceCents: number; discountPercent: number; totalCents: number; durationMinutes: number | null }
 type Sale = {
-  id: string
-  saleType: string
-  status: string
-  paymentMethod: string
-  totalCents: number
-  paidCents: number
-  createdAt: string
-  notes: string | null
+  id: string; saleType: string; status: string; paymentMethod: string
+  totalCents: number; paidCents: number; createdAt: string; notes: string | null
   customer: Customer | null
   user: { name: string; lastName: string | null }
   lines: SaleLine[]
@@ -45,67 +34,76 @@ interface Props {
   customers: Customer[]
   services: Service[]
   products: Product[]
+  workers: Worker[]
 }
 
-const STATUS_LABELS: Record<string, { label: string; cls: string }> = {
-  PAID: { label: "Pagado", cls: "bg-green-100 text-green-800 border-green-200" },
-  DEBT: { label: "Debido", cls: "bg-red-100 text-red-800 border-red-200" },
-  PARTIAL: { label: "Parcial", cls: "bg-orange-100 text-orange-800 border-orange-200" },
-}
-
-const PAYMENT_LABELS: Record<string, string> = {
-  CARD: "Tarjeta",
-  CASH: "Efectivo",
-  BALANCE: "Saldo",
-  DEBT: "Deuda",
-}
-
-function fmt(cents: number) {
-  return (cents / 100).toFixed(2) + " €"
-}
+type LineType  = "SERVICE" | "PRODUCT" | "GIFT_CARD"
 
 type DraftLine = {
-  key: number
-  type: "SERVICE" | "PRODUCT"
-  itemId: string
-  description: string
-  quantity: number
-  unitPriceCents: number
-  discountPercent: number
-  durationMinutes: number | null
+  key: number; type: LineType; itemId: string; description: string
+  workerId: string | null; quantity: number; unitPriceCents: number
+  discountPercent: number; durationMinutes: number | null
 }
 
-function calcLineTotal(l: DraftLine) {
-  const base = l.unitPriceCents * l.quantity
-  return Math.round(base * (1 - l.discountPercent / 100))
+/* ─── Helpers ────────────────────────────────────────────────────────────── */
+
+function lineTotal(l: DraftLine) {
+  return Math.round(l.unitPriceCents * l.quantity * (1 - l.discountPercent / 100))
 }
 
-export function SalesClient({ sales, customers, services, products }: Props) {
-  const [search, setSearch] = useState("")
-  const [showNew, setShowNew] = useState(false)
+function fmtEur(cents: number) {
+  return (cents / 100).toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " €"
+}
+
+function normalize(s: string) {
+  return s.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "")
+}
+
+function customerLabel(c: Customer) {
+  return c.lastName ? `${c.lastName}, ${c.firstName}` : c.firstName
+}
+
+function searchCustomers(customers: Customer[], query: string): Customer[] {
+  if (!query.trim()) return customers.slice(0, 8)
+  const tokens = normalize(query).split(/\s+/).filter(Boolean)
+  return customers.filter((c) => {
+    const hay = normalize(`${c.firstName} ${c.lastName ?? ""} ${c.phone}`)
+    return tokens.every((t) => hay.includes(t))
+  }).slice(0, 8)
+}
+
+/* ─── Status/payment labels ──────────────────────────────────────────────── */
+
+const STATUS_META: Record<string, { label: string; cls: string }> = {
+  PAID:    { label: "Pagado",  cls: "bg-green-100 text-green-800 border-green-200" },
+  DEBT:    { label: "Debido",  cls: "bg-red-100 text-red-800 border-red-200" },
+  PARTIAL: { label: "Parcial", cls: "bg-orange-100 text-orange-800 border-orange-200" },
+}
+const PAYMENT_LABELS: Record<string, string> = { CARD: "Tarjeta", CASH: "Efectivo", BALANCE: "Saldo", DEBT: "Deuda" }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Root — lista de ventas
+═══════════════════════════════════════════════════════════════════════════ */
+
+export function SalesClient({ sales, customers, services, products, workers }: Props) {
+  const [mode, setMode] = useState<"list" | "pos">("list")
   const [detailSale, setDetailSale] = useState<Sale | null>(null)
   const [payingDebt, setPayingDebt] = useState<Sale | null>(null)
   const [payDebtMethod, setPayDebtMethod] = useState<"CARD" | "CASH">("CASH")
   const [debtLoading, setDebtLoading] = useState(false)
+  const [search, setSearch] = useState("")
 
   const filtered = useMemo(() => {
-    const q = search.toLowerCase()
+    const q = normalize(search)
     return sales.filter((s) => {
-      const name = s.customer ? `${s.customer.firstName} ${s.customer.lastName ?? ""}`.toLowerCase() : ""
-      return !q || name.includes(q) || s.id.includes(q)
+      if (!q) return true
+      const name = s.customer ? normalize(`${s.customer.firstName} ${s.customer.lastName ?? ""}`) : ""
+      return name.includes(q)
     })
   }, [sales, search])
 
-  async function handlePayDebt() {
-    if (!payingDebt) return
-    setDebtLoading(true)
-    const res = await payDebt(payingDebt.id, payDebtMethod)
-    setDebtLoading(false)
-    if (res.ok) {
-      setPayingDebt(null)
-    } else {
-      alert(res.error)
-    }
+  if (mode === "pos") {
+    return <POSView customers={customers} services={services} products={products} workers={workers} onBack={() => setMode("list")} />
   }
 
   return (
@@ -113,21 +111,16 @@ export function SalesClient({ sales, customers, services, products }: Props) {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Ventas</h1>
-          <p className="text-muted-foreground">Historial de ventas y cobros</p>
+          <p className="text-muted-foreground">{sales.length} registros</p>
         </div>
-        <Button onClick={() => setShowNew(true)}>
+        <Button size="lg" onClick={() => setMode("pos")}>
           <Plus className="mr-2 h-4 w-4" /> Nueva venta
         </Button>
       </div>
 
       <div className="relative max-w-sm">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-        <Input
-          className="pl-9"
-          placeholder="Buscar por cliente…"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
+        <Input className="pl-9" placeholder="Buscar por cliente…" value={search} onChange={(e) => setSearch(e.target.value)} />
       </div>
 
       <Card>
@@ -137,7 +130,6 @@ export function SalesClient({ sales, customers, services, products }: Props) {
               <tr className="border-b text-muted-foreground">
                 <th className="px-4 py-3 text-left font-medium">Fecha</th>
                 <th className="px-4 py-3 text-left font-medium">Cliente</th>
-                <th className="px-4 py-3 text-left font-medium">Tipo</th>
                 <th className="px-4 py-3 text-left font-medium">Pago</th>
                 <th className="px-4 py-3 text-right font-medium">Total</th>
                 <th className="px-4 py-3 text-left font-medium">Estado</th>
@@ -147,32 +139,20 @@ export function SalesClient({ sales, customers, services, products }: Props) {
             </thead>
             <tbody>
               {filtered.length === 0 && (
-                <tr>
-                  <td colSpan={8} className="py-12 text-center text-muted-foreground">
-                    No hay ventas registradas.
-                  </td>
-                </tr>
+                <tr><td colSpan={7} className="py-12 text-center text-muted-foreground">No hay ventas.</td></tr>
               )}
               {filtered.map((s) => {
-                const st = STATUS_LABELS[s.status] ?? STATUS_LABELS.PAID
-                const customerName = s.customer
-                  ? `${s.customer.firstName} ${s.customer.lastName ?? ""}`.trim()
-                  : "—"
+                const st = STATUS_META[s.status] ?? STATUS_META.PAID
+                const customerName = s.customer ? customerLabel(s.customer) : "—"
                 const workerName = `${s.user.name} ${s.user.lastName ?? ""}`.trim()
-                const date = new Date(s.createdAt).toLocaleDateString("es-ES", {
-                  day: "2-digit", month: "short", year: "numeric",
-                })
                 return (
                   <tr key={s.id} className="border-b last:border-0 hover:bg-muted/40 transition-colors">
-                    <td className="px-4 py-3 text-muted-foreground">{date}</td>
-                    <td className="px-4 py-3 font-medium">{customerName}</td>
-                    <td className="px-4 py-3">
-                      {s.saleType === "GIFT_CARD" ? (
-                        <span className="flex items-center gap-1 text-purple-700"><Gift className="h-3 w-3" /> Tarjeta regalo</span>
-                      ) : "Venta"}
+                    <td className="px-4 py-3 text-muted-foreground">
+                      {new Date(s.createdAt).toLocaleDateString("es-ES", { day: "2-digit", month: "short", year: "numeric" })}
                     </td>
+                    <td className="px-4 py-3 font-medium">{customerName}</td>
                     <td className="px-4 py-3 text-muted-foreground">{PAYMENT_LABELS[s.paymentMethod] ?? s.paymentMethod}</td>
-                    <td className="px-4 py-3 text-right font-medium">{fmt(s.totalCents)}</td>
+                    <td className="px-4 py-3 text-right font-medium tabular-nums">{fmtEur(s.totalCents)}</td>
                     <td className="px-4 py-3">
                       <span className={`rounded-full border px-2 py-0.5 text-xs ${st.cls}`}>{st.label}</span>
                     </td>
@@ -196,90 +176,72 @@ export function SalesClient({ sales, customers, services, products }: Props) {
         </CardContent>
       </Card>
 
-      {/* NUEVA VENTA */}
-      {showNew && (
-        <NewSaleDialog
-          customers={customers}
-          services={services}
-          products={products}
-          onClose={() => setShowNew(false)}
-        />
-      )}
-
-      {/* DETALLE */}
+      {/* Detail */}
       {detailSale && (
         <Dialog open onOpenChange={() => setDetailSale(null)}>
           <DialogContent style={{ maxWidth: "42rem" }}>
-            <DialogHeader>
-              <DialogTitle>Detalle de venta</DialogTitle>
-            </DialogHeader>
+            <DialogHeader><DialogTitle>Detalle de venta</DialogTitle></DialogHeader>
             <div className="space-y-4 text-sm">
               <div className="grid grid-cols-2 gap-2 text-muted-foreground">
-                <div>Cliente: <span className="text-foreground font-medium">{detailSale.customer ? `${detailSale.customer.firstName} ${detailSale.customer.lastName ?? ""}` : "—"}</span></div>
-                <div>Tipo: <span className="text-foreground font-medium">{detailSale.saleType === "GIFT_CARD" ? "Tarjeta regalo" : "Venta"}</span></div>
+                <div>Cliente: <span className="text-foreground font-medium">{detailSale.customer ? customerLabel(detailSale.customer) : "Sin cliente"}</span></div>
                 <div>Pago: <span className="text-foreground font-medium">{PAYMENT_LABELS[detailSale.paymentMethod]}</span></div>
-                <div>Estado: <span className={`rounded-full border px-2 py-0.5 text-xs ${(STATUS_LABELS[detailSale.status] ?? STATUS_LABELS.PAID).cls}`}>{(STATUS_LABELS[detailSale.status] ?? STATUS_LABELS.PAID).label}</span></div>
               </div>
               <table className="w-full">
                 <thead><tr className="border-b text-muted-foreground text-xs">
                   <th className="text-left py-1">Descripción</th>
                   <th className="text-right py-1">Cant.</th>
-                  <th className="text-right py-1">Precio</th>
+                  <th className="text-right py-1">P.U.</th>
                   <th className="text-right py-1">Dto.</th>
                   <th className="text-right py-1">Total</th>
                 </tr></thead>
                 <tbody>
                   {detailSale.lines.map((l) => (
                     <tr key={l.id} className="border-b last:border-0">
-                      <td className="py-1.5">{l.description}{l.durationMinutes ? ` (${l.durationMinutes} min)` : ""}</td>
-                      <td className="text-right py-1.5">{l.quantity}</td>
-                      <td className="text-right py-1.5">{fmt(l.unitPriceCents)}</td>
+                      <td className="py-1.5">{l.description}{l.durationMinutes ? ` · ${l.durationMinutes} min` : ""}</td>
+                      <td className="text-right tabular-nums py-1.5">{l.quantity}</td>
+                      <td className="text-right tabular-nums py-1.5">{fmtEur(l.unitPriceCents)}</td>
                       <td className="text-right py-1.5">{l.discountPercent > 0 ? `-${l.discountPercent}%` : "—"}</td>
-                      <td className="text-right py-1.5 font-medium">{fmt(l.totalCents)}</td>
+                      <td className="text-right tabular-nums py-1.5 font-medium">{fmtEur(l.totalCents)}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
-              <div className="text-right space-y-1">
-                <div className="text-muted-foreground">Total: <span className="text-foreground font-semibold text-base">{fmt(detailSale.totalCents)}</span></div>
+              <div className="text-right">
+                <span className="text-muted-foreground mr-2">Total:</span>
+                <span className="font-semibold text-base tabular-nums">{fmtEur(detailSale.totalCents)}</span>
                 {detailSale.paidCents < detailSale.totalCents && (
-                  <div className="text-red-600">Pendiente: {fmt(detailSale.totalCents - detailSale.paidCents)}</div>
+                  <div className="text-red-600 mt-1">Pendiente: {fmtEur(detailSale.totalCents - detailSale.paidCents)}</div>
                 )}
               </div>
-              {detailSale.notes && <p className="text-muted-foreground border-t pt-2">{detailSale.notes}</p>}
             </div>
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setDetailSale(null)}>Cerrar</Button>
-            </DialogFooter>
+            <DialogFooter><Button variant="outline" onClick={() => setDetailSale(null)}>Cerrar</Button></DialogFooter>
           </DialogContent>
         </Dialog>
       )}
 
-      {/* COBRAR DEUDA */}
+      {/* Pay debt */}
       {payingDebt && (
         <Dialog open onOpenChange={() => setPayingDebt(null)}>
           <DialogContent style={{ maxWidth: "28rem" }}>
-            <DialogHeader>
-              <DialogTitle>Cobrar deuda pendiente</DialogTitle>
-            </DialogHeader>
+            <DialogHeader><DialogTitle>Cobrar deuda</DialogTitle></DialogHeader>
             <div className="space-y-4 text-sm">
-              <p>Pendiente: <span className="font-semibold">{fmt(payingDebt.totalCents - payingDebt.paidCents)}</span></p>
-              <div className="space-y-1">
-                <label className="text-muted-foreground text-xs">Método de pago</label>
-                <Select value={payDebtMethod} onValueChange={(v) => setPayDebtMethod(v as "CARD" | "CASH")}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="CASH">Efectivo</SelectItem>
-                    <SelectItem value="CARD">Tarjeta</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
+              <p>Pendiente: <span className="font-semibold">{fmtEur(payingDebt.totalCents - payingDebt.paidCents)}</span></p>
+              <Select value={payDebtMethod} onValueChange={(v) => setPayDebtMethod(v as "CARD" | "CASH")}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="CASH">Efectivo</SelectItem>
+                  <SelectItem value="CARD">Tarjeta</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
             <DialogFooter>
               <Button variant="outline" onClick={() => setPayingDebt(null)}>Cancelar</Button>
-              <Button onClick={handlePayDebt} disabled={debtLoading}>
-                {debtLoading ? "Guardando…" : "Confirmar cobro"}
-              </Button>
+              <Button onClick={async () => {
+                setDebtLoading(true)
+                const res = await payDebt(payingDebt.id, payDebtMethod)
+                setDebtLoading(false)
+                if (res.ok) setPayingDebt(null); else alert(res.error)
+              }} disabled={debtLoading}>{debtLoading ? "Guardando…" : "Confirmar cobro"}</Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
@@ -288,104 +250,67 @@ export function SalesClient({ sales, customers, services, products }: Props) {
   )
 }
 
-/* ─────────────────────────── NUEVA VENTA DIALOG ─────────────────────────── */
+/* ═══════════════════════════════════════════════════════════════════════════
+   POS — pantalla completa
+═══════════════════════════════════════════════════════════════════════════ */
 
-function NewSaleDialog({
-  customers,
-  services,
-  products,
-  onClose,
-}: {
-  customers: Customer[]
-  services: Service[]
-  products: Product[]
-  onClose: () => void
+function POSView({ customers, services, products, workers, onBack }: {
+  customers: Customer[]; services: Service[]; products: Product[]
+  workers: Worker[]; onBack: () => void
 }) {
-  const [customerId, setCustomerId] = useState<string>("none")
-  const [saleType, setSaleType] = useState<"SALE" | "GIFT_CARD">("SALE")
-  const [paymentMethod, setPaymentMethod] = useState<"CARD" | "CASH" | "BALANCE" | "DEBT">("CASH")
-  const [notes, setNotes] = useState("")
+  const [customer, setCustomer] = useState<Customer | null>(null)
+  const [giftRecipient, setGiftRecipient] = useState<Customer | null>(null)
   const [lines, setLines] = useState<DraftLine[]>([])
   const [lineKey, setLineKey] = useState(0)
+  const [paymentMethod, setPaymentMethod] = useState<"CASH" | "CARD" | "DEBT" | "BALANCE">("CASH")
+  const [tenderedInput, setTenderedInput] = useState("")
+  const [notes, setNotes] = useState("")
   const [loading, setLoading] = useState(false)
-  const [error, setError] = useState("")
+  const [errors, setErrors] = useState<string[]>([])
+  const [showCancel, setShowCancel] = useState(false)
 
-  // Add line controls
-  const [addType, setAddType] = useState<"SERVICE" | "PRODUCT">("SERVICE")
-  const [addItemId, setAddItemId] = useState("")
-  const [addQty, setAddQty] = useState(1)
-  const [addDiscount, setAddDiscount] = useState(0)
-  const [addDuration, setAddDuration] = useState<number | null>(null)
-  const [customerSearch, setCustomerSearch] = useState("")
+  const now = new Date()
+  const timeStr = now.toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" })
+  const dateStr = now.toLocaleDateString("es-ES", { weekday: "long", day: "numeric", month: "long" })
 
-  const selectedCustomer = customers.find((c) => c.id === customerId)
+  const subtotalCents = lines.reduce((s, l) => s + l.unitPriceCents * l.quantity, 0)
+  const discountCents = lines.reduce((s, l) => s + (l.unitPriceCents * l.quantity - lineTotal(l)), 0)
+  const totalCents = subtotalCents - discountCents
+  const tenderedCents = Math.round(Number(tenderedInput) * 100)
+  const changeCents = paymentMethod === "CASH" && tenderedCents > totalCents ? tenderedCents - totalCents : 0
 
-  const filteredCustomers = useMemo(() => {
-    const q = customerSearch.toLowerCase()
-    return customers.filter((c) =>
-      !q || `${c.firstName} ${c.lastName ?? ""}`.toLowerCase().includes(q)
-    )
-  }, [customers, customerSearch])
+  const hasGiftCard = lines.some((l) => l.type === "GIFT_CARD")
+  const customerBalance = customer?.balanceCents ?? 0
 
-  function computeUnitPrice(): number {
-    if (addType === "SERVICE") {
-      const svc = services.find((s) => s.id === addItemId)
-      if (!svc) return 0
-      if (svc.pricingType === "PER_MINUTE" && svc.pricePerMinuteCents && addDuration) {
-        return svc.pricePerMinuteCents * addDuration
-      }
-      return svc.priceCents
-    } else {
-      return products.find((p) => p.id === addItemId)?.priceCents ?? 0
+  // Auto-switch to BALANCE when customer is selected and has positive balance
+  useEffect(() => {
+    if (customer && customer.balanceCents > 0) {
+      setPaymentMethod("BALANCE")
+    } else if (!customer || customer.balanceCents <= 0) {
+      setPaymentMethod((prev) => prev === "BALANCE" ? "CASH" : prev)
     }
+  }, [customer?.id, customer?.balanceCents])
+
+  function validate(): string[] {
+    const errs: string[] = []
+    if (lines.length === 0) errs.push("Añade al menos una línea al ticket.")
+    if (paymentMethod === "CASH" && tenderedCents > 0 && tenderedCents < totalCents)
+      errs.push("El importe entregado es inferior al total.")
+    lines.forEach((l) => {
+      if (l.type === "SERVICE" && !l.workerId)
+        errs.push(`Asigna un profesional a "${l.description}".`)
+    })
+    if (hasGiftCard && !giftRecipient)
+      errs.push("Selecciona el cliente destinatario de la tarjeta regalo.")
+    return errs
   }
-
-  function addLine() {
-    if (!addItemId) return
-    const unitPriceCents = computeUnitPrice()
-    let description = ""
-    let durationMinutes: number | null = null
-
-    if (addType === "SERVICE") {
-      const svc = services.find((s) => s.id === addItemId)!
-      description = svc.name
-      if (svc.pricingType === "PER_MINUTE") {
-        durationMinutes = addDuration ?? svc.durationMinutes
-        description += ` (${durationMinutes} min)`
-      }
-    } else {
-      description = products.find((p) => p.id === addItemId)!.name
-    }
-
-    const line: DraftLine = {
-      key: lineKey,
-      type: addType,
-      itemId: addItemId,
-      description,
-      quantity: addQty,
-      unitPriceCents,
-      discountPercent: addDiscount,
-      durationMinutes,
-    }
-    setLines((prev) => [...prev, line])
-    setLineKey((k) => k + 1)
-    setAddItemId("")
-    setAddQty(1)
-    setAddDiscount(0)
-    setAddDuration(null)
-  }
-
-  const totals = useMemo(() => {
-    const subtotal = lines.reduce((s, l) => s + l.unitPriceCents * l.quantity, 0)
-    const discount = lines.reduce((s, l) => s + Math.round(l.unitPriceCents * l.quantity * l.discountPercent / 100), 0)
-    const total = subtotal - discount
-    return { subtotal, discount, total }
-  }, [lines])
 
   async function handleSubmit() {
-    if (lines.length === 0) { setError("Añade al menos una línea."); return }
+    const errs = validate()
+    if (errs.length) { setErrors(errs); return }
+    setErrors([])
     setLoading(true)
-    setError("")
+
     const saleLines: SaleLineInput[] = lines.map((l) => ({
       type: l.type,
       serviceId: l.type === "SERVICE" ? l.itemId : undefined,
@@ -395,207 +320,551 @@ function NewSaleDialog({
       unitPriceCents: l.unitPriceCents,
       discountPercent: l.discountPercent,
       durationMinutes: l.durationMinutes ?? undefined,
-      totalCents: calcLineTotal(l),
+      totalCents: lineTotal(l),
     }))
+
     const res = await createSale(
-      customerId === "none" ? null : customerId,
-      saleType,
+      customer?.id ?? null,
+      hasGiftCard ? "GIFT_CARD" : "SALE",
       paymentMethod,
       saleLines,
       notes || null,
+      giftRecipient?.id ?? null,
     )
     setLoading(false)
-    if (res.ok) {
-      onClose()
-    } else {
-      setError(res.error ?? "Error desconocido")
-    }
+    if (res.ok) onBack()
+    else setErrors([res.error ?? "Error inesperado"])
   }
 
-  const selectedService = addType === "SERVICE" ? services.find((s) => s.id === addItemId) : null
+  function addLine(line: DraftLine) {
+    setLines((prev) => [...prev, { ...line, key: lineKey }])
+    setLineKey((k) => k + 1)
+  }
+
+  function handleBack() {
+    if (lines.length > 0) setShowCancel(true)
+    else onBack()
+  }
 
   return (
-    <Dialog open onOpenChange={onClose}>
-      <DialogContent style={{ maxWidth: "54rem" }}>
-        <DialogHeader>
-          <DialogTitle>Nueva venta</DialogTitle>
-        </DialogHeader>
+    <div className="flex flex-col h-screen overflow-hidden bg-background">
+      {/* Topbar */}
+      <div className="flex items-center gap-4 px-6 py-3 border-b bg-background shrink-0">
+        <Button variant="ghost" size="sm" onClick={handleBack} className="gap-1.5">
+          <ArrowLeft className="h-4 w-4" /> Volver
+        </Button>
+        <span className="font-semibold flex-1">Nueva venta</span>
+        <span className="text-sm text-muted-foreground capitalize">{dateStr} · {timeStr}</span>
+      </div>
 
-        <div className="grid grid-cols-2 gap-6 text-sm">
-          {/* LEFT: Config */}
-          <div className="space-y-4">
-            {/* Cliente */}
-            <div className="space-y-1">
-              <label className="text-muted-foreground text-xs">Cliente (opcional)</label>
-              <Input
-                placeholder="Buscar cliente…"
-                value={customerSearch}
-                onChange={(e) => setCustomerSearch(e.target.value)}
-                className="mb-1"
-              />
-              <Select value={customerId} onValueChange={setCustomerId}>
-                <SelectTrigger><SelectValue placeholder="Sin cliente" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">Sin cliente</SelectItem>
-                  {filteredCustomers.map((c) => (
-                    <SelectItem key={c.id} value={c.id}>
-                      {c.firstName} {c.lastName ?? ""} {c.balanceCents > 0 ? `· Saldo: ${fmt(c.balanceCents)}` : ""}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+      <div className="flex flex-1 overflow-hidden">
+        {/* LEFT */}
+        <div className="flex flex-col flex-1 overflow-y-auto px-6 py-5 space-y-5 border-r">
+          {/* Cliente comprador */}
+          <CustomerSelector
+            label="Cliente"
+            customers={customers}
+            selected={customer}
+            onSelect={setCustomer}
+            onClear={() => setCustomer(null)}
+          />
 
-            {/* Tipo de venta */}
-            <div className="space-y-1">
-              <label className="text-muted-foreground text-xs">Tipo</label>
-              <Select value={saleType} onValueChange={(v) => setSaleType(v as "SALE" | "GIFT_CARD")}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="SALE">Venta</SelectItem>
-                  <SelectItem value="GIFT_CARD">Tarjeta regalo</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
+          {/* Añadir línea */}
+          <AddLinePanel
+            services={services}
+            products={products}
+            workers={workers}
+            customers={customers}
+            giftRecipient={giftRecipient}
+            onGiftRecipientChange={setGiftRecipient}
+            onAdd={addLine}
+          />
 
-            {/* Método de pago */}
-            <div className="space-y-1">
-              <label className="text-muted-foreground text-xs">Método de pago</label>
-              <Select value={paymentMethod} onValueChange={(v) => setPaymentMethod(v as any)}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="CASH"><span className="flex items-center gap-2"><Banknote className="h-4 w-4" />Efectivo</span></SelectItem>
-                  <SelectItem value="CARD"><span className="flex items-center gap-2"><CreditCard className="h-4 w-4" />Tarjeta</span></SelectItem>
-                  {selectedCustomer && selectedCustomer.balanceCents > 0 && (
-                    <SelectItem value="BALANCE"><span className="flex items-center gap-2"><Wallet className="h-4 w-4" />Saldo cliente ({fmt(selectedCustomer.balanceCents)})</span></SelectItem>
-                  )}
-                  <SelectItem value="DEBT">Deuda (cobrar después)</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            {/* Notas */}
-            <div className="space-y-1">
-              <label className="text-muted-foreground text-xs">Notas</label>
-              <Input placeholder="Notas opcionales…" value={notes} onChange={(e) => setNotes(e.target.value)} />
-            </div>
-
-            {/* Totales */}
-            <div className="rounded-lg border p-3 space-y-1 bg-muted/30">
-              <div className="flex justify-between text-muted-foreground">
-                <span>Subtotal</span><span>{fmt(totals.subtotal)}</span>
+          {/* Líneas */}
+          <div className="flex-1">
+            <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">
+              Líneas del ticket {lines.length > 0 && <span className="text-foreground">({lines.length})</span>}
+            </h3>
+            {lines.length === 0 ? (
+              <div className="flex flex-col items-center justify-center rounded-xl border-2 border-dashed py-10 text-muted-foreground text-sm gap-2">
+                <ShoppingCart className="h-8 w-8 opacity-25" />
+                <p>Aún no hay líneas. Elige un tipo arriba y busca un servicio, producto o tarjeta.</p>
               </div>
-              {totals.discount > 0 && (
-                <div className="flex justify-between text-green-700">
-                  <span>Descuento</span><span>-{fmt(totals.discount)}</span>
-                </div>
-              )}
-              <div className="flex justify-between font-semibold text-base border-t pt-1 mt-1">
-                <span>Total</span><span>{fmt(totals.total)}</span>
+            ) : (
+              <div className="rounded-xl border overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b bg-muted/40 text-muted-foreground text-xs">
+                      <th className="text-left px-4 py-2.5 font-medium">Concepto</th>
+                      <th className="text-left px-3 py-2.5 font-medium w-40">Profesional</th>
+                      <th className="text-center px-3 py-2.5 font-medium w-24">Cant.</th>
+                      <th className="text-right px-3 py-2.5 font-medium w-24">P.U.</th>
+                      <th className="text-center px-3 py-2.5 font-medium w-28">Dto. %</th>
+                      <th className="text-right px-3 py-2.5 font-medium w-24">Total</th>
+                      <th className="w-10" />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {lines.map((l) => (
+                      <LineRow
+                        key={l.key}
+                        line={l}
+                        workers={workers}
+                        onUpdate={(patch) => setLines((prev) => prev.map((x) => x.key === l.key ? { ...x, ...patch } : x))}
+                        onRemove={() => setLines((prev) => prev.filter((x) => x.key !== l.key))}
+                      />
+                    ))}
+                  </tbody>
+                </table>
               </div>
-            </div>
+            )}
           </div>
 
-          {/* RIGHT: Lines */}
-          <div className="space-y-4">
-            {/* Add line */}
-            <div className="rounded-lg border p-3 space-y-2 bg-muted/20">
-              <div className="flex gap-2">
-                <Select value={addType} onValueChange={(v) => { setAddType(v as any); setAddItemId("") }}>
-                  <SelectTrigger className="w-32"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="SERVICE">Servicio</SelectItem>
-                    <SelectItem value="PRODUCT">Producto</SelectItem>
-                  </SelectContent>
-                </Select>
-                <Select value={addItemId} onValueChange={setAddItemId}>
-                  <SelectTrigger className="flex-1"><SelectValue placeholder="Seleccionar…" /></SelectTrigger>
-                  <SelectContent>
-                    {addType === "SERVICE"
-                      ? services.map((s) => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)
-                      : products.map((p) => <SelectItem key={p.id} value={p.id}>{p.name} (stock: {p.stock})</SelectItem>)
-                    }
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="flex gap-2">
-                <div className="space-y-0.5">
-                  <label className="text-xs text-muted-foreground">Cant.</label>
-                  <Input
-                    type="number" min={1} value={addQty}
-                    onChange={(e) => setAddQty(Number(e.target.value))}
-                    className="w-16"
-                  />
-                </div>
-                <div className="space-y-0.5">
-                  <label className="text-xs text-muted-foreground">Dto. %</label>
-                  <Input
-                    type="number" min={0} max={100} value={addDiscount}
-                    onChange={(e) => setAddDiscount(Number(e.target.value))}
-                    className="w-20"
-                  />
-                </div>
-                {selectedService?.pricingType === "PER_MINUTE" && (
-                  <div className="space-y-0.5">
-                    <label className="text-xs text-muted-foreground">Minutos</label>
-                    <Input
-                      type="number" min={1} value={addDuration ?? selectedService.durationMinutes}
-                      onChange={(e) => setAddDuration(Number(e.target.value))}
-                      className="w-24"
-                    />
-                  </div>
-                )}
-                <div className="flex items-end">
-                  <Button size="sm" onClick={addLine} disabled={!addItemId}>
-                    <Plus className="h-4 w-4 mr-1" /> Añadir
-                  </Button>
-                </div>
-              </div>
-              {addItemId && (
-                <p className="text-xs text-muted-foreground">
-                  Precio unitario: {fmt(computeUnitPrice())}
-                  {addDiscount > 0 && ` → ${fmt(Math.round(computeUnitPrice() * (1 - addDiscount / 100)))}`}
-                </p>
-              )}
-            </div>
-
-            {/* Lines list */}
-            <div className="space-y-1 max-h-52 overflow-y-auto">
-              {lines.length === 0 && (
-                <p className="text-center text-muted-foreground text-xs py-4">Sin líneas. Añade servicios o productos.</p>
-              )}
-              {lines.map((l) => (
-                <div key={l.key} className="flex items-center gap-2 rounded border px-3 py-2 text-xs">
-                  <span className="flex-1 truncate">{l.description}</span>
-                  <span className="text-muted-foreground">×{l.quantity}</span>
-                  {l.discountPercent > 0 && <span className="text-green-700">-{l.discountPercent}%</span>}
-                  <span className="font-medium">{fmt(calcLineTotal(l))}</span>
-                  <button
-                    type="button"
-                    onClick={() => setLines((prev) => prev.filter((x) => x.key !== l.key))}
-                    className="text-muted-foreground hover:text-destructive"
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </button>
-                </div>
-              ))}
-            </div>
-          </div>
+          <Input placeholder="Notas (opcional)…" value={notes} onChange={(e) => setNotes(e.target.value)} className="text-sm" />
         </div>
 
-        {error && (
-          <div className="flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-            <AlertCircle className="h-4 w-4" /> {error}
+        {/* RIGHT */}
+        <div className="w-80 shrink-0 flex flex-col overflow-y-auto px-5 py-5 space-y-4 bg-muted/20">
+          {/* Resumen */}
+          <div className="rounded-xl border bg-background p-4 space-y-2 text-sm">
+            <h3 className="font-semibold mb-3">Resumen</h3>
+            <div className="flex justify-between text-muted-foreground">
+              <span>Subtotal</span><span className="tabular-nums">{fmtEur(subtotalCents)}</span>
+            </div>
+            {discountCents > 0 && (
+              <div className="flex justify-between text-green-700">
+                <span>Descuentos</span><span className="tabular-nums">−{fmtEur(discountCents)}</span>
+              </div>
+            )}
+            <div className="flex justify-between font-bold text-lg border-t pt-2 mt-1">
+              <span>Total</span><span className="tabular-nums">{fmtEur(totalCents)}</span>
+            </div>
+            {discountCents > 0 && <p className="text-xs text-green-700">Ahorro: {fmtEur(discountCents)}</p>}
+          </div>
+
+          {/* Pago */}
+          <div className="rounded-xl border bg-background p-4 space-y-3 text-sm">
+            <h3 className="font-semibold">Método de pago</h3>
+            <div className={cn("grid gap-2", customerBalance > 0 ? "grid-cols-4" : "grid-cols-3")}>
+              {([
+                { id: "CASH",    Icon: Banknote,     label: "Efectivo" },
+                { id: "CARD",    Icon: CreditCard,   label: "Tarjeta" },
+                ...(customerBalance > 0 ? [{ id: "BALANCE", Icon: Wallet, label: "Saldo" }] : []),
+                { id: "DEBT",    Icon: AlertCircle,  label: "Deuda" },
+              ] as const).map(({ id, Icon, label }) => (
+                <button key={id} type="button" onClick={() => setPaymentMethod(id as typeof paymentMethod)}
+                  className={cn(
+                    "flex flex-col items-center gap-1.5 rounded-lg border-2 py-3 px-1 text-xs font-medium transition-colors",
+                    paymentMethod === id
+                      ? "border-primary bg-primary/5 text-primary"
+                      : "border-border text-muted-foreground hover:border-primary/40 hover:text-foreground"
+                  )}>
+                  <Icon className="h-5 w-5" />{label}
+                </button>
+              ))}
+            </div>
+
+            {paymentMethod === "CASH" && (
+              <div className="space-y-2">
+                <label className="text-xs text-muted-foreground">Importe entregado (€)</label>
+                <Input
+                  type="number" step="0.01" min="0"
+                  placeholder={(totalCents / 100).toFixed(2)}
+                  value={tenderedInput}
+                  onChange={(e) => setTenderedInput(e.target.value)}
+                  className="tabular-nums"
+                />
+                {changeCents > 0 && (
+                  <div className="flex justify-between rounded-lg bg-green-50 border border-green-200 px-3 py-2">
+                    <span className="text-green-700">Cambio</span>
+                    <span className="font-semibold text-green-700 tabular-nums">{fmtEur(changeCents)}</span>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {paymentMethod === "BALANCE" && customerBalance > 0 && (
+              <div className="space-y-1.5 rounded-lg bg-blue-50 border border-blue-200 px-3 py-2.5 text-xs">
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Saldo disponible</span>
+                  <span className="font-semibold text-blue-700 tabular-nums">{fmtEur(customerBalance)}</span>
+                </div>
+                {customerBalance >= totalCents ? (
+                  <div className="flex justify-between text-green-700">
+                    <span>Saldo suficiente — queda</span>
+                    <span className="font-semibold tabular-nums">{fmtEur(customerBalance - totalCents)}</span>
+                  </div>
+                ) : (
+                  <div className="flex justify-between text-orange-700">
+                    <span>Saldo insuficiente — resta</span>
+                    <span className="font-semibold tabular-nums">{fmtEur(totalCents - customerBalance)}</span>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {paymentMethod === "DEBT" && (
+              <p className="text-xs text-muted-foreground">
+                El importe quedará como deuda del cliente y podrás cobrarlo desde el listado.
+              </p>
+            )}
+          </div>
+
+          {/* Errors */}
+          {errors.length > 0 && (
+            <div className="rounded-xl border border-destructive/40 bg-destructive/5 p-3 space-y-1">
+              {errors.map((e, i) => (
+                <p key={i} className="text-xs text-destructive flex items-start gap-1.5">
+                  <AlertCircle className="h-3.5 w-3.5 mt-0.5 shrink-0" /> {e}
+                </p>
+              ))}
+            </div>
+          )}
+
+          {/* Actions */}
+          <div className="space-y-2 mt-auto pt-2">
+            <Button className="w-full h-12 text-base font-semibold" onClick={handleSubmit}
+              disabled={loading || lines.length === 0}>
+              {loading ? "Registrando…" : `Registrar · ${fmtEur(totalCents)}`}
+            </Button>
+            <Button variant="outline" className="w-full" onClick={handleBack}>Cancelar</Button>
+          </div>
+        </div>
+      </div>
+
+      {showCancel && (
+        <Dialog open onOpenChange={() => setShowCancel(false)}>
+          <DialogContent style={{ maxWidth: "26rem" }}>
+            <DialogHeader><DialogTitle>¿Cancelar la venta?</DialogTitle></DialogHeader>
+            <p className="text-sm text-muted-foreground">Se perderán las líneas añadidas.</p>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setShowCancel(false)}>Seguir editando</Button>
+              <Button variant="destructive" onClick={onBack}>Cancelar venta</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
+    </div>
+  )
+}
+
+/* ─── Customer selector (shared) ─────────────────────────────────────────── */
+
+function CustomerSelector({ label, customers, selected, onSelect, onClear, placeholder }: {
+  label: string; customers: Customer[]; selected: Customer | null
+  onSelect: (c: Customer) => void; onClear: () => void; placeholder?: string
+}) {
+  const [query, setQuery] = useState("")
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    function out(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener("mousedown", out)
+    return () => document.removeEventListener("mousedown", out)
+  }, [])
+
+  const results = useMemo(() => searchCustomers(customers, query), [customers, query])
+
+  if (selected) {
+    return (
+      <div>
+        <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1.5 block">{label}</label>
+        <div className="flex items-center gap-3 rounded-xl border bg-background px-4 py-2.5">
+          <div className="flex-1 min-w-0">
+            <p className="font-medium truncate">{customerLabel(selected)}</p>
+            {selected.balanceCents !== 0 && (
+              <p className={cn("text-xs", selected.balanceCents > 0 ? "text-green-700" : "text-red-600")}>
+                {selected.balanceCents > 0 ? "Saldo:" : "Debe:"} {fmtEur(selected.balanceCents)}
+              </p>
+            )}
+          </div>
+          <Button variant="ghost" size="sm" className="text-muted-foreground shrink-0 h-7 w-7 p-0" onClick={onClear}>
+            <X className="h-4 w-4" />
+          </Button>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div ref={ref} className="relative">
+      <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1.5 block">{label}</label>
+      <div className="relative">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+        <Input
+          className="pl-9 h-11"
+          placeholder={placeholder ?? "Buscar por nombre, apellidos o teléfono…"}
+          value={query}
+          onChange={(e) => { setQuery(e.target.value); setOpen(true) }}
+          onFocus={() => setOpen(true)}
+        />
+      </div>
+      {open && (
+        <div className="absolute z-50 w-full mt-1 bg-background border rounded-xl shadow-lg overflow-hidden">
+          {results.length === 0 ? (
+            <div className="px-4 py-3 text-sm text-muted-foreground">Sin resultados para "{query}"</div>
+          ) : (
+            results.map((c) => (
+              <button key={c.id} type="button"
+                className="w-full flex items-center justify-between px-4 py-2.5 hover:bg-muted/60 text-left transition-colors"
+                onClick={() => { onSelect(c); setQuery(""); setOpen(false) }}>
+                <span className="text-sm font-medium truncate">{customerLabel(c)}</span>
+                {c.balanceCents !== 0 && (
+                  <span className={cn("text-xs ml-3 shrink-0", c.balanceCents > 0 ? "text-green-700" : "text-red-600")}>
+                    {c.balanceCents > 0 ? "+" : "−"}{fmtEur(c.balanceCents)}
+                  </span>
+                )}
+              </button>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/* ─── Add line panel ─────────────────────────────────────────────────────── */
+
+type AddLineTab = "SERVICE" | "PRODUCT" | "GIFT_CARD"
+
+function AddLinePanel({ services, products, workers, customers, giftRecipient, onGiftRecipientChange, onAdd }: {
+  services: Service[]; products: Product[]; workers: Worker[]
+  customers: Customer[]
+  giftRecipient: Customer | null
+  onGiftRecipientChange: (c: Customer | null) => void
+  onAdd: (line: DraftLine) => void
+}) {
+  const [tab, setTab] = useState<AddLineTab>("SERVICE")
+  const [query, setQuery] = useState("")
+  const [giftAmount, setGiftAmount] = useState("")
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    function out(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener("mousedown", out)
+    return () => document.removeEventListener("mousedown", out)
+  }, [])
+
+  const tabItems = useMemo(() => {
+    const q = normalize(query)
+    if (tab === "SERVICE") return services.filter((s) => !q || normalize(s.name).includes(q))
+    return products.filter((p) => !q || normalize(p.name).includes(q))
+  }, [tab, query, services, products])
+
+  function addGiftCard() {
+    const cents = Math.round(Number(giftAmount) * 100)
+    if (!cents || cents <= 0) return
+    const recipientName = giftRecipient ? customerLabel(giftRecipient) : ""
+    onAdd({
+      key: 0, type: "GIFT_CARD", itemId: "gift_card",
+      description: recipientName ? `Tarjeta regalo — ${recipientName}` : "Tarjeta regalo",
+      workerId: null, quantity: 1, unitPriceCents: cents, discountPercent: 0, durationMinutes: null,
+    })
+    setGiftAmount("")
+  }
+
+  const tabs: { id: AddLineTab; label: string; icon: React.ElementType }[] = [
+    { id: "SERVICE",   label: "Servicio",      icon: Scissors },
+    { id: "PRODUCT",   label: "Producto",       icon: Package },
+    { id: "GIFT_CARD", label: "Tarjeta regalo", icon: Gift },
+  ]
+
+  return (
+    <div>
+      <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">Añadir línea</h3>
+      <div className="rounded-xl border bg-background p-4 space-y-3">
+        <div className="flex gap-1">
+          {tabs.map((t) => {
+            const Icon = t.icon
+            return (
+              <button key={t.id} type="button"
+                onClick={() => { setTab(t.id); setQuery(""); setOpen(false) }}
+                className={cn(
+                  "flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
+                  tab === t.id
+                    ? "bg-primary text-primary-foreground"
+                    : "bg-muted text-muted-foreground hover:bg-muted/80 hover:text-foreground"
+                )}>
+                <Icon className="h-3.5 w-3.5" />{t.label}
+              </button>
+            )
+          })}
+        </div>
+
+        {tab === "GIFT_CARD" ? (
+          <div className="space-y-3">
+            {/* Destinatario */}
+            <CustomerSelector
+              label="Destinatario (quien recibe el saldo)"
+              customers={customers}
+              selected={giftRecipient}
+              onSelect={onGiftRecipientChange}
+              onClear={() => onGiftRecipientChange(null)}
+              placeholder="Buscar cliente destinatario…"
+            />
+            {/* Importe */}
+            <div className="flex gap-2 items-end">
+              <div className="flex-1 space-y-1">
+                <label className="text-xs text-muted-foreground">Importe (€)</label>
+                <Input
+                  type="number" step="0.01" min="0" placeholder="0,00"
+                  value={giftAmount}
+                  onChange={(e) => setGiftAmount(e.target.value)}
+                  className="tabular-nums"
+                />
+              </div>
+              <Button onClick={addGiftCard} disabled={!giftAmount || Number(giftAmount) <= 0 || !giftRecipient}>
+                <Plus className="h-4 w-4 mr-1" /> Añadir
+              </Button>
+            </div>
+            {!giftRecipient && (
+              <p className="text-xs text-muted-foreground">Selecciona primero el destinatario.</p>
+            )}
+          </div>
+        ) : (
+          <div ref={ref} className="relative">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+              <Input
+                className="pl-9 h-11"
+                placeholder={tab === "SERVICE" ? "Buscar servicio…" : "Buscar producto…"}
+                value={query}
+                onChange={(e) => { setQuery(e.target.value); setOpen(true) }}
+                onFocus={() => setOpen(true)}
+              />
+            </div>
+            {open && tabItems.length > 0 && (
+              <div className="absolute z-40 w-full mt-1 bg-background border rounded-xl shadow-lg overflow-hidden max-h-56 overflow-y-auto">
+                {tabItems.slice(0, 10).map((item) => {
+                  const isService = tab === "SERVICE"
+                  const s = item as Service
+                  const p = item as Product
+                  return (
+                    <button key={item.id} type="button"
+                      className="w-full flex items-center justify-between px-4 py-2.5 hover:bg-muted/60 text-left transition-colors text-sm"
+                      onClick={() => {
+                        if (isService) {
+                          onAdd({
+                            key: 0, type: "SERVICE", itemId: s.id, description: s.name,
+                            workerId: workers.length === 1 ? workers[0].id : null,
+                            quantity: 1, unitPriceCents: s.priceCents, discountPercent: 0,
+                            durationMinutes: s.pricingType === "PER_MINUTE" ? s.durationMinutes : null,
+                          })
+                        } else {
+                          onAdd({
+                            key: 0, type: "PRODUCT", itemId: p.id, description: p.name,
+                            workerId: null, quantity: 1, unitPriceCents: p.priceCents, discountPercent: 0, durationMinutes: null,
+                          })
+                        }
+                        setQuery(""); setOpen(false)
+                      }}>
+                      <span className="font-medium truncate">{item.name}</span>
+                      <span className="text-muted-foreground tabular-nums ml-3 shrink-0">
+                        {isService
+                          ? (s.pricingType === "PER_MINUTE" && s.pricePerMinuteCents ? `${fmtEur(s.pricePerMinuteCents)}/min` : fmtEur(s.priceCents))
+                          : <><span className={p.stock === 0 ? "text-red-500" : ""}>{p.stock} ud</span> · {fmtEur(p.priceCents)}</>
+                        }
+                      </span>
+                    </button>
+                  )
+                })}
+              </div>
+            )}
           </div>
         )}
+      </div>
+    </div>
+  )
+}
 
-        <DialogFooter>
-          <Button variant="outline" onClick={onClose}>Cancelar</Button>
-          <Button onClick={handleSubmit} disabled={loading || lines.length === 0}>
-            {loading ? "Guardando…" : `Registrar · ${fmt(totals.total)}`}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+/* ─── Line row ───────────────────────────────────────────────────────────── */
+
+function LineRow({ line, workers, onUpdate, onRemove }: {
+  line: DraftLine; workers: Worker[]
+  onUpdate: (p: Partial<DraftLine>) => void; onRemove: () => void
+}) {
+  const total = lineTotal(line)
+  const [discountStr, setDiscountStr] = useState(line.discountPercent === 0 ? "" : String(line.discountPercent))
+
+  return (
+    <tr className="border-b last:border-0 group">
+      <td className="px-4 py-2.5">
+        <div className="flex items-center gap-2">
+          <span className="text-sm truncate max-w-[14rem]">{line.description}</span>
+          {line.type === "SERVICE" && line.durationMinutes && (
+            <span className="text-xs text-muted-foreground flex items-center gap-0.5 shrink-0">
+              <Clock className="h-3 w-3" />{line.durationMinutes}m
+            </span>
+          )}
+        </div>
+      </td>
+
+      <td className="px-3 py-2">
+        {line.type === "SERVICE" ? (
+          <Select value={line.workerId ?? ""} onValueChange={(v) => onUpdate({ workerId: v })}>
+            <SelectTrigger className={cn("h-8 text-xs w-36", !line.workerId && "border-orange-300 text-orange-600")}>
+              <SelectValue placeholder="Profesional…" />
+            </SelectTrigger>
+            <SelectContent>
+              {workers.map((w) => (
+                <SelectItem key={w.id} value={w.id}>{w.name} {w.lastName ?? ""}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        ) : <span className="text-muted-foreground text-xs">—</span>}
+      </td>
+
+      <td className="px-3 py-2 text-center">
+        {line.type === "GIFT_CARD" ? <span className="text-sm">1</span> : (
+          <div className="flex items-center justify-center gap-1">
+            <button type="button"
+              className="h-7 w-7 rounded border text-muted-foreground hover:bg-muted flex items-center justify-center text-base leading-none"
+              onClick={() => onUpdate({ quantity: Math.max(1, line.quantity - 1) })}>−</button>
+            <span className="w-6 text-center text-sm tabular-nums">{line.quantity}</span>
+            <button type="button"
+              className="h-7 w-7 rounded border text-muted-foreground hover:bg-muted flex items-center justify-center text-base leading-none"
+              onClick={() => onUpdate({ quantity: line.quantity + 1 })}>+</button>
+          </div>
+        )}
+      </td>
+
+      <td className="px-3 py-2.5 text-right text-sm tabular-nums text-muted-foreground">{fmtEur(line.unitPriceCents)}</td>
+
+      <td className="px-3 py-2 text-center">
+        {line.type === "GIFT_CARD" ? <span className="text-muted-foreground text-xs">—</span> : (
+          <div className="relative w-24">
+            <Input
+              type="number" min={0} max={100}
+              value={discountStr}
+              placeholder="0"
+              onFocus={(e) => e.target.select()}
+              onChange={(e) => {
+                const raw = e.target.value.replace(/^0+(?=\d)/, "")
+                setDiscountStr(raw)
+                const n = Math.min(100, Math.max(0, Number(raw) || 0))
+                onUpdate({ discountPercent: n })
+              }}
+              className="h-8 text-center text-sm tabular-nums pr-6"
+            />
+            <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-muted-foreground pointer-events-none">%</span>
+          </div>
+        )}
+      </td>
+
+      <td className="px-3 py-2.5 text-right text-sm font-medium tabular-nums">{fmtEur(total)}</td>
+
+      <td className="px-2 py-2">
+        <button type="button" onClick={onRemove}
+          className="h-7 w-7 rounded flex items-center justify-center text-muted-foreground hover:bg-red-50 hover:text-red-600 transition-colors opacity-0 group-hover:opacity-100">
+          <Trash2 className="h-3.5 w-3.5" />
+        </button>
+      </td>
+    </tr>
   )
 }

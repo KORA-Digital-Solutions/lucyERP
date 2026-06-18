@@ -17,6 +17,16 @@ import {
 } from "@/components/ui/select"
 import { cn } from "@/lib/utils"
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
+import {
   createAppointment,
   updateAppointment,
   setAppointmentStatus,
@@ -29,6 +39,7 @@ import { formatDuration, normalizeSearch } from "@/lib/format"
 export interface Option {
   id: string
   name: string
+  defaultWorkerId?: string | null
 }
 export interface ServiceOption extends Option {
   durationMinutes: number
@@ -99,15 +110,33 @@ export function AppointmentPanel({
   const router = useRouter()
   const isEdit = Boolean(appointment)
   const [loading, setLoading] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState(false)
 
   const initTime = appointment ? appointment.time : (defaultTime ?? "10:00")
   const initDuration = appointment ? appointment.durationMinutes : 60
   const initCabinId = appointment ? appointment.cabinId : (defaultCabinId ?? cabins[0]?.id ?? "")
 
+  function defaultWorkerForCabin(cId: string) {
+    return cabins.find((c) => c.id === cId)?.defaultWorkerId ?? null
+  }
+
+  const initWorkerId = appointment?.workerId
+    ?? defaultWorkerForCabin(initCabinId)
+    ?? workers[0]?.id
+    ?? ""
+
   const [customerId, setCustomerId] = useState(appointment?.customerId ?? "")
   const [serviceId, setServiceId] = useState(appointment?.serviceId ?? "")
-  const [workerId, setWorkerId] = useState(appointment?.workerId ?? workers[0]?.id ?? "")
+  const [workerId, setWorkerId] = useState(initWorkerId)
   const [cabinId, setCabinId] = useState(initCabinId)
+
+  function handleCabinChange(newCabinId: string) {
+    setCabinId(newCabinId)
+    if (!isEdit) {
+      const def = defaultWorkerForCabin(newCabinId)
+      if (def) setWorkerId(def)
+    }
+  }
   const [date, setDate] = useState(appointment?.date ?? defaultDate)
   const [time, setTime] = useState(initTime)
   const [duration, setDuration] = useState(initDuration)
@@ -140,10 +169,11 @@ export function AppointmentPanel({
       setQuery(customers.find((c) => c.id === appointment.customerId)?.label ?? "")
     } else {
       const t = defaultTime ?? "10:00"
+      const newCabinId = defaultCabinId ?? cabins[0]?.id ?? ""
       setCustomerId("")
       setServiceId("")
-      setWorkerId(workers[0]?.id ?? "")
-      setCabinId(defaultCabinId ?? cabins[0]?.id ?? "")
+      setWorkerId(defaultWorkerForCabin(newCabinId) ?? workers[0]?.id ?? "")
+      setCabinId(newCabinId)
       setDate(defaultDate)
       setTime(t)
       setDuration(60)
@@ -429,7 +459,7 @@ export function AppointmentPanel({
           </div>
           <div className="space-y-2">
             <Label>Cabina</Label>
-            <Select value={cabinId} onValueChange={setCabinId}>
+            <Select value={cabinId} onValueChange={handleCabinChange}>
               <SelectTrigger>
                 <SelectValue placeholder="Seleccionar" />
               </SelectTrigger>
@@ -490,9 +520,28 @@ export function AppointmentPanel({
                 </Button>
               )}
               <Button type="button" size="sm" variant="ghost" className="text-[#B31412]" disabled={loading}
-                onClick={() => runAction(() => deleteAppointment(appointment.id), "Cita borrada.")}>
+                onClick={() => setConfirmDelete(true)}>
                 <Trash2 className="mr-1 h-3.5 w-3.5" /> Borrar
               </Button>
+              <AlertDialog open={confirmDelete} onOpenChange={setConfirmDelete}>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>¿Borrar esta cita?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      Esta acción no se puede deshacer.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                    <AlertDialogAction
+                      className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                      onClick={() => runAction(() => deleteAppointment(appointment.id), "Cita borrada.")}
+                    >
+                      Borrar
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
             </div>
           </div>
         )}

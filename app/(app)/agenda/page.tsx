@@ -59,7 +59,7 @@ export default async function AgendaPage({
       longDate={formatLongDate(date)}
       openingMinutes={timeToMinutes(clinic.openingTime)}
       closingMinutes={timeToMinutes(clinic.closingTime)}
-      cabins={cabins.map((c) => ({ id: c.id, name: c.name }))}
+      cabins={cabins.map((c) => ({ id: c.id, name: c.name, defaultWorkerId: c.defaultWorkerId }))}
       workers={workers.map((w) => ({ id: w.id, name: w.name }))}
       services={services.map((s) => ({
         id: s.id,

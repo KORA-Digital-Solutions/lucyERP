@@ -42,8 +42,17 @@ export function isWhatsappConfigured(): boolean {
 export function buildTemplatePayload(appt: AppointmentForReminder) {
   const templateName = appt.clinic.whatsappTemplateName || "appointment_reminder_es"
   const lang = appt.clinic.whatsappTemplateLang || "es"
+  const diaSemana = appt.startAt.toLocaleDateString("es-ES", { weekday: "long" })
   const fecha = appt.startAt.toLocaleDateString("es-ES", { day: "2-digit", month: "2-digit", year: "numeric" })
+  const diaFecha = `${diaSemana} ${fecha}`
   const hora = appt.startAt.toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" })
+
+  const parameters = [
+    { type: "text", text: appt.customer.firstName },
+    { type: "text", text: diaFecha },
+    { type: "text", text: hora },
+    { type: "text", text: appt.service.name },
+  ]
 
   return {
     messaging_product: "whatsapp",
@@ -52,19 +61,9 @@ export function buildTemplatePayload(appt: AppointmentForReminder) {
     template: {
       name: templateName,
       language: { code: lang },
-      components: [
-        {
-          type: "body",
-          parameters: [
-            { type: "text", text: appt.customer.firstName },
-            { type: "text", text: appt.clinic.name },
-            { type: "text", text: fecha },
-            { type: "text", text: hora },
-            { type: "text", text: appt.service.name },
-            { type: "text", text: appt.worker.name },
-          ],
-        },
-      ],
+      ...(parameters.length > 0 && templateName !== "hello_world"
+        ? { components: [{ type: "body", parameters }] }
+        : {}),
     },
   }
 }

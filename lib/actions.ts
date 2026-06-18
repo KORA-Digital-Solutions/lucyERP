@@ -308,6 +308,7 @@ export async function saveCabin(id: string | null, fd: FormData): Promise<Action
       description: optStr(fd, "description"),
       sortOrder: int(fd, "sortOrder", 0),
       active: bool(fd, "active"),
+      defaultWorkerId: optStr(fd, "defaultWorkerId"),
     }
     if (id) {
       await prisma.cabin.update({ where: { id }, data })

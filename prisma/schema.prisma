@@ -61,15 +61,16 @@ model User {
 }
 
 model Cabin {
-  id          String   @id @default(cuid())
-  clinicId    String
-  clinic      Clinic   @relation(fields: [clinicId], references: [id])
-  name        String
-  description String?
-  active      Boolean  @default(true)
-  sortOrder   Int      @default(0)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id              String   @id @default(cuid())
+  clinicId        String
+  clinic          Clinic   @relation(fields: [clinicId], references: [id])
+  name            String
+  description     String?
+  active          Boolean  @default(true)
+  sortOrder       Int      @default(0)
+  defaultWorkerId String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
   appointments Appointment[]
 }

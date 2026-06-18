@@ -4,6 +4,7 @@ import { getActiveClinicId } from "@/lib/clinic"
 import { validateAppointmentSlot } from "@/lib/availability"
 import { dayRange, toDateInputValue } from "@/lib/format"
 
+
 // GET /api/appointments?date=YYYY-MM-DD
 export async function GET(req: NextRequest) {
   const clinicId = await getActiveClinicId()

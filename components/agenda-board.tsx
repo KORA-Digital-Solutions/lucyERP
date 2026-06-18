@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
-import { ChevronLeft, ChevronRight, Plus, Filter, MessageCircle } from "lucide-react"
+import { ChevronLeft, ChevronRight, Plus, Filter, MessageCircle, CheckCircle2, XCircle, Clock, Send, Trash2, UserX } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import {
@@ -12,6 +12,23 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { cn } from "@/lib/utils"
 import { STATUS_META, type AppointmentStatus } from "@/lib/enums"
 import {
@@ -21,6 +38,7 @@ import {
   type Option,
   type ExistingAppointment,
 } from "@/components/appointment-panel"
+import { setAppointmentStatus, deleteAppointment, sendReminder } from "@/lib/actions"
 
 export interface AgendaAppointment {
   id: string
@@ -88,6 +106,24 @@ export function AgendaBoard({
   const [presetCabin, setPresetCabin] = useState<string | undefined>(undefined)
   const [presetTime, setPresetTime] = useState<string | undefined>(undefined)
   const [draft, setDraft] = useState<SlotDraft | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; customerName: string } | null>(null)
+
+  async function quickStatusChange(apptId: string, newStatus: string) {
+    await setAppointmentStatus(apptId, newStatus)
+    router.refresh()
+  }
+
+  async function quickSendReminder(apptId: string) {
+    await sendReminder(apptId)
+    router.refresh()
+  }
+
+  async function confirmDelete() {
+    if (!deleteTarget) return
+    await deleteAppointment(deleteTarget.id)
+    setDeleteTarget(null)
+    router.refresh()
+  }
 
   // Fin de semana del día seleccionado (vista diaria).
   const isWeekend = useMemo(() => {
@@ -162,7 +198,20 @@ export function AgendaBoard({
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-card p-6">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Agenda</h1>
+          <div className="flex items-center gap-3">
+            <h1 className="text-2xl font-semibold tracking-tight">Agenda</h1>
+            <div className="flex items-center rounded-lg border bg-card">
+              <Button variant="ghost" size="sm" onClick={() => goToDate(-1)}>
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+              <Button variant="ghost" size="sm" onClick={goToday}>
+                Hoy
+              </Button>
+              <Button variant="ghost" size="sm" onClick={() => goToDate(1)}>
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
           <p className="capitalize text-muted-foreground">
             {longDate}
             {isWeekend && <span className="ml-2 text-xs uppercase tracking-wide">· fin de semana</span>}
@@ -170,18 +219,6 @@ export function AgendaBoard({
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
-          <div className="flex items-center rounded-lg border bg-card">
-            <Button variant="ghost" size="sm" onClick={() => goToDate(-1)}>
-              <ChevronLeft className="h-4 w-4" />
-            </Button>
-            <Button variant="ghost" size="sm" onClick={goToday}>
-              Hoy
-            </Button>
-            <Button variant="ghost" size="sm" onClick={() => goToDate(1)}>
-              <ChevronRight className="h-4 w-4" />
-            </Button>
-          </div>
-
           <Select value={workerFilter} onValueChange={setWorkerFilter}>
             <SelectTrigger className="w-44">
               <Filter className="mr-2 h-4 w-4" />
@@ -274,36 +311,82 @@ export function AgendaBoard({
                             const height = Math.max((a.durationMinutes / 60) * HOUR_PX, 28)
                             const meta = STATUS_META[a.status as AppointmentStatus] ?? STATUS_META.PENDING
                             const reminded = ["SENT", "DELIVERED", "READ"].includes(a.reminderStatus)
+                            const isCancelled = a.status === "CANCELLED"
                             return (
-                              <button
-                                key={a.id}
-                                onClick={() => openEdit(a)}
-                                className={cn(
-                                  "absolute left-1 right-1 z-10 overflow-hidden rounded-md border-l-4 p-1.5 text-left shadow-sm transition hover:shadow-md",
-                                  meta.className,
-                                  panelOpen && editing && editing.id !== a.id && "opacity-50",
-                                  panelOpen && editing?.id === a.id &&
-                                    "z-20 opacity-100 ring-2 ring-primary ring-offset-2 ring-offset-card shadow-lg",
-                                )}
-                                style={{ top, height, borderLeftColor: a.workerColor }}
-                              >
-                                <div className="flex items-baseline justify-between gap-1">
-                                  <p className="truncate text-xs font-semibold">
-                                    [{a.workerName}] {a.serviceName}
-                                  </p>
-                                  <p className="shrink-0 text-[11px] opacity-80">
-                                    {a.startLabel}–{a.endLabel} · {a.durationMinutes} min
-                                  </p>
-                                </div>
-                                <div className="flex items-center justify-between gap-1">
-                                  <p className="truncate text-xs">{a.customerName}</p>
-                                  <div className="flex shrink-0 items-center gap-1 text-[11px]">
-                                    <span className={cn("inline-block h-2 w-2 rounded-full", meta.dot)} />
-                                    {meta.label}
-                                    {reminded && <MessageCircle className="h-3 w-3 text-[#1E6B34]" />}
+                              <ContextMenu key={a.id}>
+                                <ContextMenuTrigger asChild>
+                                  <button
+                                    onClick={() => openEdit(a)}
+                                    className={cn(
+                                      "absolute left-1 right-1 z-10 overflow-hidden rounded-md border-l-4 p-1.5 text-left shadow-sm transition hover:shadow-md",
+                                      meta.className,
+                                      panelOpen && editing && editing.id !== a.id && "opacity-50",
+                                      panelOpen && editing?.id === a.id &&
+                                        "z-20 opacity-100 ring-2 ring-primary ring-offset-2 ring-offset-card shadow-lg",
+                                    )}
+                                    style={{ top, height, borderLeftColor: a.workerColor }}
+                                  >
+                                    <div className="flex items-baseline justify-between gap-1">
+                                      <p className="truncate text-xs font-semibold">
+                                        [{a.workerName}] {a.serviceName}
+                                      </p>
+                                      <p className="shrink-0 text-[11px] opacity-80">
+                                        {a.startLabel}–{a.endLabel} · {a.durationMinutes} min
+                                      </p>
+                                    </div>
+                                    <div className="flex items-center justify-between gap-1">
+                                      <p className="truncate text-xs">{a.customerName}</p>
+                                      <div className="flex shrink-0 items-center gap-1 text-[11px]">
+                                        <span className={cn("inline-block h-2 w-2 rounded-full", meta.dot)} />
+                                        {meta.label}
+                                        {reminded && <MessageCircle className="h-3 w-3 text-[#1E6B34]" />}
+                                      </div>
+                                    </div>
+                                  </button>
+                                </ContextMenuTrigger>
+                                <ContextMenuContent className="w-52">
+                                  <div className="px-2 py-1.5 text-xs font-semibold text-muted-foreground truncate">
+                                    {a.customerName}
                                   </div>
-                                </div>
-                              </button>
+                                  <ContextMenuSeparator />
+                                  {a.status !== "CONFIRMED" && !isCancelled && a.status !== "DONE" && (
+                                    <ContextMenuItem onClick={() => quickStatusChange(a.id, "CONFIRMED")}>
+                                      <CheckCircle2 className="mr-2 h-4 w-4 text-green-600" /> Confirmar
+                                    </ContextMenuItem>
+                                  )}
+                                  {a.status !== "PENDING" && !isCancelled && a.status !== "DONE" && a.status !== "NO_SHOW" && (
+                                    <ContextMenuItem onClick={() => quickStatusChange(a.id, "PENDING")}>
+                                      <Clock className="mr-2 h-4 w-4 text-yellow-600" /> Marcar pendiente
+                                    </ContextMenuItem>
+                                  )}
+                                  {a.status !== "DONE" && !isCancelled && (
+                                    <ContextMenuItem onClick={() => quickStatusChange(a.id, "DONE")}>
+                                      <CheckCircle2 className="mr-2 h-4 w-4 text-blue-600" /> Marcar realizada
+                                    </ContextMenuItem>
+                                  )}
+                                  {a.status !== "NO_SHOW" && !isCancelled && (
+                                    <ContextMenuItem onClick={() => quickStatusChange(a.id, "NO_SHOW")}>
+                                      <UserX className="mr-2 h-4 w-4 text-orange-500" /> No asistió
+                                    </ContextMenuItem>
+                                  )}
+                                  {!isCancelled && (
+                                    <ContextMenuItem onClick={() => quickStatusChange(a.id, "CANCELLED")}>
+                                      <XCircle className="mr-2 h-4 w-4 text-red-500" /> Cancelar cita
+                                    </ContextMenuItem>
+                                  )}
+                                  <ContextMenuSeparator />
+                                  <ContextMenuItem onClick={() => quickSendReminder(a.id)}>
+                                    <Send className="mr-2 h-4 w-4" /> Enviar recordatorio
+                                  </ContextMenuItem>
+                                  <ContextMenuSeparator />
+                                  <ContextMenuItem
+                                    className="text-red-600 focus:text-red-600"
+                                    onClick={() => setDeleteTarget({ id: a.id, customerName: a.customerName })}
+                                  >
+                                    <Trash2 className="mr-2 h-4 w-4" /> Borrar cita
+                                  </ContextMenuItem>
+                                </ContextMenuContent>
+                              </ContextMenu>
                             )
                           })}
                         </div>
@@ -324,6 +407,23 @@ export function AgendaBoard({
             aria-hidden="true"
           />
         )}
+
+        <AlertDialog open={!!deleteTarget} onOpenChange={(o) => { if (!o) setDeleteTarget(null) }}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>¿Borrar esta cita?</AlertDialogTitle>
+              <AlertDialogDescription>
+                Esta acción no se puede deshacer.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancelar</AlertDialogCancel>
+              <AlertDialogAction className="bg-destructive text-destructive-foreground hover:bg-destructive/90" onClick={confirmDelete}>
+                Borrar
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
 
         {panelOpen && (
           <AppointmentPanel

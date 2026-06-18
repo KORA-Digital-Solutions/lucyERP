@@ -42,18 +42,20 @@ model Clinic {
 
 // role: "ADMIN" | "WORKER"
 model User {
-  id           String   @id @default(cuid())
-  clinicId     String
-  clinic       Clinic   @relation(fields: [clinicId], references: [id])
-  name         String
-  email        String?  @unique
-  passwordHash String?
-  phone        String?
-  role         String   @default("WORKER")
-  active       Boolean  @default(true)
-  color        String?  @default("#3C54A4")
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id                  String   @id @default(cuid())
+  clinicId            String
+  clinic              Clinic   @relation(fields: [clinicId], references: [id])
+  name                String
+  lastName            String?
+  email               String?  @unique
+  passwordHash        String?
+  mustChangePassword  Boolean  @default(false)
+  phone               String?
+  role                String   @default("WORKER")
+  active              Boolean  @default(true)
+  color               String?  @default("#3C54A4")
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
 
   appointments Appointment[]
 }

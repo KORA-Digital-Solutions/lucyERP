@@ -14,11 +14,13 @@ export default async function WorkersPage() {
   const rows: WorkerRow[] = workers.map((w) => ({
     id: w.id,
     name: w.name,
+    lastName: w.lastName,
     email: w.email,
     phone: w.phone,
     role: w.role,
     active: w.active,
     color: w.color ?? "#3C54A4",
+    mustChangePassword: w.mustChangePassword,
   }))
 
   return <WorkersClient rows={rows} />

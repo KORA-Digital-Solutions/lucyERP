@@ -1,11 +1,13 @@
 "use server"
 
 import { revalidatePath } from "next/cache"
+import bcrypt from "bcryptjs"
 import { prisma } from "@/lib/db"
 import { getActiveClinicId } from "@/lib/clinic"
 import { validateAppointmentSlot } from "@/lib/availability"
 import { sendReminderForAppointmentId } from "@/lib/whatsapp"
 import { combineDateTime } from "@/lib/format"
+import { getSession, createSession, setSessionCookie } from "@/lib/session"
 
 export type ActionResult = { ok: boolean; error?: string; id?: string }
 
@@ -238,6 +240,7 @@ export async function saveWorker(id: string | null, fd: FormData): Promise<Actio
     const clinicId = await getActiveClinicId()
     const data = {
       name: str(fd, "name"),
+      lastName: optStr(fd, "lastName"),
       email: optStr(fd, "email"),
       phone: optStr(fd, "phone"),
       role: str(fd, "role") || "WORKER",
@@ -250,6 +253,35 @@ export async function saveWorker(id: string | null, fd: FormData): Promise<Actio
       await prisma.user.create({ data: { ...data, clinicId } })
     }
     revalidateAll()
+    return { ok: true }
+  } catch (e) {
+    return { ok: false, error: errMsg(e) }
+  }
+}
+
+export async function setUserPassword(id: string, password: string): Promise<ActionResult> {
+  try {
+    if (password.length < 6) return { ok: false, error: "La contraseña debe tener al menos 6 caracteres." }
+    const hash = await bcrypt.hash(password, 12)
+    await prisma.user.update({ where: { id }, data: { passwordHash: hash, mustChangePassword: true } })
+    revalidateAll()
+    return { ok: true }
+  } catch (e) {
+    return { ok: false, error: errMsg(e) }
+  }
+}
+
+export async function changeOwnPassword(userId: string, newPassword: string): Promise<ActionResult> {
+  try {
+    if (newPassword.length < 6) return { ok: false, error: "La contraseña debe tener al menos 6 caracteres." }
+    const hash = await bcrypt.hash(newPassword, 12)
+    await prisma.user.update({ where: { id: userId }, data: { passwordHash: hash, mustChangePassword: false } })
+    // Re-issue session cookie with mustChangePassword: false
+    const current = await getSession()
+    if (current) {
+      const token = await createSession({ ...current, mustChangePassword: false })
+      await setSessionCookie(token)
+    }
     return { ok: true }
   } catch (e) {
     return { ok: false, error: errMsg(e) }

@@ -16,13 +16,13 @@ import { cn } from "@/lib/utils"
 import { LuciaMark } from "@/components/lucia-logo"
 
 const ALL_NAV = [
-  { icon: LayoutGrid, label: "Dashboard",     href: "/dashboard", roles: ["ADMIN", "WORKER"] },
-  { icon: Calendar,    label: "Agenda",        href: "/agenda",    roles: ["ADMIN", "WORKER"] },
-  { icon: Users,       label: "Clientes",      href: "/clients",   roles: ["ADMIN", "WORKER"] },
-  { icon: Briefcase,   label: "Servicios",     href: "/services",  roles: ["ADMIN"] },
-  { icon: UserCog,     label: "Usuarios",      href: "/workers",   roles: ["ADMIN"] },
-  { icon: DoorOpen,    label: "Cabinas",       href: "/cabins",    roles: ["ADMIN"] },
-  { icon: Settings,    label: "Configuración", href: "/settings",  roles: ["ADMIN"] },
+  { icon: LayoutGrid, label: "Dashboard",     href: "/dashboard", roles: ["ADMIN", "WORKER"], group: "main" },
+  { icon: Calendar,    label: "Agenda",        href: "/agenda",    roles: ["ADMIN", "WORKER"], group: "main" },
+  { icon: Users,       label: "Clientes",      href: "/clients",   roles: ["ADMIN", "WORKER"], group: "main" },
+  { icon: Briefcase,   label: "Servicios",     href: "/services",  roles: ["ADMIN"],           group: "main" },
+  { icon: DoorOpen,    label: "Cabinas",       href: "/cabins",    roles: ["ADMIN"],           group: "main" },
+  { icon: UserCog,     label: "Usuarios",      href: "/workers",   roles: ["ADMIN"],           group: "admin" },
+  { icon: Settings,    label: "Configuración", href: "/settings",  roles: ["ADMIN"],           group: "admin" },
 ]
 
 interface Props {
@@ -60,25 +60,53 @@ export function AppSidebar({ name, lastName, role }: Props) {
         </div>
       </div>
 
-      <nav className="flex-1 space-y-1 px-3 py-4">
-        {navItems.map((item) => {
-          const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`)
-          return (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={cn(
-                "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors",
-                isActive
-                  ? "bg-sidebar-accent text-sidebar-accent-foreground"
-                  : "text-sidebar-muted hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
-              )}
-            >
-              <item.icon className="h-5 w-5" />
-              {item.label}
-            </Link>
-          )
-        })}
+      <nav className="flex-1 px-3 py-4">
+        <div className="space-y-1">
+          {navItems.filter(i => i.group === "main").map((item) => {
+            const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`)
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                className={cn(
+                  "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors",
+                  isActive
+                    ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                    : "text-sidebar-muted hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
+                )}
+              >
+                <item.icon className="h-5 w-5" />
+                {item.label}
+              </Link>
+            )
+          })}
+        </div>
+
+        {navItems.some(i => i.group === "admin") && (
+          <>
+            <div className="my-3 border-t border-sidebar-border" />
+            <div className="space-y-1">
+              {navItems.filter(i => i.group === "admin").map((item) => {
+                const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`)
+                return (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    className={cn(
+                      "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors",
+                      isActive
+                        ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                        : "text-sidebar-muted hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
+                    )}
+                  >
+                    <item.icon className="h-5 w-5" />
+                    {item.label}
+                  </Link>
+                )
+              })}
+            </div>
+          </>
+        )}
       </nav>
 
       <div className="border-t border-sidebar-border p-4">

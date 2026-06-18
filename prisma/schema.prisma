@@ -38,6 +38,8 @@ model Clinic {
   customers    Customer[]
   services     Service[]
   appointments Appointment[]
+  suppliers    Supplier[]
+  products     Product[]
 }
 
 // role: "ADMIN" | "WORKER"
@@ -141,6 +143,56 @@ model Appointment {
   @@index([clinicId, startAt])
   @@index([clinicId, cabinId, startAt])
   @@index([clinicId, workerId, startAt])
+}
+
+model Supplier {
+  id        String   @id @default(cuid())
+  clinicId  String
+  clinic    Clinic   @relation(fields: [clinicId], references: [id])
+  name      String
+  phone     String?
+  email     String?
+  notes     String?
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  products Product[]
+}
+
+// type: SALE | INTERNAL | BOTH (legacy, now unused — kept for future)
+model Product {
+  id          String   @id @default(cuid())
+  clinicId    String
+  clinic      Clinic   @relation(fields: [clinicId], references: [id])
+  supplierId  String?
+  supplier    Supplier? @relation(fields: [supplierId], references: [id])
+  name        String
+  description String?
+  priceCents  Int      @default(0)
+  costCents   Int      @default(0)
+  stock       Int      @default(0)
+  stockMin    Int      @default(0)
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  movements StockMovement[]
+}
+
+// type: ENTRY | CONSUME | SALE
+model StockMovement {
+  id        String   @id @default(cuid())
+  productId String
+  product   Product  @relation(fields: [productId], references: [id])
+  userId    String
+  type      String
+  quantity  Int
+  notes     String?
+  saleId    String?
+  createdAt DateTime @default(now())
+
+  @@index([productId])
 }
 
 // direction: OUTBOUND | INBOUND

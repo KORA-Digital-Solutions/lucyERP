@@ -1,5 +1,5 @@
 import Link from "next/link"
-import { Calendar, Clock, AlertTriangle, CheckCircle2, ArrowRight, MessageCircle } from "lucide-react"
+import { Calendar, Clock, AlertTriangle, CheckCircle2, ArrowRight, MessageCircle, Package } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { KPICard } from "@/components/kpi-card"
@@ -16,7 +16,7 @@ export default async function DashboardPage() {
   const { start, end } = dayRange(today)
   const now = new Date()
 
-  const [todays, pending, failed, upcoming] = await Promise.all([
+  const [todays, pending, failed, upcoming, lowStockProducts] = await Promise.all([
     prisma.appointment.findMany({
       where: { clinicId: clinic.id, startAt: { gte: start, lte: end }, status: { not: "CANCELLED" } },
       include: { customer: true, service: true, worker: true },
@@ -34,6 +34,10 @@ export default async function DashboardPage() {
       orderBy: { startAt: "asc" },
       take: 6,
     }),
+    prisma.product.findMany({
+      where: { clinicId: clinic.id, active: true, stockMin: { gt: 0 } },
+      orderBy: { name: "asc" },
+    }).then((ps) => ps.filter((p) => p.stock <= p.stockMin)),
   ])
 
   const confirmed = todays.filter((a) => a.status === "CONFIRMED").length
@@ -121,6 +125,32 @@ export default async function DashboardPage() {
           </CardContent>
         </Card>
       </div>
+
+      {lowStockProducts.length > 0 && (
+        <Card className="border-orange-200 bg-orange-50/50">
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <div className="flex items-center gap-2">
+              <Package className="h-4 w-4 text-orange-600" />
+              <CardTitle className="text-base font-medium text-orange-800">Stock bajo mínimo</CardTitle>
+            </div>
+            <Button variant="ghost" size="sm" asChild>
+              <Link href="/stock" className="text-orange-700 hover:text-orange-900">
+                Ver stock <ArrowRight className="ml-1 h-4 w-4" />
+              </Link>
+            </Button>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-1">
+              {lowStockProducts.map((p) => (
+                <div key={p.id} className="flex items-center justify-between rounded-lg px-3 py-2 hover:bg-orange-100/50 transition-colors">
+                  <span className="text-sm font-medium">{p.name}</span>
+                  <span className="text-sm text-orange-700 font-medium">{p.stock} ud · mín. {p.stockMin}</span>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
     </div>
   )
 }

@@ -361,6 +361,128 @@ export async function updateClinic(fd: FormData): Promise<ActionResult> {
   }
 }
 
+/* ------------------------------ PROVEEDORES ----------------------------- */
+
+export async function saveSupplier(id: string | null, fd: FormData): Promise<ActionResult> {
+  try {
+    const clinicId = await getActiveClinicId()
+    const data = {
+      name: str(fd, "name"),
+      phone: optStr(fd, "phone"),
+      email: optStr(fd, "email"),
+      notes: optStr(fd, "notes"),
+      active: bool(fd, "active"),
+    }
+    if (id) {
+      await prisma.supplier.update({ where: { id }, data })
+    } else {
+      await prisma.supplier.create({ data: { ...data, clinicId } })
+    }
+    revalidatePath("/stock")
+    return { ok: true }
+  } catch (e) {
+    return { ok: false, error: errMsg(e) }
+  }
+}
+
+export async function deleteSupplier(id: string): Promise<ActionResult> {
+  try {
+    const count = await prisma.product.count({ where: { supplierId: id } })
+    if (count > 0) return { ok: false, error: "No se puede borrar: tiene productos asignados." }
+    await prisma.supplier.delete({ where: { id } })
+    revalidatePath("/stock")
+    return { ok: true }
+  } catch (e) {
+    return { ok: false, error: errMsg(e) }
+  }
+}
+
+/* ------------------------------- PRODUCTOS ------------------------------ */
+
+export async function saveProduct(id: string | null, fd: FormData): Promise<ActionResult> {
+  try {
+    const clinicId = await getActiveClinicId()
+    const data = {
+      name: str(fd, "name"),
+      description: optStr(fd, "description"),
+      supplierId: optStr(fd, "supplierId"),
+      priceCents: Math.round(Number(str(fd, "price") || "0") * 100),
+      costCents: Math.round(Number(str(fd, "cost") || "0") * 100),
+      stockMin: int(fd, "stockMin", 0),
+      active: bool(fd, "active"),
+    }
+    if (id) {
+      await prisma.product.update({ where: { id }, data })
+    } else {
+      await prisma.product.create({ data: { ...data, clinicId, stock: 0 } })
+    }
+    revalidatePath("/stock")
+    return { ok: true }
+  } catch (e) {
+    return { ok: false, error: errMsg(e) }
+  }
+}
+
+export async function registerOrder(
+  lines: { productId: string; quantity: number }[],
+  notes: string | null,
+): Promise<ActionResult> {
+  try {
+    const session = await getSession()
+    if (!session) return { ok: false, error: "No autenticado." }
+    if (lines.length === 0) return { ok: false, error: "Añade al menos un producto." }
+
+    await prisma.$transaction(
+      lines.flatMap(({ productId, quantity }) => [
+        prisma.stockMovement.create({
+          data: { productId, userId: session.userId, type: "ENTRY", quantity, notes },
+        }),
+        prisma.product.update({
+          where: { id: productId },
+          data: { stock: { increment: quantity } },
+        }),
+      ])
+    )
+    revalidatePath("/stock")
+    revalidatePath("/dashboard")
+    return { ok: true }
+  } catch (e) {
+    return { ok: false, error: errMsg(e) }
+  }
+}
+
+export async function addStockMovement(
+  productId: string,
+  type: "ENTRY" | "CONSUME" | "SALE",
+  quantity: number,
+  notes: string | null,
+): Promise<ActionResult> {
+  try {
+    const session = await getSession()
+    if (!session) return { ok: false, error: "No autenticado." }
+
+    const product = await prisma.product.findUniqueOrThrow({ where: { id: productId } })
+    const delta = type === "ENTRY" ? quantity : -quantity
+    const newStock = product.stock + delta
+    if (newStock < 0) return { ok: false, error: "Stock insuficiente." }
+
+    await prisma.$transaction([
+      prisma.stockMovement.create({
+        data: { productId, userId: session.userId, type, quantity, notes },
+      }),
+      prisma.product.update({
+        where: { id: productId },
+        data: { stock: newStock },
+      }),
+    ])
+    revalidatePath("/stock")
+    revalidatePath("/dashboard")
+    return { ok: true }
+  } catch (e) {
+    return { ok: false, error: errMsg(e) }
+  }
+}
+
 function errMsg(e: unknown): string {
   return e instanceof Error ? e.message : "Error inesperado"
 }

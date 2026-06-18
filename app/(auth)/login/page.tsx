@@ -1,25 +1,41 @@
 "use client"
 
-import React from "react"
-
-import { useState } from "react"
-import Link from "next/link"
+import React, { useState } from "react"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Checkbox } from "@/components/ui/checkbox"
 
 export default function LoginPage() {
   const router = useRouter()
   const [isLoading, setIsLoading] = useState(false)
+  const [error, setError] = useState("")
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
+    setError("")
     setIsLoading(true)
-    // Simulate login
-    await new Promise((resolve) => setTimeout(resolve, 1000))
-    router.push("/dashboard")
+
+    const fd = new FormData(e.currentTarget)
+    const res = await fetch("/api/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        email: fd.get("email"),
+        password: fd.get("password"),
+      }),
+    })
+
+    setIsLoading(false)
+
+    if (res.ok) {
+      const data = await res.json()
+      router.push(data.mustChangePassword ? "/change-password" : "/agenda")
+      router.refresh()
+    } else {
+      const data = await res.json()
+      setError(data.error ?? "Error al iniciar sesión.")
+    }
   }
 
   return (
@@ -32,7 +48,7 @@ export default function LoginPage() {
           </div>
           <span className="text-xl font-semibold">LuciaERP</span>
         </div>
-        
+
         <div className="space-y-6">
           <blockquote className="space-y-2">
             <p className="text-lg leading-relaxed">
@@ -59,11 +75,9 @@ export default function LoginPage() {
               </div>
               <span className="text-xl font-semibold">LuciaERP</span>
             </div>
-            <h1 className="text-2xl font-semibold tracking-tight">
-              Bienvenido de nuevo
-            </h1>
+            <h1 className="text-2xl font-semibold tracking-tight">Bienvenido de nuevo</h1>
             <p className="text-sm text-muted-foreground">
-              Introduce tus credenciales para acceder a tu cuenta
+              Introduce tus credenciales para acceder
             </p>
           </div>
 
@@ -72,10 +86,12 @@ export default function LoginPage() {
               <Label htmlFor="email">Email</Label>
               <Input
                 id="email"
+                name="email"
                 type="email"
                 placeholder="usuario@empresa.com"
                 required
                 disabled={isLoading}
+                autoComplete="email"
               />
             </div>
 
@@ -83,39 +99,23 @@ export default function LoginPage() {
               <Label htmlFor="password">Contraseña</Label>
               <Input
                 id="password"
+                name="password"
                 type="password"
                 placeholder="••••••••"
                 required
                 disabled={isLoading}
+                autoComplete="current-password"
               />
             </div>
 
-            <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-2">
-                <Checkbox id="remember" />
-                <Label htmlFor="remember" className="text-sm font-normal cursor-pointer">
-                  Recordarme
-                </Label>
-              </div>
-              <Link
-                href="/forgot-password"
-                className="text-sm text-primary hover:underline"
-              >
-                ¿Olvidaste tu contraseña?
-              </Link>
-            </div>
+            {error && (
+              <p className="text-sm text-destructive">{error}</p>
+            )}
 
             <Button type="submit" className="w-full" disabled={isLoading}>
-              {isLoading ? "Iniciando sesión..." : "Iniciar Sesión"}
+              {isLoading ? "Iniciando sesión…" : "Iniciar sesión"}
             </Button>
           </form>
-
-          <p className="text-center text-sm text-muted-foreground">
-            ¿No tienes una cuenta?{" "}
-            <Link href="/register" className="text-primary hover:underline">
-              Regístrate
-            </Link>
-          </p>
         </div>
       </div>
     </div>

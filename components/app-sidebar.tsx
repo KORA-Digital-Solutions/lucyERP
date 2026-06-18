@@ -1,7 +1,7 @@
 "use client"
 
 import Link from "next/link"
-import { usePathname } from "next/navigation"
+import { usePathname, useRouter } from "next/navigation"
 import {
   LayoutGrid,
   Calendar,
@@ -15,18 +15,36 @@ import {
 import { cn } from "@/lib/utils"
 import { LuciaMark } from "@/components/lucia-logo"
 
-const navItems = [
-  { icon: LayoutGrid, label: "Dashboard", href: "/dashboard" },
-  { icon: Calendar, label: "Agenda", href: "/agenda" },
-  { icon: Users, label: "Clientes", href: "/clients" },
-  { icon: Briefcase, label: "Servicios", href: "/services" },
-  { icon: UserCog, label: "Trabajadores", href: "/workers" },
-  { icon: DoorOpen, label: "Cabinas", href: "/cabins" },
-  { icon: Settings, label: "Configuración", href: "/settings" },
+const ALL_NAV = [
+  { icon: LayoutGrid, label: "Dashboard",     href: "/dashboard", roles: ["ADMIN", "WORKER"] },
+  { icon: Calendar,    label: "Agenda",        href: "/agenda",    roles: ["ADMIN", "WORKER"] },
+  { icon: Users,       label: "Clientes",      href: "/clients",   roles: ["ADMIN", "WORKER"] },
+  { icon: Briefcase,   label: "Servicios",     href: "/services",  roles: ["ADMIN"] },
+  { icon: UserCog,     label: "Usuarios",      href: "/workers",   roles: ["ADMIN"] },
+  { icon: DoorOpen,    label: "Cabinas",       href: "/cabins",    roles: ["ADMIN"] },
+  { icon: Settings,    label: "Configuración", href: "/settings",  roles: ["ADMIN"] },
 ]
 
-export function AppSidebar() {
+interface Props {
+  name: string
+  lastName: string | null
+  role: string
+}
+
+export function AppSidebar({ name, lastName, role }: Props) {
+  const router = useRouter()
   const pathname = usePathname()
+
+  const navItems = ALL_NAV.filter((item) => item.roles.includes(role))
+  const fullName = lastName ? `${name} ${lastName}` : name
+  const initials = [name[0], lastName?.[0]].filter(Boolean).join("").toUpperCase()
+  const roleLabel = role === "ADMIN" ? "Administrador" : "Trabajador"
+
+  async function handleLogout() {
+    await fetch("/api/auth/logout", { method: "POST" })
+    router.push("/login")
+    router.refresh()
+  }
 
   return (
     <aside className="fixed left-0 top-0 z-40 flex h-screen w-64 flex-col bg-sidebar text-sidebar-foreground">
@@ -65,15 +83,16 @@ export function AppSidebar() {
 
       <div className="border-t border-sidebar-border p-4">
         <div className="flex items-center gap-3">
-          <div className="flex h-9 w-9 items-center justify-center rounded-full bg-sidebar-accent text-sm font-medium">
-            MG
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-sidebar-accent text-sm font-medium">
+            {initials}
           </div>
           <div className="flex-1 min-w-0">
-            <p className="truncate text-sm font-medium">María García</p>
-            <p className="truncate text-xs text-sidebar-muted">Administrador</p>
+            <p className="truncate text-sm font-medium">{fullName}</p>
+            <p className="truncate text-xs text-sidebar-muted">{roleLabel}</p>
           </div>
           <button
             type="button"
+            onClick={handleLogout}
             className="rounded-lg p-2 text-sidebar-muted hover:bg-sidebar-accent hover:text-sidebar-foreground transition-colors"
             aria-label="Cerrar sesión"
           >

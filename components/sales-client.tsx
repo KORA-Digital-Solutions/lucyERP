@@ -3,7 +3,7 @@
 import { useState, useMemo, useRef, useEffect } from "react"
 import {
   ArrowLeft, Plus, Search, CreditCard, Banknote, AlertCircle,
-  Trash2, Gift, ShoppingCart, X, Clock, Wallet, Scissors, Package,
+  Trash2, Gift, ShoppingCart, X, Clock, Wallet, Scissors, Package, Eye, CalendarDays,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -35,6 +35,8 @@ interface Props {
   services: Service[]
   products: Product[]
   workers: Worker[]
+  currentUserId: string | null
+  cashOpen: boolean
 }
 
 type LineType  = "SERVICE" | "PRODUCT" | "GIFT_CARD"
@@ -85,25 +87,54 @@ const PAYMENT_LABELS: Record<string, string> = { CARD: "Tarjeta", CASH: "Efectiv
    Root — lista de ventas
 ═══════════════════════════════════════════════════════════════════════════ */
 
-export function SalesClient({ sales, customers, services, products, workers }: Props) {
+function todayStr() {
+  return new Date().toISOString().slice(0, 10)
+}
+
+export function SalesClient({ sales, customers, services, products, workers, currentUserId, cashOpen }: Props) {
   const [mode, setMode] = useState<"list" | "pos">("list")
+  const [showNoCashDialog, setShowNoCashDialog] = useState(false)
   const [detailSale, setDetailSale] = useState<Sale | null>(null)
   const [payingDebt, setPayingDebt] = useState<Sale | null>(null)
   const [payDebtMethod, setPayDebtMethod] = useState<"CARD" | "CASH">("CASH")
   const [debtLoading, setDebtLoading] = useState(false)
-  const [search, setSearch] = useState("")
+  const [clientSearch, setClientSearch] = useState("")
+  const [workerFilter, setWorkerFilter] = useState("ALL")
+  const [dateFrom, setDateFrom] = useState(todayStr())
+  const [dateTo, setDateTo] = useState(todayStr())
+
+  // Unique workers derived from sales for filter dropdown
+  const saleWorkers = useMemo(() => {
+    const map = new Map<string, string>()
+    sales.forEach((s) => {
+      const key = `${s.user.name} ${s.user.lastName ?? ""}`.trim()
+      map.set(key, key)
+    })
+    return Array.from(map.keys()).sort()
+  }, [sales])
 
   const filtered = useMemo(() => {
-    const q = normalize(search)
+    const q = normalize(clientSearch)
+    const from = dateFrom ? new Date(dateFrom + "T00:00:00") : null
+    const to = dateTo ? new Date(dateTo + "T23:59:59") : null
     return sales.filter((s) => {
-      if (!q) return true
-      const name = s.customer ? normalize(`${s.customer.firstName} ${s.customer.lastName ?? ""}`) : ""
-      return name.includes(q)
+      if (q) {
+        const name = s.customer ? normalize(`${s.customer.firstName} ${s.customer.lastName ?? ""}`) : ""
+        if (!name.includes(q)) return false
+      }
+      if (workerFilter !== "ALL") {
+        const wName = `${s.user.name} ${s.user.lastName ?? ""}`.trim()
+        if (wName !== workerFilter) return false
+      }
+      const createdAt = new Date(s.createdAt)
+      if (from && createdAt < from) return false
+      if (to && createdAt > to) return false
+      return true
     })
-  }, [sales, search])
+  }, [sales, clientSearch, workerFilter, dateFrom, dateTo])
 
   if (mode === "pos") {
-    return <POSView customers={customers} services={services} products={products} workers={workers} onBack={() => setMode("list")} />
+    return <POSView customers={customers} services={services} products={products} workers={workers} currentUserId={currentUserId} onBack={() => setMode("list")} />
   }
 
   return (
@@ -113,14 +144,49 @@ export function SalesClient({ sales, customers, services, products, workers }: P
           <h1 className="text-2xl font-semibold tracking-tight">Ventas</h1>
           <p className="text-muted-foreground">{sales.length} registros</p>
         </div>
-        <Button size="lg" onClick={() => setMode("pos")}>
+        <Button size="lg" onClick={() => cashOpen ? setMode("pos") : setShowNoCashDialog(true)}>
           <Plus className="mr-2 h-4 w-4" /> Nueva venta
         </Button>
       </div>
 
-      <div className="relative max-w-sm">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-        <Input className="pl-9" placeholder="Buscar por cliente…" value={search} onChange={(e) => setSearch(e.target.value)} />
+      {/* Filtros */}
+      <div className="flex flex-wrap gap-3 items-end">
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input className="pl-9 w-52" placeholder="Buscar cliente…" value={clientSearch} onChange={(e) => setClientSearch(e.target.value)} />
+        </div>
+        <div className="flex items-center gap-2">
+          <CalendarDays className="h-4 w-4 text-muted-foreground shrink-0" />
+          <input
+            type="date"
+            value={dateFrom}
+            onChange={(e) => setDateFrom(e.target.value)}
+            className="h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground"
+          />
+          <span className="text-muted-foreground text-sm">—</span>
+          <input
+            type="date"
+            value={dateTo}
+            onChange={(e) => setDateTo(e.target.value)}
+            className="h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground"
+          />
+        </div>
+        <select
+          value={workerFilter}
+          onChange={(e) => setWorkerFilter(e.target.value)}
+          className="h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground"
+        >
+          <option value="ALL">Todos los trabajadores</option>
+          {saleWorkers.map((w) => <option key={w} value={w}>{w}</option>)}
+        </select>
+        {(clientSearch || workerFilter !== "ALL" || dateFrom !== todayStr() || dateTo !== todayStr()) && (
+          <Button variant="ghost" size="sm" className="text-muted-foreground" onClick={() => {
+            setClientSearch(""); setWorkerFilter("ALL"); setDateFrom(todayStr()); setDateTo(todayStr())
+          }}>
+            Limpiar filtros
+          </Button>
+        )}
+        <span className="text-sm text-muted-foreground ml-auto">{filtered.length} resultado{filtered.length !== 1 ? "s" : ""}</span>
       </div>
 
       <Card>
@@ -134,12 +200,12 @@ export function SalesClient({ sales, customers, services, products, workers }: P
                 <th className="px-4 py-3 text-right font-medium">Total</th>
                 <th className="px-4 py-3 text-left font-medium">Estado</th>
                 <th className="px-4 py-3 text-left font-medium">Trabajador</th>
-                <th className="px-4 py-3" />
+                <th className="px-4 py-3 text-right font-medium">Acciones</th>
               </tr>
             </thead>
             <tbody>
               {filtered.length === 0 && (
-                <tr><td colSpan={7} className="py-12 text-center text-muted-foreground">No hay ventas.</td></tr>
+                <tr><td colSpan={7} className="py-12 text-center text-muted-foreground">No hay ventas para los filtros aplicados.</td></tr>
               )}
               {filtered.map((s) => {
                 const st = STATUS_META[s.status] ?? STATUS_META.PAID
@@ -159,7 +225,9 @@ export function SalesClient({ sales, customers, services, products, workers }: P
                     <td className="px-4 py-3 text-muted-foreground">{workerName}</td>
                     <td className="px-4 py-3">
                       <div className="flex gap-1 justify-end">
-                        <Button variant="ghost" size="sm" onClick={() => setDetailSale(s)}>Ver</Button>
+                        <Button variant="ghost" size="sm" className="gap-1.5" onClick={() => setDetailSale(s)}>
+                          <Eye className="h-3.5 w-3.5" /> Ver detalle
+                        </Button>
                         {(s.status === "DEBT" || s.status === "PARTIAL") && (
                           <Button variant="outline" size="sm" className="text-green-700 border-green-300 hover:bg-green-50"
                             onClick={() => { setPayingDebt(s); setPayDebtMethod("CASH") }}>
@@ -219,6 +287,22 @@ export function SalesClient({ sales, customers, services, products, workers }: P
         </Dialog>
       )}
 
+      {/* No cash register dialog */}
+      {showNoCashDialog && (
+        <Dialog open onOpenChange={() => setShowNoCashDialog(false)}>
+          <DialogContent style={{ maxWidth: "26rem" }}>
+            <DialogHeader><DialogTitle>Caja no abierta</DialogTitle></DialogHeader>
+            <p className="text-sm text-muted-foreground">
+              Para registrar una nueva venta primero debes abrir la caja del día.
+            </p>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setShowNoCashDialog(false)}>Cancelar</Button>
+              <Button onClick={() => { window.location.href = "/cash-register" }}>Abrir caja</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
+
       {/* Pay debt */}
       {payingDebt && (
         <Dialog open onOpenChange={() => setPayingDebt(null)}>
@@ -254,9 +338,9 @@ export function SalesClient({ sales, customers, services, products, workers }: P
    POS — pantalla completa
 ═══════════════════════════════════════════════════════════════════════════ */
 
-function POSView({ customers, services, products, workers, onBack }: {
+function POSView({ customers, services, products, workers, currentUserId, onBack }: {
   customers: Customer[]; services: Service[]; products: Product[]
-  workers: Worker[]; onBack: () => void
+  workers: Worker[]; currentUserId: string | null; onBack: () => void
 }) {
   const [customer, setCustomer] = useState<Customer | null>(null)
   const [giftRecipient, setGiftRecipient] = useState<Customer | null>(null)
@@ -376,6 +460,7 @@ function POSView({ customers, services, products, workers, onBack }: {
             services={services}
             products={products}
             workers={workers}
+            currentUserId={currentUserId}
             customers={customers}
             giftRecipient={giftRecipient}
             onGiftRecipientChange={setGiftRecipient}
@@ -674,8 +759,9 @@ function CustomerSelector({ label, customers, selected, onSelect, onClear, place
 
 type AddLineTab = "SERVICE" | "PRODUCT" | "GIFT_CARD"
 
-function AddLinePanel({ services, products, workers, customers, giftRecipient, onGiftRecipientChange, onAdd }: {
+function AddLinePanel({ services, products, workers, currentUserId, customers, giftRecipient, onGiftRecipientChange, onAdd }: {
   services: Service[]; products: Product[]; workers: Worker[]
+  currentUserId: string | null
   customers: Customer[]
   giftRecipient: Customer | null
   onGiftRecipientChange: (c: Customer | null) => void
@@ -794,9 +880,12 @@ function AddLinePanel({ services, products, workers, customers, giftRecipient, o
                       className="w-full flex items-center justify-between px-4 py-2.5 hover:bg-muted/60 text-left transition-colors text-sm"
                       onClick={() => {
                         if (isService) {
+                          const defaultWorker = currentUserId
+                            ? workers.find((w) => w.id === currentUserId)?.id ?? (workers.length === 1 ? workers[0].id : null)
+                            : (workers.length === 1 ? workers[0].id : null)
                           onAdd({
                             key: 0, type: "SERVICE", itemId: s.id, description: s.name,
-                            workerId: workers.length === 1 ? workers[0].id : null,
+                            workerId: defaultWorker,
                             quantity: 1, unitPriceCents: s.priceCents, discountPercent: 0,
                             durationMinutes: s.pricingType === "PER_MINUTE" ? s.durationMinutes : null,
                           })

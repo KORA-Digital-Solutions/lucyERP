@@ -72,6 +72,9 @@ export function CashRegisterClient({ todayRegister, history, suggestedOpeningCen
   const expectedCash = todayRegister
     ? todayRegister.openingCashCents + todayRegister.totalCashCents
     : 0
+  const todayTotal = todayRegister
+    ? todayRegister.totalCashCents + todayRegister.totalCardCents
+    : 0
 
   return (
     <div className="p-8 space-y-6">
@@ -100,16 +103,16 @@ export function CashRegisterClient({ todayRegister, history, suggestedOpeningCen
       {/* TODAY SUMMARY */}
       {todayRegister ? (
         <div className="grid gap-4 md:grid-cols-4">
-          <Card>
-            <CardHeader className="pb-1"><CardTitle className="text-sm font-medium text-muted-foreground">Apertura efectivo</CardTitle></CardHeader>
-            <CardContent><p className="text-2xl font-semibold">{fmt(todayRegister.openingCashCents)}</p></CardContent>
+          <Card className="border-primary/30 bg-primary/5">
+            <CardHeader className="pb-1"><CardTitle className="text-sm font-medium text-muted-foreground">Total del día</CardTitle></CardHeader>
+            <CardContent><p className="text-2xl font-bold text-primary">{fmt(todayTotal)}</p></CardContent>
           </Card>
           <Card>
-            <CardHeader className="pb-1"><CardTitle className="text-sm font-medium text-muted-foreground">Cobros efectivo</CardTitle></CardHeader>
+            <CardHeader className="pb-1"><CardTitle className="text-sm font-medium text-muted-foreground">Pagos en efectivo</CardTitle></CardHeader>
             <CardContent><p className="text-2xl font-semibold">{fmt(todayRegister.totalCashCents)}</p></CardContent>
           </Card>
           <Card>
-            <CardHeader className="pb-1"><CardTitle className="text-sm font-medium text-muted-foreground">Cobros tarjeta</CardTitle></CardHeader>
+            <CardHeader className="pb-1"><CardTitle className="text-sm font-medium text-muted-foreground">Pagos con tarjeta</CardTitle></CardHeader>
             <CardContent><p className="text-2xl font-semibold">{fmt(todayRegister.totalCardCents)}</p></CardContent>
           </Card>
           <Card>
@@ -131,11 +134,11 @@ export function CashRegisterClient({ todayRegister, history, suggestedOpeningCen
         <Card className={Math.abs(todayRegister.differenceCents) > 0 ? "border-orange-200 bg-orange-50/40" : "border-green-200 bg-green-50/40"}>
           <CardContent className="py-4 text-sm grid grid-cols-3 gap-4">
             <div>
-              <p className="text-muted-foreground">Declarado</p>
+              <p className="text-muted-foreground">Efectivo en caja al cierre</p>
               <p className="font-semibold text-lg">{fmt(todayRegister.closingDeclaredCents!)}</p>
             </div>
             <div>
-              <p className="text-muted-foreground">Diferencia</p>
+              <p className="text-muted-foreground">Diferencia de efectivo al cierre</p>
               <p className={`font-semibold text-lg ${Math.abs(todayRegister.differenceCents) > 0 ? "text-orange-700" : "text-green-700"}`}>
                 {todayRegister.differenceCents > 0 ? "+" : ""}{fmt(todayRegister.differenceCents)}
               </p>
@@ -160,8 +163,8 @@ export function CashRegisterClient({ todayRegister, history, suggestedOpeningCen
                   <th className="px-4 py-3 text-right font-medium">Apertura</th>
                   <th className="px-4 py-3 text-right font-medium">Efectivo</th>
                   <th className="px-4 py-3 text-right font-medium">Tarjeta</th>
-                  <th className="px-4 py-3 text-right font-medium">Declarado</th>
-                  <th className="px-4 py-3 text-right font-medium">Diferencia</th>
+                  <th className="px-4 py-3 text-right font-medium">Efectivo en caja al cierre</th>
+                  <th className="px-4 py-3 text-right font-medium">Diferencia de efectivo al cierre</th>
                   <th className="px-4 py-3 text-left font-medium">Estado</th>
                 </tr>
               </thead>
@@ -270,7 +273,7 @@ export function CashRegisterClient({ todayRegister, history, suggestedOpeningCen
             </div>
             {declaredInput && (
               <div className="text-xs rounded border p-2 bg-background">
-                Diferencia: <span className={Math.abs(Math.round(Number(declaredInput) * 100) - expectedCash) > 0 ? "text-orange-700 font-semibold" : "text-green-700 font-semibold"}>
+                Diferencia de efectivo al cierre: <span className={Math.abs(Math.round(Number(declaredInput) * 100) - expectedCash) > 0 ? "text-orange-700 font-semibold" : "text-green-700 font-semibold"}>
                   {(() => {
                     const diff = Math.round(Number(declaredInput) * 100) - expectedCash
                     return `${diff > 0 ? "+" : ""}${fmt(diff)}`

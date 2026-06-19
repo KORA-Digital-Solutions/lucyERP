@@ -40,6 +40,8 @@ model Clinic {
   appointments Appointment[]
   suppliers    Supplier[]
   products     Product[]
+  sales        Sale[]
+  cashRegisters CashRegister[]
 }
 
 // role: "ADMIN" | "WORKER"
@@ -59,7 +61,10 @@ model User {
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
 
-  appointments Appointment[]
+  appointments         Appointment[]
+  sales                Sale[]
+  balanceMovements     CustomerBalanceMovement[]
+  cashRegistersClosedBy CashRegister[]
 }
 
 model Cabin {
@@ -90,26 +95,33 @@ model Customer {
   notes         String?
   whatsappOptIn Boolean   @default(true)
   active        Boolean   @default(true)
+  balanceCents  Int       @default(0)
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
   appointments     Appointment[]
   whatsappMessages WhatsappMessage[]
+  sales            Sale[]
+  balanceMovements CustomerBalanceMovement[]
 }
 
+// pricingType: "FIXED" | "PER_MINUTE"
 model Service {
-  id              String   @id @default(cuid())
-  clinicId        String
-  clinic          Clinic   @relation(fields: [clinicId], references: [id])
-  name            String
-  description     String?
-  durationMinutes Int
-  priceCents      Int
-  active          Boolean  @default(true)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id                  String   @id @default(cuid())
+  clinicId            String
+  clinic              Clinic   @relation(fields: [clinicId], references: [id])
+  name                String
+  description         String?
+  durationMinutes     Int
+  priceCents          Int
+  pricingType         String   @default("FIXED")
+  pricePerMinuteCents Int?
+  active              Boolean  @default(true)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
 
   appointments Appointment[]
+  saleLines    SaleLine[]
 }
 
 // status: PENDING | CONFIRMED | CANCELLED | DONE | NO_SHOW
@@ -162,22 +174,23 @@ model Supplier {
 
 // type: SALE | INTERNAL | BOTH (legacy, now unused — kept for future)
 model Product {
-  id          String   @id @default(cuid())
+  id          String    @id @default(cuid())
   clinicId    String
-  clinic      Clinic   @relation(fields: [clinicId], references: [id])
+  clinic      Clinic    @relation(fields: [clinicId], references: [id])
   supplierId  String?
   supplier    Supplier? @relation(fields: [supplierId], references: [id])
   name        String
   description String?
-  priceCents  Int      @default(0)
-  costCents   Int      @default(0)
-  stock       Int      @default(0)
-  stockMin    Int      @default(0)
-  active      Boolean  @default(true)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  priceCents  Int       @default(0)
+  costCents   Int       @default(0)
+  stock       Int       @default(0)
+  stockMin    Int       @default(0)
+  active      Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
   movements StockMovement[]
+  saleLines SaleLine[]
 }
 
 // type: ENTRY | CONSUME | SALE
@@ -193,6 +206,97 @@ model StockMovement {
   createdAt DateTime @default(now())
 
   @@index([productId])
+}
+
+// saleType: "SALE" | "GIFT_CARD"
+// status: "PAID" | "DEBT" | "PARTIAL"
+// paymentMethod: "CARD" | "CASH" | "BALANCE" | "DEBT"
+model Sale {
+  id            String   @id @default(cuid())
+  clinicId      String
+  clinic        Clinic   @relation(fields: [clinicId], references: [id])
+  customerId    String?
+  customer      Customer? @relation(fields: [customerId], references: [id])
+  userId        String
+  user          User     @relation(fields: [userId], references: [id])
+  saleType      String   @default("SALE")
+  status        String   @default("PAID")
+  paymentMethod String   @default("CASH")
+  subtotalCents Int      @default(0)
+  discountCents Int      @default(0)
+  totalCents    Int      @default(0)
+  paidCents     Int      @default(0)
+  notes         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  lines            SaleLine[]
+  balanceMovements CustomerBalanceMovement[]
+
+  @@index([clinicId, createdAt])
+  @@index([clinicId, customerId])
+}
+
+// type: "SERVICE" | "PRODUCT"
+model SaleLine {
+  id              String   @id @default(cuid())
+  saleId          String
+  sale            Sale     @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  type            String
+  serviceId       String?
+  service         Service?  @relation(fields: [serviceId], references: [id])
+  productId       String?
+  product         Product?  @relation(fields: [productId], references: [id])
+  description     String
+  quantity        Int      @default(1)
+  unitPriceCents  Int
+  discountPercent Int      @default(0)
+  durationMinutes Int?
+  totalCents      Int
+
+  @@index([saleId])
+}
+
+// type: "GIFT_CARD_IN" | "BALANCE_USED" | "DEBT_CREATED" | "DEBT_PAID"
+model CustomerBalanceMovement {
+  id          String   @id @default(cuid())
+  clinicId    String
+  customerId  String
+  customer    Customer @relation(fields: [customerId], references: [id])
+  userId      String
+  user        User     @relation(fields: [userId], references: [id])
+  type        String
+  amountCents Int
+  saleId      String?
+  sale        Sale?    @relation(fields: [saleId], references: [id])
+  notes       String?
+  createdAt   DateTime @default(now())
+
+  @@index([customerId])
+}
+
+// status: "OPEN" | "CLOSED"
+model CashRegister {
+  id                  String    @id @default(cuid())
+  clinicId            String
+  clinic              Clinic    @relation(fields: [clinicId], references: [id])
+  date                String
+  status              String    @default("OPEN")
+  openingCashCents    Int       @default(0)
+  totalCardCents      Int       @default(0)
+  totalCashCents      Int       @default(0)
+  closingDeclaredCents Int?
+  closingKeptCents    Int?
+  differenceCents     Int?
+  denominationNotes   String?
+  closedByUserId      String?
+  closedBy            User?     @relation(fields: [closedByUserId], references: [id])
+  closedAt            DateTime?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  @@unique([clinicId, date])
+  @@index([clinicId, date])
 }
 
 // direction: OUTBOUND | INBOUND

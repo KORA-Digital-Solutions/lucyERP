@@ -12,6 +12,8 @@ import {
   Settings,
   LogOut,
   Package,
+  ShoppingCart,
+  Wallet,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { LuciaMark } from "@/components/lucia-logo"
@@ -22,8 +24,10 @@ const ALL_NAV = [
   { icon: Users,       label: "Clientes",      href: "/clients",   roles: ["ADMIN", "WORKER"], group: "main" },
   { icon: Briefcase,   label: "Servicios",     href: "/services",  roles: ["ADMIN"],           group: "main" },
   { icon: DoorOpen,    label: "Cabinas",       href: "/cabins",    roles: ["ADMIN"],           group: "main" },
-  { icon: Package,     label: "Stock",         href: "/stock",     roles: ["ADMIN", "WORKER"], group: "main" },
-  { icon: UserCog,     label: "Usuarios",      href: "/workers",   roles: ["ADMIN"],           group: "admin" },
+  { icon: Package,      label: "Stock",         href: "/stock",          roles: ["ADMIN", "WORKER"], group: "main" },
+  { icon: ShoppingCart, label: "Ventas",        href: "/sales",          roles: ["ADMIN", "WORKER"], group: "main" },
+  { icon: Wallet,       label: "Caja",          href: "/cash-register",  roles: ["ADMIN", "WORKER"], group: "main" },
+  { icon: UserCog,      label: "Usuarios",      href: "/workers",        roles: ["ADMIN"],           group: "admin" },
   { icon: Settings,    label: "Configuración", href: "/settings",  roles: ["ADMIN"],           group: "admin" },
 ]
 

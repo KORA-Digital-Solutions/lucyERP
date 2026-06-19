@@ -204,11 +204,17 @@ export async function deleteCustomer(id: string): Promise<ActionResult> {
 export async function saveService(id: string | null, fd: FormData): Promise<ActionResult> {
   try {
     const clinicId = await getActiveClinicId()
+    const pricingType = str(fd, "pricingType") || "FIXED"
+    const pricePerMinute = str(fd, "pricePerMinute")
     const data = {
       name: str(fd, "name"),
       description: optStr(fd, "description"),
       durationMinutes: int(fd, "durationMinutes", 60),
       priceCents: Math.round(Number(str(fd, "price") || "0") * 100),
+      pricingType,
+      pricePerMinuteCents: pricingType === "PER_MINUTE" && pricePerMinute
+        ? Math.round(Number(pricePerMinute) * 100)
+        : null,
       active: bool(fd, "active"),
     }
     if (id) {
@@ -481,6 +487,283 @@ export async function addStockMovement(
   } catch (e) {
     return { ok: false, error: errMsg(e) }
   }
+}
+
+/* --------------------------------- VENTAS -------------------------------- */
+
+export type SaleLineInput = {
+  type: "SERVICE" | "PRODUCT" | "GIFT_CARD"
+  serviceId?: string
+  productId?: string
+  description: string
+  quantity: number
+  unitPriceCents: number
+  discountPercent: number
+  durationMinutes?: number
+  totalCents: number
+}
+
+export async function createSale(
+  customerId: string | null,
+  saleType: "SALE" | "GIFT_CARD",
+  paymentMethod: "CARD" | "CASH" | "DEBT",
+  lines: SaleLineInput[],
+  notes: string | null,
+  giftCardRecipientId?: string | null,
+  balanceAppliedCents: number = 0,
+): Promise<ActionResult> {
+  try {
+    const session = await getSession()
+    if (!session) return { ok: false, error: "No autenticado." }
+    const clinicId = await getActiveClinicId()
+
+    if (lines.length === 0) return { ok: false, error: "La venta debe tener al menos una línea." }
+
+    const subtotalCents = lines.reduce((s, l) => s + l.unitPriceCents * l.quantity, 0)
+    const discountCents = lines.reduce((s, l) => s + Math.round(l.unitPriceCents * l.quantity * l.discountPercent / 100), 0)
+    const totalCents = lines.reduce((s, l) => s + l.totalCents, 0)
+
+    const balanceUsed = customerId ? Math.min(Math.max(0, balanceAppliedCents), totalCents) : 0
+    const remainingCents = totalCents - balanceUsed
+
+    let status: "PAID" | "DEBT" | "PARTIAL" = "PAID"
+    let paidCents = totalCents
+
+    if (saleType === "GIFT_CARD") {
+      status = "PAID"
+      paidCents = totalCents
+    } else if (paymentMethod === "DEBT") {
+      paidCents = balanceUsed
+      if (paidCents >= totalCents) status = "PAID"
+      else if (paidCents > 0) status = "PARTIAL"
+      else status = "DEBT"
+    } else {
+      // CASH or CARD: remainder is fully paid now
+      paidCents = totalCents
+      status = "PAID"
+    }
+
+    const sale = await prisma.$transaction(async (tx) => {
+      const s = await tx.sale.create({
+        data: {
+          clinicId,
+          customerId: customerId || null,
+          userId: session.userId,
+          saleType,
+          status,
+          paymentMethod,
+          subtotalCents,
+          discountCents,
+          totalCents,
+          paidCents,
+          notes,
+          lines: {
+            create: lines.map((l) => ({
+              type: l.type,
+              serviceId: l.serviceId ?? null,
+              productId: l.productId ?? null,
+              description: l.description,
+              quantity: l.quantity,
+              unitPriceCents: l.unitPriceCents,
+              discountPercent: l.discountPercent,
+              durationMinutes: l.durationMinutes ?? null,
+              totalCents: l.totalCents,
+            })),
+          },
+        },
+      })
+
+      // Descontar stock de productos vendidos
+      const productLines = lines.filter((l) => l.type === "PRODUCT" && l.productId)
+      for (const pl of productLines) {
+        await tx.stockMovement.create({
+          data: { productId: pl.productId!, userId: session.userId, type: "SALE", quantity: pl.quantity, saleId: s.id, notes: null },
+        })
+        await tx.product.update({
+          where: { id: pl.productId! },
+          data: { stock: { decrement: pl.quantity } },
+        })
+      }
+
+      // Tarjetas regalo: abono de saldo al destinatario
+      const giftCardLines = lines.filter((l) => l.type === "GIFT_CARD")
+      const recipientId = giftCardRecipientId ?? null
+      for (const gc of giftCardLines) {
+        if (recipientId) {
+          await tx.customerBalanceMovement.create({
+            data: { clinicId, customerId: recipientId, userId: session.userId, type: "GIFT_CARD_IN", amountCents: gc.totalCents, saleId: s.id, notes: gc.description },
+          })
+          await tx.customer.update({ where: { id: recipientId }, data: { balanceCents: { increment: gc.totalCents } } })
+        }
+      }
+
+      // Movimientos de saldo/deuda del cliente comprador
+      if (customerId && saleType !== "GIFT_CARD") {
+        if (balanceUsed > 0) {
+          await tx.customerBalanceMovement.create({
+            data: { clinicId, customerId, userId: session.userId, type: "BALANCE_USED", amountCents: -balanceUsed, saleId: s.id, notes: null },
+          })
+          await tx.customer.update({ where: { id: customerId }, data: { balanceCents: { decrement: balanceUsed } } })
+        }
+        if (paymentMethod === "DEBT" && remainingCents > 0) {
+          await tx.customerBalanceMovement.create({
+            data: { clinicId, customerId, userId: session.userId, type: "DEBT_CREATED", amountCents: -remainingCents, saleId: s.id, notes: null },
+          })
+        }
+      }
+
+      // Actualizar caja del día (solo el importe cobrado en efectivo/tarjeta, no el saldo)
+      const today = new Date().toISOString().slice(0, 10)
+      const existingCash = await tx.cashRegister.findUnique({ where: { clinicId_date: { clinicId, date: today } } })
+      if (existingCash && existingCash.status === "OPEN" && saleType !== "GIFT_CARD") {
+        const cardDelta = paymentMethod === "CARD" ? remainingCents : 0
+        const cashDelta = paymentMethod === "CASH" ? remainingCents : 0
+        await tx.cashRegister.update({
+          where: { id: existingCash.id },
+          data: { totalCardCents: { increment: cardDelta }, totalCashCents: { increment: cashDelta } },
+        })
+      }
+
+      return s
+    })
+
+    revalidatePath("/sales")
+    revalidatePath("/dashboard")
+    revalidatePath("/clients")
+    revalidatePath("/stock")
+    revalidatePath("/cash-register")
+    return { ok: true, id: sale.id }
+  } catch (e) {
+    return { ok: false, error: errMsg(e) }
+  }
+}
+
+export async function payDebt(saleId: string, paymentMethod: "CARD" | "CASH"): Promise<ActionResult> {
+  try {
+    const session = await getSession()
+    if (!session) return { ok: false, error: "No autenticado." }
+    const clinicId = await getActiveClinicId()
+
+    await prisma.$transaction(async (tx) => {
+      const sale = await tx.sale.findUniqueOrThrow({ where: { id: saleId } })
+      const pending = sale.totalCents - sale.paidCents
+      if (pending <= 0) return
+
+      await tx.sale.update({ where: { id: saleId }, data: { status: "PAID", paidCents: sale.totalCents, paymentMethod } })
+
+      if (sale.customerId) {
+        await tx.customerBalanceMovement.create({
+          data: { clinicId, customerId: sale.customerId, userId: session.userId, type: "DEBT_PAID", amountCents: pending, saleId, notes: null },
+        })
+      }
+
+      const today = new Date().toISOString().slice(0, 10)
+      const existingCash = await tx.cashRegister.findUnique({ where: { clinicId_date: { clinicId, date: today } } })
+      if (existingCash && existingCash.status === "OPEN") {
+        await tx.cashRegister.update({
+          where: { id: existingCash.id },
+          data: {
+            totalCardCents: { increment: paymentMethod === "CARD" ? pending : 0 },
+            totalCashCents: { increment: paymentMethod === "CASH" ? pending : 0 },
+          },
+        })
+      }
+    })
+
+    revalidatePath("/sales")
+    revalidatePath("/dashboard")
+    revalidatePath("/cash-register")
+    return { ok: true }
+  } catch (e) {
+    return { ok: false, error: errMsg(e) }
+  }
+}
+
+/* ---------------------------- CAJA DIARIA -------------------------------- */
+
+export async function openCashRegister(openingCashCents: number): Promise<ActionResult> {
+  try {
+    const session = await getSession()
+    if (!session) return { ok: false, error: "No autenticado." }
+    const clinicId = await getActiveClinicId()
+    const today = new Date().toISOString().slice(0, 10)
+
+    const existing = await prisma.cashRegister.findUnique({ where: { clinicId_date: { clinicId, date: today } } })
+    if (existing) return { ok: false, error: "Ya hay una caja abierta para hoy." }
+
+    await prisma.cashRegister.create({
+      data: { clinicId, date: today, status: "OPEN", openingCashCents, totalCardCents: 0, totalCashCents: 0 },
+    })
+    revalidatePath("/cash-register")
+    revalidatePath("/dashboard")
+    return { ok: true }
+  } catch (e) {
+    return { ok: false, error: errMsg(e) }
+  }
+}
+
+export async function closeCashRegister(
+  registerId: string,
+  closingDeclaredCents: number,
+  closingKeptCents: number,
+  denominationNotes: string | null,
+): Promise<ActionResult> {
+  try {
+    const session = await getSession()
+    if (!session) return { ok: false, error: "No autenticado." }
+
+    const reg = await prisma.cashRegister.findUniqueOrThrow({ where: { id: registerId } })
+    const expectedCash = reg.openingCashCents + reg.totalCashCents
+    const differenceCents = closingDeclaredCents - expectedCash
+
+    await prisma.cashRegister.update({
+      where: { id: registerId },
+      data: {
+        status: "CLOSED",
+        closingDeclaredCents,
+        closingKeptCents,
+        differenceCents,
+        denominationNotes,
+        closedByUserId: session.userId,
+        closedAt: new Date(),
+      },
+    })
+    revalidatePath("/cash-register")
+    revalidatePath("/dashboard")
+    return { ok: true }
+  } catch (e) {
+    return { ok: false, error: errMsg(e) }
+  }
+}
+
+/* ---------------------------- FICHA CLIENTE ------------------------------ */
+
+export async function getClientProfile(customerId: string) {
+  const [customer, movements, recentSales] = await Promise.all([
+    prisma.customer.findUnique({
+      where: { id: customerId },
+      select: {
+        id: true, firstName: true, lastName: true,
+        phone: true, email: true, notes: true, balanceCents: true,
+      },
+    }),
+    prisma.customerBalanceMovement.findMany({
+      where: { customerId },
+      include: { user: { select: { name: true, lastName: true } } },
+      orderBy: { createdAt: "desc" },
+      take: 30,
+    }),
+    prisma.sale.findMany({
+      where: { customerId },
+      include: {
+        lines: { select: { description: true, totalCents: true, type: true } },
+        user: { select: { name: true } },
+      },
+      orderBy: { createdAt: "desc" },
+      take: 15,
+    }),
+  ])
+  return { customer, movements, recentSales }
 }
 
 function errMsg(e: unknown): string {

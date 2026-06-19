@@ -262,7 +262,9 @@ function POSView({ customers, services, products, workers, onBack }: {
   const [giftRecipient, setGiftRecipient] = useState<Customer | null>(null)
   const [lines, setLines] = useState<DraftLine[]>([])
   const [lineKey, setLineKey] = useState(0)
-  const [paymentMethod, setPaymentMethod] = useState<"CASH" | "CARD" | "DEBT" | "BALANCE">("CASH")
+  const [paymentMethod, setPaymentMethod] = useState<"CASH" | "CARD" | "DEBT">("CASH")
+  const [balanceAppliedCents, setBalanceAppliedCents] = useState(0)
+  const [balanceInput, setBalanceInput] = useState("")
   const [tenderedInput, setTenderedInput] = useState("")
   const [notes, setNotes] = useState("")
   const [loading, setLoading] = useState(false)
@@ -276,26 +278,25 @@ function POSView({ customers, services, products, workers, onBack }: {
   const subtotalCents = lines.reduce((s, l) => s + l.unitPriceCents * l.quantity, 0)
   const discountCents = lines.reduce((s, l) => s + (l.unitPriceCents * l.quantity - lineTotal(l)), 0)
   const totalCents = subtotalCents - discountCents
+  const customerBalance = customer?.balanceCents ?? 0
+  const remainingCents = Math.max(0, totalCents - balanceAppliedCents)
   const tenderedCents = Math.round(Number(tenderedInput) * 100)
-  const changeCents = paymentMethod === "CASH" && tenderedCents > totalCents ? tenderedCents - totalCents : 0
+  const changeCents = paymentMethod === "CASH" && tenderedCents > remainingCents ? tenderedCents - remainingCents : 0
 
   const hasGiftCard = lines.some((l) => l.type === "GIFT_CARD")
-  const customerBalance = customer?.balanceCents ?? 0
 
-  // Auto-switch to BALANCE when customer is selected and has positive balance
+  // Ajustar saldo aplicado cuando cambia el cliente o el total
   useEffect(() => {
-    if (customer && customer.balanceCents > 0) {
-      setPaymentMethod("BALANCE")
-    } else if (!customer || customer.balanceCents <= 0) {
-      setPaymentMethod((prev) => prev === "BALANCE" ? "CASH" : prev)
-    }
-  }, [customer?.id, customer?.balanceCents])
+    const maxApply = Math.min(customerBalance, totalCents)
+    setBalanceAppliedCents(maxApply)
+    setBalanceInput(maxApply > 0 ? (maxApply / 100).toFixed(2) : "")
+  }, [customer?.id, totalCents])
 
   function validate(): string[] {
     const errs: string[] = []
     if (lines.length === 0) errs.push("Añade al menos una línea al ticket.")
-    if (paymentMethod === "CASH" && tenderedCents > 0 && tenderedCents < totalCents)
-      errs.push("El importe entregado es inferior al total.")
+    if (paymentMethod === "CASH" && tenderedCents > 0 && tenderedCents < remainingCents)
+      errs.push("El importe entregado es inferior al resto a cobrar.")
     lines.forEach((l) => {
       if (l.type === "SERVICE" && !l.workerId)
         errs.push(`Asigna un profesional a "${l.description}".`)
@@ -330,6 +331,7 @@ function POSView({ customers, services, products, workers, onBack }: {
       saleLines,
       notes || null,
       giftRecipient?.id ?? null,
+      balanceAppliedCents,
     )
     setLoading(false)
     if (res.ok) onBack()
@@ -440,73 +442,115 @@ function POSView({ customers, services, products, workers, onBack }: {
               <span>Total</span><span className="tabular-nums">{fmtEur(totalCents)}</span>
             </div>
             {discountCents > 0 && <p className="text-xs text-green-700">Ahorro: {fmtEur(discountCents)}</p>}
+
+            {/* Saldo del cliente */}
+            {customerBalance > 0 && (
+              <div className="border-t pt-3 mt-1 space-y-2">
+                <div className="flex items-center justify-between text-xs text-muted-foreground">
+                  <span className="flex items-center gap-1.5"><Wallet className="h-3.5 w-3.5" /> Saldo del cliente</span>
+                  <span className="font-medium text-blue-700 tabular-nums">{fmtEur(customerBalance)} disponible</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <label className="text-xs text-muted-foreground shrink-0">Aplicar (€)</label>
+                  <Input
+                    type="number" step="0.01" min="0"
+                    max={(Math.min(customerBalance, totalCents) / 100).toFixed(2)}
+                    placeholder="0,00"
+                    value={balanceInput}
+                    onChange={(e) => {
+                      setBalanceInput(e.target.value)
+                      const v = Math.round(Number(e.target.value) * 100)
+                      const clamped = Math.min(Math.max(0, v), Math.min(customerBalance, totalCents))
+                      setBalanceAppliedCents(clamped)
+                    }}
+                    onBlur={() => {
+                      setBalanceInput(balanceAppliedCents > 0 ? (balanceAppliedCents / 100).toFixed(2) : "")
+                    }}
+                    className="tabular-nums h-8 text-sm"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const max = Math.min(customerBalance, totalCents)
+                      setBalanceAppliedCents(max)
+                      setBalanceInput((max / 100).toFixed(2))
+                    }}
+                    className="text-xs text-blue-700 hover:text-blue-900 shrink-0 font-medium"
+                  >
+                    Todo
+                  </button>
+                </div>
+                {balanceAppliedCents > 0 && (
+                  <div className="flex justify-between text-blue-700 font-medium">
+                    <span>Saldo a descontar</span>
+                    <span className="tabular-nums">−{fmtEur(balanceAppliedCents)}</span>
+                  </div>
+                )}
+                <div className="flex justify-between font-bold border-t pt-2">
+                  <span>A cobrar</span>
+                  <span className="tabular-nums">{fmtEur(remainingCents)}</span>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Pago */}
           <div className="rounded-xl border bg-background p-4 space-y-3 text-sm">
-            <h3 className="font-semibold">Método de pago</h3>
-            <div className={cn("grid gap-2", customerBalance > 0 ? "grid-cols-4" : "grid-cols-3")}>
-              {([
-                { id: "CASH",    Icon: Banknote,     label: "Efectivo" },
-                { id: "CARD",    Icon: CreditCard,   label: "Tarjeta" },
-                ...(customerBalance > 0 ? [{ id: "BALANCE", Icon: Wallet, label: "Saldo" }] : []),
-                { id: "DEBT",    Icon: AlertCircle,  label: "Deuda" },
-              ] as const).map(({ id, Icon, label }) => (
-                <button key={id} type="button" onClick={() => setPaymentMethod(id as typeof paymentMethod)}
-                  className={cn(
-                    "flex flex-col items-center gap-1.5 rounded-lg border-2 py-3 px-1 text-xs font-medium transition-colors",
-                    paymentMethod === id
-                      ? "border-primary bg-primary/5 text-primary"
-                      : "border-border text-muted-foreground hover:border-primary/40 hover:text-foreground"
-                  )}>
-                  <Icon className="h-5 w-5" />{label}
-                </button>
-              ))}
-            </div>
+            <h3 className="font-semibold">
+              {remainingCents === 0 ? "Forma de pago" : `Cobrar ${fmtEur(remainingCents)}`}
+            </h3>
 
-            {paymentMethod === "CASH" && (
-              <div className="space-y-2">
-                <label className="text-xs text-muted-foreground">Importe entregado (€)</label>
-                <Input
-                  type="number" step="0.01" min="0"
-                  placeholder={(totalCents / 100).toFixed(2)}
-                  value={tenderedInput}
-                  onChange={(e) => setTenderedInput(e.target.value)}
-                  className="tabular-nums"
-                />
-                {changeCents > 0 && (
-                  <div className="flex justify-between rounded-lg bg-green-50 border border-green-200 px-3 py-2">
-                    <span className="text-green-700">Cambio</span>
-                    <span className="font-semibold text-green-700 tabular-nums">{fmtEur(changeCents)}</span>
-                  </div>
-                )}
+            {remainingCents === 0 ? (
+              <div className="rounded-lg bg-green-50 border border-green-200 px-3 py-2.5 text-xs text-green-700 text-center font-medium">
+                Cubierto completamente con saldo del cliente
               </div>
-            )}
-
-            {paymentMethod === "BALANCE" && customerBalance > 0 && (
-              <div className="space-y-1.5 rounded-lg bg-blue-50 border border-blue-200 px-3 py-2.5 text-xs">
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Saldo disponible</span>
-                  <span className="font-semibold text-blue-700 tabular-nums">{fmtEur(customerBalance)}</span>
+            ) : (
+              <>
+                <div className="grid grid-cols-3 gap-2">
+                  {([
+                    { id: "CASH", Icon: Banknote,    label: "Efectivo" },
+                    { id: "CARD", Icon: CreditCard,  label: "Tarjeta" },
+                    { id: "DEBT", Icon: AlertCircle, label: "Deuda" },
+                  ] as const).map(({ id, Icon, label }) => (
+                    <button key={id} type="button" onClick={() => setPaymentMethod(id)}
+                      className={cn(
+                        "flex flex-col items-center gap-1.5 rounded-lg border-2 py-3 px-1 text-xs font-medium transition-colors",
+                        paymentMethod === id
+                          ? "border-primary bg-primary/5 text-primary"
+                          : "border-border text-muted-foreground hover:border-primary/40 hover:text-foreground"
+                      )}>
+                      <Icon className="h-5 w-5" />{label}
+                    </button>
+                  ))}
                 </div>
-                {customerBalance >= totalCents ? (
-                  <div className="flex justify-between text-green-700">
-                    <span>Saldo suficiente — queda</span>
-                    <span className="font-semibold tabular-nums">{fmtEur(customerBalance - totalCents)}</span>
-                  </div>
-                ) : (
-                  <div className="flex justify-between text-orange-700">
-                    <span>Saldo insuficiente — resta</span>
-                    <span className="font-semibold tabular-nums">{fmtEur(totalCents - customerBalance)}</span>
+
+                {paymentMethod === "CASH" && (
+                  <div className="space-y-2">
+                    <label className="text-xs text-muted-foreground">Importe entregado (€)</label>
+                    <Input
+                      type="number" step="0.01" min="0"
+                      placeholder={(remainingCents / 100).toFixed(2)}
+                      value={tenderedInput}
+                      onChange={(e) => setTenderedInput(e.target.value)}
+                      className="tabular-nums"
+                    />
+                    {changeCents > 0 && (
+                      <div className="flex justify-between rounded-lg bg-green-50 border border-green-200 px-3 py-2">
+                        <span className="text-green-700">Cambio</span>
+                        <span className="font-semibold text-green-700 tabular-nums">{fmtEur(changeCents)}</span>
+                      </div>
+                    )}
                   </div>
                 )}
-              </div>
-            )}
 
-            {paymentMethod === "DEBT" && (
-              <p className="text-xs text-muted-foreground">
-                El importe quedará como deuda del cliente y podrás cobrarlo desde el listado.
-              </p>
+                {paymentMethod === "DEBT" && (
+                  <p className="text-xs text-muted-foreground">
+                    {balanceAppliedCents > 0
+                      ? `Se descontará ${fmtEur(balanceAppliedCents)} del saldo y ${fmtEur(remainingCents)} quedarán como deuda.`
+                      : "El importe quedará como deuda del cliente y podrás cobrarlo desde el listado."}
+                  </p>
+                )}
+              </>
             )}
           </div>
 
@@ -525,7 +569,7 @@ function POSView({ customers, services, products, workers, onBack }: {
           <div className="space-y-2 mt-auto pt-2">
             <Button className="w-full h-12 text-base font-semibold" onClick={handleSubmit}
               disabled={loading || lines.length === 0}>
-              {loading ? "Registrando…" : `Registrar · ${fmtEur(totalCents)}`}
+              {loading ? "Registrando…" : remainingCents === 0 ? `Registrar · ${fmtEur(totalCents)}` : `Cobrar · ${fmtEur(remainingCents)}`}
             </Button>
             <Button variant="outline" className="w-full" onClick={handleBack}>Cancelar</Button>
           </div>

@@ -506,10 +506,11 @@ export type SaleLineInput = {
 export async function createSale(
   customerId: string | null,
   saleType: "SALE" | "GIFT_CARD",
-  paymentMethod: "CARD" | "CASH" | "BALANCE" | "DEBT",
+  paymentMethod: "CARD" | "CASH" | "DEBT",
   lines: SaleLineInput[],
   notes: string | null,
   giftCardRecipientId?: string | null,
+  balanceAppliedCents: number = 0,
 ): Promise<ActionResult> {
   try {
     const session = await getSession()
@@ -522,6 +523,9 @@ export async function createSale(
     const discountCents = lines.reduce((s, l) => s + Math.round(l.unitPriceCents * l.quantity * l.discountPercent / 100), 0)
     const totalCents = lines.reduce((s, l) => s + l.totalCents, 0)
 
+    const balanceUsed = customerId ? Math.min(Math.max(0, balanceAppliedCents), totalCents) : 0
+    const remainingCents = totalCents - balanceUsed
+
     let status: "PAID" | "DEBT" | "PARTIAL" = "PAID"
     let paidCents = totalCents
 
@@ -529,18 +533,14 @@ export async function createSale(
       status = "PAID"
       paidCents = totalCents
     } else if (paymentMethod === "DEBT") {
-      status = "DEBT"
-      paidCents = 0
-    } else if (paymentMethod === "BALANCE" && customerId) {
-      const customer = await prisma.customer.findUnique({ where: { id: customerId } })
-      const available = customer?.balanceCents ?? 0
-      if (available >= totalCents) {
-        paidCents = totalCents
-        status = "PAID"
-      } else {
-        paidCents = available
-        status = available > 0 ? "PARTIAL" : "DEBT"
-      }
+      paidCents = balanceUsed
+      if (paidCents >= totalCents) status = "PAID"
+      else if (paidCents > 0) status = "PARTIAL"
+      else status = "DEBT"
+    } else {
+      // CASH or CARD: remainder is fully paid now
+      paidCents = totalCents
+      status = "PAID"
     }
 
     const sale = await prisma.$transaction(async (tx) => {
@@ -599,32 +599,25 @@ export async function createSale(
 
       // Movimientos de saldo/deuda del cliente comprador
       if (customerId && saleType !== "GIFT_CARD") {
-        if (paymentMethod === "BALANCE") {
-          const used = Math.min(paidCents, totalCents)
+        if (balanceUsed > 0) {
           await tx.customerBalanceMovement.create({
-            data: { clinicId, customerId, userId: session.userId, type: "BALANCE_USED", amountCents: -used, saleId: s.id, notes: null },
+            data: { clinicId, customerId, userId: session.userId, type: "BALANCE_USED", amountCents: -balanceUsed, saleId: s.id, notes: null },
           })
-          await tx.customer.update({ where: { id: customerId }, data: { balanceCents: { decrement: used } } })
-          if (status === "DEBT" || status === "PARTIAL") {
-            const debtCents = totalCents - used
-            await tx.customerBalanceMovement.create({
-              data: { clinicId, customerId, userId: session.userId, type: "DEBT_CREATED", amountCents: -debtCents, saleId: s.id, notes: null },
-            })
-          }
-        } else if (paymentMethod === "DEBT") {
+          await tx.customer.update({ where: { id: customerId }, data: { balanceCents: { decrement: balanceUsed } } })
+        }
+        if (paymentMethod === "DEBT" && remainingCents > 0) {
           await tx.customerBalanceMovement.create({
-            data: { clinicId, customerId, userId: session.userId, type: "DEBT_CREATED", amountCents: -totalCents, saleId: s.id, notes: null },
+            data: { clinicId, customerId, userId: session.userId, type: "DEBT_CREATED", amountCents: -remainingCents, saleId: s.id, notes: null },
           })
         }
       }
 
-
-      // Actualizar caja del día
+      // Actualizar caja del día (solo el importe cobrado en efectivo/tarjeta, no el saldo)
       const today = new Date().toISOString().slice(0, 10)
       const existingCash = await tx.cashRegister.findUnique({ where: { clinicId_date: { clinicId, date: today } } })
       if (existingCash && existingCash.status === "OPEN" && saleType !== "GIFT_CARD") {
-        const cardDelta = paymentMethod === "CARD" ? totalCents : 0
-        const cashDelta = paymentMethod === "CASH" ? totalCents : 0
+        const cardDelta = paymentMethod === "CARD" ? remainingCents : 0
+        const cashDelta = paymentMethod === "CASH" ? remainingCents : 0
         await tx.cashRegister.update({
           where: { id: existingCash.id },
           data: { totalCardCents: { increment: cardDelta }, totalCashCents: { increment: cashDelta } },

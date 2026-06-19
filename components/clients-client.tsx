@@ -245,7 +245,9 @@ export function ClientsClient({ rows, inactivityWarningDays }: { rows: ClientRow
   const filtered = useMemo(() => {
     const q = normalizeSearch(search)
     return rows.filter((r) => {
-      const matchesSearch = !q || normalizeSearch(`${r.firstName} ${r.lastName ?? ""} ${r.phone}`).includes(q)
+      const words = normalizeSearch(`${r.lastName ?? ""} ${r.firstName} ${r.phone}`).split(/\s+/).filter(Boolean)
+      const tokens = q.split(/\s+/).filter(Boolean)
+      const matchesSearch = !q || tokens.every((t) => words.some((w) => w.startsWith(t)))
       const matchesStatus =
         statusFilter === "all" ||
         (statusFilter === "warning" ? hasInactivityWarning(r, inactivityWarningDays) : getActivityStatus(r) === statusFilter)

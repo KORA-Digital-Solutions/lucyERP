@@ -6,7 +6,7 @@ import { toast } from "sonner"
 import {
   Plus, Search, Pencil, Trash2, Check, X, UserCheck, UserX,
   AlertTriangle, FileText, Wallet, ArrowUpCircle, ArrowDownCircle,
-  ShoppingCart, Gift,
+  ShoppingCart, Gift, ArrowLeft,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
@@ -69,11 +69,11 @@ const MOV_META: Record<string, { label: string; sign: string; cls: string }> = {
   DEBT_PAID:     { label: "Deuda pagada",      sign: "+", cls: "text-green-700" },
 }
 
-/* ─── Profile dialog ─────────────────────────────────────────────────────── */
+/* ─── Profile fullscreen view ────────────────────────────────────────────── */
 
 type ProfileData = Awaited<ReturnType<typeof getClientProfile>>
 
-function ClientProfileDialog({ row, onClose }: { row: ClientRow; onClose: () => void }) {
+function ClientProfileView({ row, onBack, onEdit }: { row: ClientRow; onBack: () => void; onEdit: () => void }) {
   const [data, setData] = useState<ProfileData | null>(null)
   const [loading, setLoading] = useState(true)
 
@@ -84,43 +84,58 @@ function ClientProfileDialog({ row, onClose }: { row: ClientRow; onClose: () => 
   const customer = data?.customer
   const movements = data?.movements ?? []
   const sales = data?.recentSales ?? []
-
   const balance = customer?.balanceCents ?? 0
+  const clientName = row.lastName ? `${row.firstName} ${row.lastName}` : row.firstName
 
   return (
-    <Dialog open onOpenChange={onClose}>
-      <DialogContent style={{ maxWidth: "52rem" }}>
-        <DialogHeader>
-          <DialogTitle>
-            Ficha de {row.lastName ? `${row.lastName}, ${row.firstName}` : row.firstName}
-          </DialogTitle>
-        </DialogHeader>
+    <div className="flex flex-col h-screen overflow-hidden bg-background">
+      {/* Topbar */}
+      <div className="flex items-center gap-4 px-6 py-3 border-b bg-background shrink-0">
+        <Button variant="ghost" size="sm" onClick={onBack} className="gap-1.5">
+          <ArrowLeft className="h-4 w-4" /> Volver
+        </Button>
+        <span className="font-semibold flex-1">{clientName}</span>
+      </div>
 
-        {loading ? (
-          <div className="py-12 text-center text-muted-foreground text-sm">Cargando…</div>
-        ) : (
-          <div className="grid grid-cols-2 gap-6 text-sm max-h-[70vh] overflow-y-auto">
-            {/* Left: info + balance */}
+      {loading ? (
+        <div className="flex-1 flex items-center justify-center text-muted-foreground text-sm">Cargando…</div>
+      ) : (
+        <div className="flex-1 overflow-y-auto px-8 py-6">
+          <div className="max-w-5xl mx-auto grid grid-cols-3 gap-6 text-sm">
+
+            {/* Col 1: datos de contacto + saldo */}
             <div className="space-y-4">
-              {/* Contact */}
               <div className="rounded-xl border p-4 space-y-2">
-                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">Datos de contacto</p>
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-3">Datos de contacto</p>
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Teléfono</span>
                   <span className="font-medium">{row.phone}</span>
                 </div>
+                {row.phone2 && (
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Teléfono 2</span>
+                    <span className="font-medium">{row.phone2}</span>
+                  </div>
+                )}
                 {row.email && (
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">Email</span>
                     <span className="font-medium">{row.email}</span>
                   </div>
                 )}
+                {row.birthDate && (
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Nacimiento</span>
+                    <span className="font-medium">
+                      {new Date(row.birthDate).toLocaleDateString("es-ES", { day: "2-digit", month: "short", year: "numeric" })}
+                    </span>
+                  </div>
+                )}
                 {row.notes && (
-                  <div className="border-t pt-2 text-muted-foreground">{row.notes}</div>
+                  <div className="border-t pt-2 text-muted-foreground italic">{row.notes}</div>
                 )}
               </div>
 
-              {/* Balance */}
               <div className={cn(
                 "rounded-xl border p-4",
                 balance > 0 ? "border-green-200 bg-green-50/60" :
@@ -141,38 +156,38 @@ function ClientProfileDialog({ row, onClose }: { row: ClientRow; onClose: () => 
                    "Sin saldo ni deuda"}
                 </p>
               </div>
-
-              {/* Movements */}
-              <div>
-                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">Movimientos de saldo</p>
-                {movements.length === 0 ? (
-                  <p className="text-xs text-muted-foreground">Sin movimientos.</p>
-                ) : (
-                  <div className="space-y-1">
-                    {movements.map((m) => {
-                      const meta = MOV_META[m.type] ?? { label: m.type, sign: "", cls: "" }
-                      const date = new Date(m.createdAt).toLocaleDateString("es-ES", { day: "2-digit", month: "short" })
-                      return (
-                        <div key={m.id} className="flex items-center justify-between rounded-lg border px-3 py-2 text-xs">
-                          <div className="flex-1 min-w-0">
-                            <span className={cn("font-medium", meta.cls)}>{meta.label}</span>
-                            <span className="text-muted-foreground ml-2">{date}</span>
-                            {m.notes && <span className="text-muted-foreground ml-1">· {m.notes}</span>}
-                          </div>
-                          <span className={cn("font-semibold tabular-nums ml-3 shrink-0", meta.cls)}>
-                            {meta.sign}{fmtEur(Math.abs(m.amountCents))}
-                          </span>
-                        </div>
-                      )
-                    })}
-                  </div>
-                )}
-              </div>
             </div>
 
-            {/* Right: sales */}
-            <div>
-              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">Últimas ventas</p>
+            {/* Col 2: movimientos de saldo */}
+            <div className="space-y-4">
+              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Movimientos de saldo</p>
+              {movements.length === 0 ? (
+                <p className="text-xs text-muted-foreground">Sin movimientos.</p>
+              ) : (
+                <div className="space-y-1.5">
+                  {movements.map((m) => {
+                    const meta = MOV_META[m.type] ?? { label: m.type, sign: "", cls: "" }
+                    const date = new Date(m.createdAt).toLocaleDateString("es-ES", { day: "2-digit", month: "short" })
+                    return (
+                      <div key={m.id} className="flex items-center justify-between rounded-lg border px-3 py-2 text-xs">
+                        <div className="flex-1 min-w-0">
+                          <span className={cn("font-medium", meta.cls)}>{meta.label}</span>
+                          <span className="text-muted-foreground ml-2">{date}</span>
+                          {m.notes && <span className="text-muted-foreground ml-1">· {m.notes}</span>}
+                        </div>
+                        <span className={cn("font-semibold tabular-nums ml-3 shrink-0", meta.cls)}>
+                          {meta.sign}{fmtEur(Math.abs(m.amountCents))}
+                        </span>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Col 3: últimas ventas */}
+            <div className="space-y-4">
+              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Últimas ventas</p>
               {sales.length === 0 ? (
                 <p className="text-xs text-muted-foreground">Sin ventas registradas.</p>
               ) : (
@@ -205,10 +220,11 @@ function ClientProfileDialog({ row, onClose }: { row: ClientRow; onClose: () => 
                 </div>
               )}
             </div>
+
           </div>
-        )}
-      </DialogContent>
-    </Dialog>
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -279,6 +295,16 @@ export function ClientsClient({ rows, inactivityWarningDays }: { rows: ClientRow
     warning:  rows.filter((r) => hasInactivityWarning(r, inactivityWarningDays)).length,
   }), [rows, inactivityWarningDays])
 
+  if (profileRow) {
+    return (
+      <ClientProfileView
+        row={profileRow}
+        onBack={() => setProfileRow(null)}
+        onEdit={() => { openEdit(profileRow); setProfileRow(null) }}
+      />
+    )
+  }
+
   return (
     <div className="flex h-screen flex-col">
       {/* Header */}
@@ -340,7 +366,7 @@ export function ClientsClient({ rows, inactivityWarningDays }: { rows: ClientRow
                     <TableRow
                       key={r.id}
                       className={cn("cursor-pointer", panelOpen && editing?.id === r.id && "bg-accent/60")}
-                      onClick={() => openEdit(r)}
+                      onClick={() => setProfileRow(r)}
                     >
                       <TableCell className="font-medium">
                         <div className="flex items-center gap-1.5">
@@ -390,24 +416,14 @@ export function ClientsClient({ rows, inactivityWarningDays }: { rows: ClientRow
                         </Badge>
                       </TableCell>
                       <TableCell className="text-right">
-                        <div className="flex justify-end gap-1">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            title="Ver ficha"
-                            onClick={(e) => { e.stopPropagation(); setProfileRow(r) }}
-                          >
-                            <FileText className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            title="Editar"
-                            onClick={(e) => { e.stopPropagation(); openEdit(r) }}
-                          >
-                            <Pencil className="h-4 w-4" />
-                          </Button>
-                        </div>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          title="Editar"
+                          onClick={(e) => { e.stopPropagation(); openEdit(r) }}
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </Button>
                       </TableCell>
                     </TableRow>
                   )
@@ -522,9 +538,6 @@ export function ClientsClient({ rows, inactivityWarningDays }: { rows: ClientRow
           </aside>
         )}
       </div>
-
-      {/* Profile dialog */}
-      {profileRow && <ClientProfileDialog row={profileRow} onClose={() => setProfileRow(null)} />}
 
       {/* Delete confirm */}
       <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>

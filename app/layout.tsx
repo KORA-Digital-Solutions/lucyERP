@@ -8,7 +8,7 @@ import './globals.css'
 const _inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: 'Clínica Lucía · Agenda',
+  title: 'Centro de Estética Lucía',
   description: 'POC — Agenda por cabinas y recordatorios automáticos por WhatsApp',
   generator: 'v0.app',
   icons: {

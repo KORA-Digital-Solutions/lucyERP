@@ -740,12 +740,13 @@ export async function closeCashRegister(
 /* ---------------------------- FICHA CLIENTE ------------------------------ */
 
 export async function getClientProfile(customerId: string) {
-  const [customer, movements, recentSales] = await Promise.all([
+  const [customer, movements, recentSales, appointments] = await Promise.all([
     prisma.customer.findUnique({
       where: { id: customerId },
       select: {
-        id: true, firstName: true, lastName: true,
-        phone: true, email: true, notes: true, balanceCents: true,
+        id: true, firstName: true, lastName: true, lastName2: true,
+        phone: true, phone2: true, email: true, birthDate: true,
+        notes: true, balanceCents: true, whatsappOptIn: true,
       },
     }),
     prisma.customerBalanceMovement.findMany({
@@ -763,8 +764,17 @@ export async function getClientProfile(customerId: string) {
       orderBy: { createdAt: "desc" },
       take: 15,
     }),
+    prisma.appointment.findMany({
+      where: { customerId },
+      include: {
+        service: { select: { name: true } },
+        worker: { select: { name: true } },
+      },
+      orderBy: { startAt: "desc" },
+      take: 50,
+    }),
   ])
-  return { customer, movements, recentSales }
+  return { customer, movements, recentSales, appointments }
 }
 
 function errMsg(e: unknown): string {

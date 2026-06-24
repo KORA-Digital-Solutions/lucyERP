@@ -6,7 +6,7 @@ import { toast } from "sonner"
 import {
   Plus, Search, Pencil, Trash2, Check, X, UserCheck, UserX,
   AlertTriangle, FileText, Wallet, ArrowUpCircle, ArrowDownCircle,
-  ShoppingCart, Gift, ArrowLeft,
+  ShoppingCart, Gift, ArrowLeft, TrendingUp,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
@@ -74,38 +74,87 @@ const MOV_META: Record<string, { label: string; sign: string; cls: string }> = {
 
 type ProfileData = Awaited<ReturnType<typeof getClientProfile>>
 
+type ProfileTab = "resumen" | "citas" | "progresion" | "finanzas"
+
+const STATUS_LABEL: Record<string, string> = { DONE: "Realizada", CONFIRMED: "Confirmada", PENDING: "Pendiente", CANCELLED: "Cancelada" }
+const STATUS_CLS: Record<string, string> = { DONE: "text-green-700", CONFIRMED: "text-blue-700", PENDING: "text-orange-600", CANCELLED: "text-muted-foreground" }
+
 function ClientProfileView({ row, onBack, onEdit }: { row: ClientRow; onBack: () => void; onEdit: () => void }) {
   const [data, setData] = useState<ProfileData | null>(null)
   const [loading, setLoading] = useState(true)
+  const [tab, setTab] = useState<ProfileTab>("resumen")
 
   useEffect(() => {
     getClientProfile(row.id).then((d) => { setData(d); setLoading(false) })
   }, [row.id])
 
-  const customer = data?.customer
   const movements = data?.movements ?? []
   const sales = data?.recentSales ?? []
-  const balance = customer?.balanceCents ?? 0
-  const clientName = [row.firstName, row.lastName, row.lastName2].filter(Boolean).join(" ")
+  const appointments = data?.appointments ?? []
+  const balance = data?.customer?.balanceCents ?? row.balanceCents
+  const age = row.birthDate
+    ? Math.floor((Date.now() - new Date(row.birthDate).getTime()) / (365.25 * 24 * 3600 * 1000))
+    : null
+  const fullLastName = [row.lastName, row.lastName2].filter(Boolean).join(" ")
+
+  const TABS: { key: ProfileTab; label: string }[] = [
+    { key: "resumen",    label: "Resumen" },
+    { key: "citas",      label: `Citas${appointments.length ? ` (${appointments.length})` : ""}` },
+    { key: "progresion", label: "Progresión" },
+    { key: "finanzas",   label: "Finanzas" },
+  ]
 
   return (
     <div className="flex flex-col h-screen overflow-hidden bg-background">
-      {/* Topbar */}
-      <div className="flex items-center gap-4 px-6 py-3 border-b bg-background shrink-0">
-        <Button variant="ghost" size="sm" onClick={onBack} className="gap-1.5">
-          <ArrowLeft className="h-4 w-4" /> Volver
-        </Button>
-        <span className="font-semibold flex-1">{clientName}</span>
+      {/* Header */}
+      <div className="border-b bg-background shrink-0">
+        <div className="flex items-start gap-4 px-6 pt-4 pb-3">
+          <Button variant="ghost" size="sm" onClick={onBack} className="gap-1.5 mt-0.5 shrink-0">
+            <ArrowLeft className="h-4 w-4" /> Volver
+          </Button>
+          <div className="flex-1 min-w-0">
+            <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-0.5">Ficha Cliente</p>
+            <h1 className="text-xl font-semibold leading-tight">
+              {fullLastName ? `${fullLastName}, ${row.firstName}` : row.firstName}
+            </h1>
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-1 text-sm text-muted-foreground">
+              <span>{row.phone}</span>
+              {row.email && <span>{row.email}</span>}
+              {age !== null && <span>{age} años</span>}
+              {row.whatsappOptIn
+                ? <Badge variant="secondary" className="gap-1 text-xs py-0"><Check className="h-3 w-3" /> WhatsApp</Badge>
+                : <Badge variant="outline" className="gap-1 text-xs py-0 text-muted-foreground"><X className="h-3 w-3" /> Sin WhatsApp</Badge>
+              }
+            </div>
+          </div>
+        </div>
+        {/* Tabs */}
+        <div className="flex gap-0 px-6">
+          {TABS.map((t) => (
+            <button
+              key={t.key}
+              onClick={() => setTab(t.key)}
+              className={cn(
+                "px-4 py-2 text-sm font-medium border-b-2 transition-colors",
+                tab === t.key
+                  ? "border-primary text-primary"
+                  : "border-transparent text-muted-foreground hover:text-foreground"
+              )}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {loading ? (
         <div className="flex-1 flex items-center justify-center text-muted-foreground text-sm">Cargando…</div>
       ) : (
         <div className="flex-1 overflow-y-auto px-8 py-6">
-          <div className="max-w-5xl mx-auto grid grid-cols-3 gap-6 text-sm">
 
-            {/* Col 1: datos de contacto + saldo */}
-            <div className="space-y-4">
+          {/* ── Resumen ── */}
+          {tab === "resumen" && (
+            <div className="max-w-xl space-y-4 text-sm">
               <div className="rounded-xl border p-4 space-y-2">
                 <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-3">Datos de contacto</p>
                 <div className="flex justify-between">
@@ -128,7 +177,8 @@ function ClientProfileView({ row, onBack, onEdit }: { row: ClientRow; onBack: ()
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">Nacimiento</span>
                     <span className="font-medium">
-                      {new Date(row.birthDate).toLocaleDateString("es-ES", { day: "2-digit", month: "short", year: "numeric" })}
+                      {new Date(row.birthDate).toLocaleDateString("es-ES", { day: "2-digit", month: "long", year: "numeric" })}
+                      {age !== null && <span className="text-muted-foreground ml-1.5">({age} años)</span>}
                     </span>
                   </div>
                 )}
@@ -136,7 +186,6 @@ function ClientProfileView({ row, onBack, onEdit }: { row: ClientRow; onBack: ()
                   <div className="border-t pt-2 text-muted-foreground italic">{row.notes}</div>
                 )}
               </div>
-
               <div className={cn(
                 "rounded-xl border p-4",
                 balance > 0 ? "border-green-200 bg-green-50/60" :
@@ -145,84 +194,116 @@ function ClientProfileView({ row, onBack, onEdit }: { row: ClientRow; onBack: ()
                 <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2 flex items-center gap-1">
                   <Wallet className="h-3.5 w-3.5" /> Saldo
                 </p>
-                <p className={cn(
-                  "text-3xl font-bold tabular-nums",
+                <p className={cn("text-3xl font-bold tabular-nums",
                   balance > 0 ? "text-green-700" : balance < 0 ? "text-red-600" : "text-muted-foreground"
                 )}>
                   {balance >= 0 ? "+" : "−"}{fmtEur(balance)}
                 </p>
                 <p className="text-xs text-muted-foreground mt-1">
-                  {balance > 0 ? "Saldo a favor del cliente" :
-                   balance < 0 ? "Deuda pendiente" :
-                   "Sin saldo ni deuda"}
+                  {balance > 0 ? "Saldo a favor del cliente" : balance < 0 ? "Deuda pendiente" : "Sin saldo ni deuda"}
                 </p>
               </div>
             </div>
+          )}
 
-            {/* Col 2: movimientos de saldo */}
-            <div className="space-y-4">
-              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Movimientos de saldo</p>
-              {movements.length === 0 ? (
-                <p className="text-xs text-muted-foreground">Sin movimientos.</p>
-              ) : (
-                <div className="space-y-1.5">
-                  {movements.map((m) => {
-                    const meta = MOV_META[m.type] ?? { label: m.type, sign: "", cls: "" }
-                    const date = new Date(m.createdAt).toLocaleDateString("es-ES", { day: "2-digit", month: "short" })
-                    return (
-                      <div key={m.id} className="flex items-center justify-between rounded-lg border px-3 py-2 text-xs">
-                        <div className="flex-1 min-w-0">
-                          <span className={cn("font-medium", meta.cls)}>{meta.label}</span>
-                          <span className="text-muted-foreground ml-2">{date}</span>
-                          {m.notes && <span className="text-muted-foreground ml-1">· {m.notes}</span>}
-                        </div>
-                        <span className={cn("font-semibold tabular-nums ml-3 shrink-0", meta.cls)}>
-                          {meta.sign}{fmtEur(Math.abs(m.amountCents))}
-                        </span>
+          {/* ── Citas ── */}
+          {tab === "citas" && (
+            <div className="max-w-2xl space-y-2 text-sm">
+              {appointments.length === 0 ? (
+                <p className="text-muted-foreground">Sin citas registradas.</p>
+              ) : appointments.map((a) => {
+                const date = new Date(a.startAt).toLocaleDateString("es-ES", { weekday: "short", day: "2-digit", month: "short", year: "numeric" })
+                const time = new Date(a.startAt).toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" })
+                return (
+                  <div key={a.id} className="flex items-center justify-between rounded-xl border px-4 py-3">
+                    <div className="flex items-center gap-4">
+                      <div className="text-xs text-muted-foreground min-w-[140px] capitalize">
+                        {date} · {time}
                       </div>
-                    )
-                  })}
-                </div>
-              )}
-            </div>
-
-            {/* Col 3: últimas ventas */}
-            <div className="space-y-4">
-              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Últimas ventas</p>
-              {sales.length === 0 ? (
-                <p className="text-xs text-muted-foreground">Sin ventas registradas.</p>
-              ) : (
-                <div className="space-y-2">
-                  {sales.map((s) => {
-                    const date = new Date(s.createdAt).toLocaleDateString("es-ES", { day: "2-digit", month: "short", year: "numeric" })
-                    const statusCls = s.status === "PAID" ? "text-green-700" : s.status === "DEBT" ? "text-red-600" : "text-orange-600"
-                    const statusLabel = s.status === "PAID" ? "Pagado" : s.status === "DEBT" ? "Debido" : "Parcial"
-                    return (
-                      <div key={s.id} className="rounded-xl border p-3 space-y-1">
-                        <div className="flex justify-between items-center">
-                          <span className="text-muted-foreground text-xs">{date} · {s.user.name}</span>
-                          <span className={cn("text-xs font-medium", statusCls)}>{statusLabel}</span>
-                        </div>
-                        <div className="space-y-0.5">
-                          {s.lines.map((l, i) => (
-                            <div key={i} className="flex justify-between text-xs">
-                              <span className="truncate text-muted-foreground">{l.description}</span>
-                              <span className="tabular-nums ml-2 shrink-0">{fmtEur(l.totalCents)}</span>
-                            </div>
-                          ))}
-                        </div>
-                        <div className="flex justify-between border-t pt-1 font-medium">
-                          <span>Total</span>
-                          <span className="tabular-nums">{fmtEur(s.totalCents)}</span>
-                        </div>
+                      <div>
+                        <p className="font-medium">{a.service.name}</p>
+                        <p className="text-xs text-muted-foreground">{a.worker.name} · {a.durationMinutes} min</p>
                       </div>
-                    )
-                  })}
-                </div>
-              )}
+                    </div>
+                    <span className={cn("text-xs font-medium", STATUS_CLS[a.status] ?? "")}>
+                      {STATUS_LABEL[a.status] ?? a.status}
+                    </span>
+                  </div>
+                )
+              })}
             </div>
+          )}
 
-          </div>
+          {/* ── Progresión ── */}
+          {tab === "progresion" && (
+            <div className="max-w-xl">
+              <div className="rounded-xl border border-dashed p-10 text-center text-muted-foreground">
+                <TrendingUp className="h-8 w-8 mx-auto mb-3 opacity-30" />
+                <p className="font-medium">Historial de progresión</p>
+                <p className="text-sm mt-1 max-w-xs mx-auto">
+                  Próximamente — seguimiento personalizado por tratamiento (acné, corporal, etc.)
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* ── Finanzas ── */}
+          {tab === "finanzas" && (
+            <div className="max-w-4xl grid grid-cols-2 gap-6 text-sm">
+              <div className="space-y-3">
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Movimientos de saldo</p>
+                {movements.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">Sin movimientos.</p>
+                ) : movements.map((m) => {
+                  const meta = MOV_META[m.type] ?? { label: m.type, sign: "", cls: "" }
+                  const date = new Date(m.createdAt).toLocaleDateString("es-ES", { day: "2-digit", month: "short" })
+                  return (
+                    <div key={m.id} className="flex items-center justify-between rounded-lg border px-3 py-2 text-xs">
+                      <div className="flex-1 min-w-0">
+                        <span className={cn("font-medium", meta.cls)}>{meta.label}</span>
+                        <span className="text-muted-foreground ml-2">{date}</span>
+                        {m.notes && <span className="text-muted-foreground ml-1">· {m.notes}</span>}
+                      </div>
+                      <span className={cn("font-semibold tabular-nums ml-3 shrink-0", meta.cls)}>
+                        {meta.sign}{fmtEur(Math.abs(m.amountCents))}
+                      </span>
+                    </div>
+                  )
+                })}
+              </div>
+              <div className="space-y-3">
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Últimas ventas</p>
+                {sales.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">Sin ventas registradas.</p>
+                ) : sales.map((s) => {
+                  const date = new Date(s.createdAt).toLocaleDateString("es-ES", { day: "2-digit", month: "short", year: "numeric" })
+                  const statusCls = s.status === "PAID" ? "text-green-700" : s.status === "DEBT" ? "text-red-600" : "text-orange-600"
+                  const statusLabel = s.status === "PAID" ? "Pagado" : s.status === "DEBT" ? "Debido" : "Parcial"
+                  return (
+                    <div key={s.id} className="rounded-xl border p-3 space-y-1">
+                      <div className="flex justify-between items-center">
+                        <span className="text-muted-foreground text-xs">{date} · {s.user.name}</span>
+                        <span className={cn("text-xs font-medium", statusCls)}>{statusLabel}</span>
+                      </div>
+                      <div className="space-y-0.5">
+                        {s.lines.map((l, i) => (
+                          <div key={i} className="flex justify-between text-xs">
+                            <span className="truncate text-muted-foreground">{l.description}</span>
+                            <span className="tabular-nums ml-2 shrink-0">{fmtEur(l.totalCents)}</span>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="flex justify-between border-t pt-1 font-medium text-xs">
+                        <span>Total</span>
+                        <span className="tabular-nums">{fmtEur(s.totalCents)}</span>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+
         </div>
       )}
     </div>
@@ -351,7 +432,7 @@ export function ClientsClient({ rows, inactivityWarningDays }: { rows: ClientRow
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Nombre</TableHead>
+                  <TableHead>Apellidos, Nombre</TableHead>
                   <TableHead>Teléfono</TableHead>
                   <TableHead>F. nacimiento</TableHead>
                   <TableHead>WhatsApp</TableHead>
@@ -461,44 +542,71 @@ export function ClientsClient({ rows, inactivityWarningDays }: { rows: ClientRow
               <Button variant="ghost" size="icon" onClick={closePanel}><X className="h-4 w-4" /></Button>
             </div>
 
-            <form onSubmit={onSubmit} className="flex-1 space-y-4 overflow-y-auto px-5 py-4">
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-2">
-                  <Label htmlFor="lastName">Primer apellido</Label>
-                  <Input id="lastName" name="lastName" defaultValue={editing?.lastName ?? ""} />
+            <form onSubmit={onSubmit} className="flex-1 overflow-y-auto px-5 py-4 space-y-5">
+
+              {/* Identidad */}
+              <div className="space-y-3">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Datos personales</span>
+                  <div className="flex-1 h-px bg-border" />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-2">
+                    <Label htmlFor="lastName">Primer apellido</Label>
+                    <Input id="lastName" name="lastName" defaultValue={editing?.lastName ?? ""} />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="lastName2">Segundo apellido</Label>
+                    <Input id="lastName2" name="lastName2" defaultValue={editing?.lastName2 ?? ""} />
+                  </div>
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="lastName2">Segundo apellido</Label>
-                  <Input id="lastName2" name="lastName2" defaultValue={editing?.lastName2 ?? ""} />
-                </div>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="firstName">Nombre</Label>
-                <Input id="firstName" name="firstName" defaultValue={editing?.firstName} required />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="birthDate">Fecha de nacimiento</Label>
-                <Input id="birthDate" name="birthDate" type="date" defaultValue={editing?.birthDate ?? ""} />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-2">
-                  <Label htmlFor="phone">Teléfono</Label>
-                  <Input id="phone" name="phone" placeholder="600 111 222" defaultValue={editing?.phone} required />
+                  <Label htmlFor="firstName">Nombre</Label>
+                  <Input id="firstName" name="firstName" defaultValue={editing?.firstName} required />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="phone2">Teléfono adicional <span className="text-muted-foreground font-normal">(opcional)</span></Label>
-                  <Input id="phone2" name="phone2" placeholder="611 222 333" defaultValue={editing?.phone2 ?? ""} />
+                  <Label htmlFor="birthDate">Fecha de nacimiento</Label>
+                  <Input id="birthDate" name="birthDate" type="date" defaultValue={editing?.birthDate ?? ""} />
                 </div>
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="email">Email</Label>
-                <Input id="email" name="email" type="email" defaultValue={editing?.email ?? ""} />
+
+              {/* Contacto */}
+              <div className="space-y-3">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Contacto</span>
+                  <div className="flex-1 h-px bg-border" />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-2">
+                    <Label htmlFor="phone">Teléfono</Label>
+                    <Input id="phone" name="phone" placeholder="600 111 222" defaultValue={editing?.phone} required />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="phone2">Teléfono 2 <span className="text-muted-foreground font-normal">(opcional)</span></Label>
+                    <Input id="phone2" name="phone2" placeholder="611 222 333" defaultValue={editing?.phone2 ?? ""} />
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="email">Email</Label>
+                  <Input id="email" name="email" type="email" defaultValue={editing?.email ?? ""} />
+                </div>
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="notes">Observaciones</Label>
-                <Textarea id="notes" name="notes" rows={2} className="resize-none" defaultValue={editing?.notes ?? ""} />
+
+              {/* Observaciones */}
+              <div className="space-y-3">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Observaciones</span>
+                  <div className="flex-1 h-px bg-border" />
+                </div>
+                <Textarea id="notes" name="notes" rows={3} className="resize-none" defaultValue={editing?.notes ?? ""} placeholder="Alergias, preferencias, notas internas…" />
               </div>
-              <div className="space-y-3 rounded-lg border p-3">
+
+              {/* Configuración */}
+              <div className="space-y-3">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Configuración</span>
+                  <div className="flex-1 h-px bg-border" />
+                </div>
                 <div className="flex items-center justify-between">
                   <div>
                     <Label htmlFor="whatsappOptIn">Recordatorios por WhatsApp</Label>
@@ -506,7 +614,7 @@ export function ClientsClient({ rows, inactivityWarningDays }: { rows: ClientRow
                   </div>
                   <Switch id="whatsappOptIn" name="whatsappOptIn" defaultChecked={editing?.whatsappOptIn ?? true} />
                 </div>
-                <div className="border-t pt-3 flex items-center justify-between">
+                <div className="flex items-center justify-between">
                   <div>
                     <Label htmlFor="active">Cliente activo</Label>
                     <p className="text-xs text-muted-foreground">Desactiva para marcar como inactivo manualmente</p>
@@ -514,14 +622,13 @@ export function ClientsClient({ rows, inactivityWarningDays }: { rows: ClientRow
                   <Switch id="active" name="active" defaultChecked={editing?.active ?? true} />
                 </div>
               </div>
+
               {editing && (
-                <div className="rounded-lg border bg-muted/40 p-3 text-sm space-y-1">
-                  <p className="font-medium text-xs text-muted-foreground uppercase tracking-wide">Última cita registrada</p>
-                  <p>
-                    {editing.lastAppointment
-                      ? <>{editing.lastAppointment}{editing.daysSinceLastAppt !== null && <span className="ml-2 text-xs text-muted-foreground">(hace {editing.daysSinceLastAppt} días)</span>}</>
-                      : <span className="text-muted-foreground">Sin citas registradas</span>}
-                  </p>
+                <div className="rounded-lg bg-muted/40 border px-3 py-2 text-xs text-muted-foreground">
+                  Última cita:{" "}
+                  {editing.lastAppointment
+                    ? <><span className="text-foreground font-medium">{editing.lastAppointment}</span>{editing.daysSinceLastAppt !== null && ` (hace ${editing.daysSinceLastAppt} días)`}</>
+                    : "sin citas registradas"}
                 </div>
               )}
             </form>

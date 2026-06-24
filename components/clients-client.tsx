@@ -31,6 +31,7 @@ export interface ClientRow {
   id: string
   firstName: string
   lastName: string | null
+  lastName2: string | null
   phone: string
   phone2: string | null
   email: string | null
@@ -85,7 +86,7 @@ function ClientProfileView({ row, onBack, onEdit }: { row: ClientRow; onBack: ()
   const movements = data?.movements ?? []
   const sales = data?.recentSales ?? []
   const balance = customer?.balanceCents ?? 0
-  const clientName = row.lastName ? `${row.firstName} ${row.lastName}` : row.firstName
+  const clientName = [row.firstName, row.lastName, row.lastName2].filter(Boolean).join(" ")
 
   return (
     <div className="flex flex-col h-screen overflow-hidden bg-background">
@@ -245,7 +246,7 @@ export function ClientsClient({ rows, inactivityWarningDays }: { rows: ClientRow
   const filtered = useMemo(() => {
     const q = normalizeSearch(search)
     return rows.filter((r) => {
-      const words = normalizeSearch(`${r.lastName ?? ""} ${r.firstName} ${r.phone}`).split(/\s+/).filter(Boolean)
+      const words = normalizeSearch(`${r.lastName ?? ""} ${r.lastName2 ?? ""} ${r.firstName} ${r.phone}`).split(/\s+/).filter(Boolean)
       const tokens = q.split(/\s+/).filter(Boolean)
       const matchesSearch = !q || tokens.every((t) => words.some((w) => w.startsWith(t)))
       const matchesStatus =
@@ -375,7 +376,7 @@ export function ClientsClient({ rows, inactivityWarningDays }: { rows: ClientRow
                           {hasInactivityWarning(r, inactivityWarningDays) && (
                             <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-[#E65100]" />
                           )}
-                          {r.lastName ? `${r.lastName}, ${r.firstName}` : r.firstName}
+                          {r.lastName ? `${r.lastName}${r.lastName2 ? ` ${r.lastName2}` : ""}, ${r.firstName}` : r.firstName}
                         </div>
                       </TableCell>
                       <TableCell className="text-muted-foreground">
@@ -463,13 +464,17 @@ export function ClientsClient({ rows, inactivityWarningDays }: { rows: ClientRow
             <form onSubmit={onSubmit} className="flex-1 space-y-4 overflow-y-auto px-5 py-4">
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-2">
-                  <Label htmlFor="firstName">Nombre</Label>
-                  <Input id="firstName" name="firstName" defaultValue={editing?.firstName} required />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="lastName">Apellidos</Label>
+                  <Label htmlFor="lastName">Primer apellido</Label>
                   <Input id="lastName" name="lastName" defaultValue={editing?.lastName ?? ""} />
                 </div>
+                <div className="space-y-2">
+                  <Label htmlFor="lastName2">Segundo apellido</Label>
+                  <Input id="lastName2" name="lastName2" defaultValue={editing?.lastName2 ?? ""} />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="firstName">Nombre</Label>
+                <Input id="firstName" name="firstName" defaultValue={editing?.firstName} required />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="birthDate">Fecha de nacimiento</Label>

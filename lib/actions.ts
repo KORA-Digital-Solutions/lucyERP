@@ -167,6 +167,7 @@ export async function saveCustomer(id: string | null, fd: FormData): Promise<Act
     const data = {
       firstName: str(fd, "firstName"),
       lastName: optStr(fd, "lastName"),
+      lastName2: optStr(fd, "lastName2"),
       phone: str(fd, "phone"),
       phone2: optStr(fd, "phone2"),
       email: optStr(fd, "email"),

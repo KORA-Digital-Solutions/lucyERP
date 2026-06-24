@@ -32,6 +32,7 @@ export default async function ClientsPage() {
       id: c.id,
       firstName: c.firstName,
       lastName: c.lastName,
+      lastName2: c.lastName2,
       phone: c.phone,
       phone2: c.phone2,
       email: c.email,

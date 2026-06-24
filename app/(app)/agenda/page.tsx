@@ -70,7 +70,7 @@ export default async function AgendaPage({
       customers={customers.map((c) => ({
         id: c.id,
         // Formato "primer apellido segundo apellido, nombre" (sin teléfono).
-        label: c.lastName ? `${c.lastName}, ${c.firstName}` : c.firstName,
+        label: c.lastName ? `${[c.lastName, c.lastName2].filter(Boolean).join(" ")}, ${c.firstName}` : c.firstName,
         whatsappOptIn: c.whatsappOptIn,
       }))}
       appointments={agendaAppointments}

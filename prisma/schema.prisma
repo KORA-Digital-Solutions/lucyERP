@@ -88,6 +88,7 @@ model Customer {
   clinic        Clinic    @relation(fields: [clinicId], references: [id])
   firstName     String
   lastName      String?
+  lastName2     String?
   phone         String
   phone2        String?
   email         String?

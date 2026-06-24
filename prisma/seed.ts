@@ -1,17 +1,20 @@
 import { readFileSync } from "node:fs"
 import { resolve } from "node:path"
 import { PrismaClient } from "@prisma/client"
+import bcrypt from "bcryptjs"
 
-// Carga .env si DATABASE_URL no está ya definido (p. ej. al ejecutar con tsx).
+// Carga .env.local y .env si DATABASE_URL no está ya definido (p. ej. al ejecutar con tsx).
 if (!process.env.DATABASE_URL) {
-  try {
-    for (const line of readFileSync(resolve(process.cwd(), ".env"), "utf8").split("\n")) {
-      const m = line.match(/^\s*([\w.-]+)\s*=\s*(.*)?\s*$/)
-      if (!m) continue
-      let val = (m[2] ?? "").trim().replace(/^["']|["']$/g, "")
-      if (!(m[1] in process.env)) process.env[m[1]] = val
-    }
-  } catch {}
+  for (const file of [".env.local", ".env"]) {
+    try {
+      for (const line of readFileSync(resolve(process.cwd(), file), "utf8").split("\n")) {
+        const m = line.match(/^\s*([\w.-]+)\s*=\s*(.*)?\s*$/)
+        if (!m) continue
+        let val = (m[2] ?? "").trim().replace(/^["']|["']$/g, "")
+        if (!(m[1] in process.env)) process.env[m[1]] = val
+      }
+    } catch {}
+  }
 }
 
 const prisma = new PrismaClient()
@@ -38,7 +41,7 @@ async function main() {
   // Clínica
   const clinic = await prisma.clinic.create({
     data: {
-      name: "Clínica Estética Lucía",
+      name: "Centro de Estética Lucía",
       taxId: "B12345678",
       address: "Calle Mayor 12, 28013 Madrid",
       phone: "+34910000000",
@@ -46,7 +49,7 @@ async function main() {
       timezone: "Europe/Madrid",
       openingTime: "09:00",
       closingTime: "20:00",
-      whatsappEnabled: true,
+      whatsappEnabled: false,
       whatsappTemplateName: "appointment_reminder_es",
       whatsappTemplateLang: "es",
       reminderHoursBefore: 24,
@@ -54,15 +57,18 @@ async function main() {
   })
 
   // Usuarios / trabajadores
-  const [admin, marta, lola, lucia] = await Promise.all([
+  const adminPasswordHash = await bcrypt.hash("admin", 12)
+
+  const [admin, marta, lola] = await Promise.all([
     prisma.user.create({
       data: {
         clinicId: clinic.id,
-        name: "María García",
-        email: "admin@clinicalucia.es",
+        name: "Lucía Martínez",
+        email: "lucia.martinez@centroesteticalucia.com",
         role: "ADMIN",
         phone: "+34600000001",
         color: "#274775",
+        passwordHash: adminPasswordHash,
       },
     }),
     prisma.user.create({
@@ -71,24 +77,14 @@ async function main() {
     prisma.user.create({
       data: { clinicId: clinic.id, name: "Lola", role: "WORKER", color: "#5F73B4" },
     }),
-    prisma.user.create({
-      data: { clinicId: clinic.id, name: "Lucía", role: "WORKER", color: "#AFB9D9" },
-    }),
   ])
 
   // Cabinas
-  const cabins = await Promise.all(
-    [1, 2, 3].map((n) =>
-      prisma.cabin.create({
-        data: {
-          clinicId: clinic.id,
-          name: `Cabina ${n}`,
-          sortOrder: n,
-          active: true,
-        },
-      }),
-    ),
-  )
+  const cabins = await Promise.all([
+    prisma.cabin.create({ data: { clinicId: clinic.id, name: "Cabina 1", sortOrder: 1, active: true, defaultWorkerId: marta.id } }),
+    prisma.cabin.create({ data: { clinicId: clinic.id, name: "Cabina 2", sortOrder: 2, active: true, defaultWorkerId: lola.id } }),
+    prisma.cabin.create({ data: { clinicId: clinic.id, name: "Cabina 3", sortOrder: 3, active: true, defaultWorkerId: admin.id } }),
+  ])
 
   // Servicios
   const [facial, laser, electrica, masaje, manicura] = await Promise.all([
@@ -112,19 +108,19 @@ async function main() {
   // Clientes
   const [maria, pepita, fernando, ana, carlos] = await Promise.all([
     prisma.customer.create({
-      data: { clinicId: clinic.id, firstName: "María José", lastName: "Soriano", phone: "+34600111222", whatsappOptIn: true },
+      data: { clinicId: clinic.id, firstName: "María José", lastName: "Soriano", lastName2: "García", birthDate: new Date("1985-03-14"), phone: "+34600111222", whatsappOptIn: true },
     }),
     prisma.customer.create({
-      data: { clinicId: clinic.id, firstName: "Pepita", lastName: "Pérez", phone: "+34600222333", whatsappOptIn: true },
+      data: { clinicId: clinic.id, firstName: "Pepita", lastName: "Pérez", lastName2: "Molina", birthDate: new Date("1992-07-22"), phone: "+34600222333", whatsappOptIn: true },
     }),
     prisma.customer.create({
-      data: { clinicId: clinic.id, firstName: "Fernando", lastName: "López", phone: "+34600333444", whatsappOptIn: true },
+      data: { clinicId: clinic.id, firstName: "Fernando", lastName: "López", lastName2: "Navarro", birthDate: new Date("1978-11-05"), phone: "+34600333444", whatsappOptIn: true },
     }),
     prisma.customer.create({
-      data: { clinicId: clinic.id, firstName: "Ana", lastName: "Martínez", phone: "+34600444555", email: "ana@example.com", whatsappOptIn: false },
+      data: { clinicId: clinic.id, firstName: "Ana", lastName: "Martínez", lastName2: "Ruiz", birthDate: new Date("1990-01-30"), phone: "+34600444555", email: "ana@example.com", whatsappOptIn: false },
     }),
     prisma.customer.create({
-      data: { clinicId: clinic.id, firstName: "Carlos", lastName: "Ruiz", phone: "+34600555666", whatsappOptIn: true },
+      data: { clinicId: clinic.id, firstName: "Carlos", lastName: "Ruiz", lastName2: "Fernández", birthDate: new Date("1983-09-18"), phone: "+34600555666", whatsappOptIn: true },
     }),
   ])
 
@@ -161,15 +157,15 @@ async function main() {
   await Promise.all([
     appt({ customerId: maria.id, serviceId: laser.id, workerId: marta.id, cabinId: cabins[0].id, startHour: 9, startMinute: 45, duration: 60, status: "CONFIRMED", reminderStatus: "SENT" }),
     appt({ customerId: pepita.id, serviceId: facial.id, workerId: lola.id, cabinId: cabins[1].id, startHour: 11, startMinute: 30, duration: 60, status: "PENDING", reminderStatus: "PENDING" }),
-    appt({ customerId: fernando.id, serviceId: electrica.id, workerId: lucia.id, cabinId: cabins[2].id, startHour: 11, startMinute: 30, duration: 45, status: "CONFIRMED", reminderStatus: "DELIVERED" }),
+    appt({ customerId: fernando.id, serviceId: electrica.id, workerId: lola.id, cabinId: cabins[2].id, startHour: 11, startMinute: 30, duration: 45, status: "CONFIRMED", reminderStatus: "DELIVERED" }),
     appt({ customerId: carlos.id, serviceId: masaje.id, workerId: marta.id, cabinId: cabins[0].id, startHour: 13, startMinute: 0, duration: 90, status: "PENDING", reminderStatus: "PENDING" }),
     appt({ customerId: ana.id, serviceId: manicura.id, workerId: lola.id, cabinId: cabins[1].id, startHour: 16, startMinute: 0, duration: 30, status: "DONE", reminderStatus: "NOT_SCHEDULED" }),
   ])
 
   console.log("✅ Seed completado:")
   console.log(`   Clínica: ${clinic.name}`)
-  console.log(`   ${cabins.length} cabinas · 4 trabajadores · 5 servicios · 5 clientes · 5 citas`)
-  console.log(`   Login demo: ${admin.email}`)
+  console.log(`   ${cabins.length} cabinas · 3 trabajadores · 5 servicios · 5 clientes · 5 citas`)
+  console.log(`   Login demo: ${admin.email} / admin`)
 }
 
 main()

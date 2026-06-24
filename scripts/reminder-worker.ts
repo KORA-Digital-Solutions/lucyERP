@@ -15,23 +15,27 @@ import { resolve } from "node:path"
 import cron from "node-cron"
 import { PrismaClient } from "@prisma/client"
 
-// --- Carga manual de .env (el worker no pasa por Next) ---------------------
+// --- Carga manual de .env.local (el worker no pasa por Next) ---------------
 function loadEnv() {
-  try {
-    const content = readFileSync(resolve(process.cwd(), ".env"), "utf8")
-    for (const line of content.split("\n")) {
-      const m = line.match(/^\s*([\w.-]+)\s*=\s*(.*)?\s*$/)
-      if (!m) continue
-      const key = m[1]
-      let val = (m[2] ?? "").trim()
-      if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
-        val = val.slice(1, -1)
+  for (const file of [".env.local", ".env"]) {
+    try {
+      const content = readFileSync(resolve(process.cwd(), file), "utf8")
+      for (const line of content.split("\n")) {
+        const m = line.match(/^\s*([\w.-]+)\s*=\s*(.*)?\s*$/)
+        if (!m) continue
+        const key = m[1]
+        let val = (m[2] ?? "").trim()
+        if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+          val = val.slice(1, -1)
+        }
+        if (!(key in process.env)) process.env[key] = val
       }
-      if (!(key in process.env)) process.env[key] = val
+      return
+    } catch {
+      // siguiente fichero
     }
-  } catch {
-    console.warn("[worker] No se pudo leer .env, usando variables del entorno.")
   }
+  console.warn("[worker] No se encontró .env.local ni .env, usando variables del entorno.")
 }
 loadEnv()
 

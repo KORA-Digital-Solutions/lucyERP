@@ -13,6 +13,7 @@ export interface SessionPayload {
   name: string
   lastName: string | null
   role: string
+  originalRole?: string
   clinicId: string
   mustChangePassword: boolean
 }

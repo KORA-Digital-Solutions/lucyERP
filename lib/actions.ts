@@ -37,6 +37,13 @@ function int(fd: FormData, key: string, fallback = 0): number {
   return Number.isFinite(n) ? n : fallback
 }
 
+function normalizePhone(phone: string): string {
+  const digits = phone.replace(/\s+/g, "")
+  if (!digits) return ""
+  if (digits.startsWith("+")) return digits
+  return `+34${digits}`
+}
+
 /* ------------------------------- CITAS ---------------------------------- */
 
 export async function createAppointment(fd: FormData): Promise<ActionResult> {
@@ -168,8 +175,8 @@ export async function saveCustomer(id: string | null, fd: FormData): Promise<Act
       firstName: str(fd, "firstName"),
       lastName: optStr(fd, "lastName"),
       lastName2: optStr(fd, "lastName2"),
-      phone: str(fd, "phone"),
-      phone2: optStr(fd, "phone2"),
+      phone: normalizePhone(str(fd, "phone")),
+      phone2: normalizePhone(optStr(fd, "phone2") ?? "") || null,
       email: optStr(fd, "email"),
       birthDate: birthDateRaw ? new Date(birthDateRaw) : null,
       notes: optStr(fd, "notes"),

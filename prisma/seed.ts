@@ -64,7 +64,8 @@ async function main() {
     prisma.user.create({
       data: {
         clinicId: clinic.id,
-        name: "Lucía Martínez",
+        name: "Lucía",
+        lastName: "Martínez",
         email: "lucia.martinez@centroesteticalucia.com",
         role: "ADMIN",
         phone: "+34600000001",
@@ -109,19 +110,19 @@ async function main() {
   // Clientes
   const [maria, pepita, fernando, ana, carlos] = await Promise.all([
     prisma.customer.create({
-      data: { clinicId: clinic.id, firstName: "María José", lastName: "Soriano", lastName2: "García", birthDate: new Date("1985-03-14"), phone: "+34600111222", whatsappOptIn: true },
+      data: { clinicId: clinic.id, firstName: "María José", lastName: "Soriano", lastName2: "García", birthDate: new Date("1985-03-14"), phone: "600111222", whatsappOptIn: true },
     }),
     prisma.customer.create({
-      data: { clinicId: clinic.id, firstName: "Pepita", lastName: "Pérez", lastName2: "Molina", birthDate: new Date("1992-07-22"), phone: "+34600222333", whatsappOptIn: true },
+      data: { clinicId: clinic.id, firstName: "Pepita", lastName: "Pérez", lastName2: "Molina", birthDate: new Date("1992-07-22"), phone: "600222333", whatsappOptIn: true },
     }),
     prisma.customer.create({
-      data: { clinicId: clinic.id, firstName: "Fernando", lastName: "López", lastName2: "Navarro", birthDate: new Date("1978-11-05"), phone: "+34600333444", whatsappOptIn: true },
+      data: { clinicId: clinic.id, firstName: "Fernando", lastName: "López", lastName2: "Navarro", birthDate: new Date("1978-11-05"), phone: "600333444", whatsappOptIn: true },
     }),
     prisma.customer.create({
-      data: { clinicId: clinic.id, firstName: "Ana", lastName: "Martínez", lastName2: "Ruiz", birthDate: new Date("1990-01-30"), phone: "+34600444555", email: "ana@example.com", whatsappOptIn: false },
+      data: { clinicId: clinic.id, firstName: "Ana", lastName: "Martínez", lastName2: "Ruiz", birthDate: new Date("1990-01-30"), phone: "600444555", email: "ana@example.com", whatsappOptIn: false },
     }),
     prisma.customer.create({
-      data: { clinicId: clinic.id, firstName: "Carlos", lastName: "Ruiz", lastName2: "Fernández", birthDate: new Date("1983-09-18"), phone: "+34600555666", whatsappOptIn: true },
+      data: { clinicId: clinic.id, firstName: "Carlos", lastName: "Ruiz", lastName2: "Fernández", birthDate: new Date("1983-09-18"), phone: "600555666", whatsappOptIn: true },
     }),
   ])
 

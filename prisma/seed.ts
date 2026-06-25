@@ -3,18 +3,16 @@ import { resolve } from "node:path"
 import { PrismaClient } from "@prisma/client"
 import bcrypt from "bcryptjs"
 
-// Carga .env.local y .env si DATABASE_URL no está ya definido (p. ej. al ejecutar con tsx).
+// Carga .env si DATABASE_URL no está ya definido (p. ej. al ejecutar con tsx).
 if (!process.env.DATABASE_URL) {
-  for (const file of [".env.local", ".env"]) {
-    try {
-      for (const line of readFileSync(resolve(process.cwd(), file), "utf8").split("\n")) {
-        const m = line.match(/^\s*([\w.-]+)\s*=\s*(.*)?\s*$/)
-        if (!m) continue
-        let val = (m[2] ?? "").trim().replace(/^["']|["']$/g, "")
-        if (!(m[1] in process.env)) process.env[m[1]] = val
-      }
-    } catch {}
-  }
+  try {
+    for (const line of readFileSync(resolve(process.cwd(), ".env"), "utf8").split("\n")) {
+      const m = line.match(/^\s*([\w.-]+)\s*=\s*(.*)?\s*$/)
+      if (!m) continue
+      const val = (m[2] ?? "").trim().replace(/^["']|["']$/g, "")
+      if (!(m[1] in process.env)) process.env[m[1]] = val
+    }
+  } catch {}
 }
 
 const prisma = new PrismaClient()
@@ -32,6 +30,9 @@ async function main() {
   // Reset (orden por FKs)
   await prisma.whatsappMessage.deleteMany()
   await prisma.appointment.deleteMany()
+  await prisma.stockMovement.deleteMany()
+  await prisma.product.deleteMany()
+  await prisma.supplier.deleteMany()
   await prisma.service.deleteMany()
   await prisma.customer.deleteMany()
   await prisma.cabin.deleteMany()
@@ -45,7 +46,7 @@ async function main() {
       taxId: "B12345678",
       address: "Calle Mayor 12, 28013 Madrid",
       phone: "+34910000000",
-      email: "hola@clinicalucia.es",
+      email: "hola@centroesteticalucia.com",
       timezone: "Europe/Madrid",
       openingTime: "09:00",
       closingTime: "20:00",
@@ -72,10 +73,10 @@ async function main() {
       },
     }),
     prisma.user.create({
-      data: { clinicId: clinic.id, name: "Marta", role: "WORKER", color: "#3C54A4" },
+      data: { clinicId: clinic.id, name: "Marta", lastName: "Sánchez", role: "WORKER", color: "#3C54A4" },
     }),
     prisma.user.create({
-      data: { clinicId: clinic.id, name: "Lola", role: "WORKER", color: "#5F73B4" },
+      data: { clinicId: clinic.id, name: "Lola", lastName: "Romero", role: "WORKER", color: "#5F73B4" },
     }),
   ])
 
@@ -162,9 +163,86 @@ async function main() {
     appt({ customerId: ana.id, serviceId: manicura.id, workerId: lola.id, cabinId: cabins[1].id, startHour: 16, startMinute: 0, duration: 30, status: "DONE", reminderStatus: "NOT_SCHEDULED" }),
   ])
 
+  // Proveedores
+  const [dermoder, lamdors] = await Promise.all([
+    prisma.supplier.create({
+      data: { clinicId: clinic.id, name: "Dermoder", email: "info@dermoder.com", notes: "Cosmética profesional. La original desde 1975." },
+    }),
+    prisma.supplier.create({
+      data: { clinicId: clinic.id, name: "Lamdors", email: "info@lamdors.com", notes: "Cosmética profesional de alta gama para centros de estética." },
+    }),
+  ])
+
+  // Productos
+  await Promise.all([
+    // Dermoder
+    prisma.product.create({
+      data: {
+        clinicId: clinic.id,
+        supplierId: dermoder.id,
+        name: "Crema Ácida Dermoder 100ml",
+        description: "Crema post-depilación. Reduce rojeces e irritación.",
+        priceCents: 2699,
+        costCents: 1500,
+        stock: 10,
+        stockMin: 2,
+      },
+    }),
+    // Lamdors
+    prisma.product.create({
+      data: {
+        clinicId: clinic.id,
+        supplierId: lamdors.id,
+        name: "N.T.2 Hialuron Micro Lipid Filler 30ml",
+        description: "Crema hidratante con ácido hialurónico. Efecto lifting.",
+        priceCents: 6510,
+        costCents: 4000,
+        stock: 5,
+        stockMin: 1,
+      },
+    }),
+    prisma.product.create({
+      data: {
+        clinicId: clinic.id,
+        supplierId: lamdors.id,
+        name: "X.A.23 Purimasc 30ml",
+        description: "Mascarilla purificante para pieles grasas y mixtas.",
+        priceCents: 2350,
+        costCents: 1400,
+        stock: 8,
+        stockMin: 2,
+      },
+    }),
+    prisma.product.create({
+      data: {
+        clinicId: clinic.id,
+        supplierId: lamdors.id,
+        name: "T.E.42 Biovital Sérum Antiaging 30ml",
+        description: "Sérum vitamínico antiedad. Combate arrugas.",
+        priceCents: 5730,
+        costCents: 3500,
+        stock: 6,
+        stockMin: 1,
+      },
+    }),
+    prisma.product.create({
+      data: {
+        clinicId: clinic.id,
+        supplierId: lamdors.id,
+        name: "T.S.8 Bio Embrión Sérum Rejuvenecedor",
+        description: "Sérum regenerador profundo antiedad.",
+        priceCents: 10440,
+        costCents: 6500,
+        stock: 4,
+        stockMin: 1,
+      },
+    }),
+  ])
+
   console.log("✅ Seed completado:")
   console.log(`   Clínica: ${clinic.name}`)
   console.log(`   ${cabins.length} cabinas · 3 trabajadores · 5 servicios · 5 clientes · 5 citas`)
+  console.log(`   2 proveedores (Dermoder, Lamdors) · 5 productos`)
   console.log(`   Login demo: ${admin.email} / admin`)
 }
 

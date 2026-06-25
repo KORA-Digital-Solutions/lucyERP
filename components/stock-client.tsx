@@ -255,6 +255,7 @@ export function StockClient({ products, suppliers }: { products: ProductRow[]; s
   const [consumeTarget, setConsumeTarget] = useState<ProductRow | null>(null)
   const [entryTarget, setEntryTarget] = useState<ProductRow | null>(null)
   const [search, setSearch] = useState("")
+  const [supplierFilter, setSupplierFilter] = useState("ALL")
 
   function openProductForm(p: ProductRow | null) {
     setEditingProduct(p)
@@ -292,9 +293,11 @@ export function StockClient({ products, suppliers }: { products: ProductRow[]; s
   }
 
   const lowStock = products.filter((p) => p.active && p.stockMin > 0 && p.stock <= p.stockMin)
-  const filteredProducts = search.trim()
-    ? products.filter((p) => p.name.toLowerCase().includes(search.toLowerCase()))
-    : products
+  const filteredProducts = products.filter((p) => {
+    if (search.trim() && !p.name.toLowerCase().includes(search.toLowerCase())) return false
+    if (supplierFilter !== "ALL" && p.supplierId !== supplierFilter) return false
+    return true
+  })
 
   return (
     <div className="p-6 space-y-6">
@@ -341,6 +344,14 @@ export function StockClient({ products, suppliers }: { products: ProductRow[]; s
                   className="pl-8 w-56"
                 />
               </div>
+              <select
+                value={supplierFilter}
+                onChange={(e) => setSupplierFilter(e.target.value)}
+                className="h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground"
+              >
+                <option value="ALL">Todos los proveedores</option>
+                {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </select>
               <Button variant="outline" onClick={() => openProductForm(null)}>
                 <Plus className="mr-2 h-4 w-4" /> Nuevo producto
               </Button>

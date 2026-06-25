@@ -12,7 +12,10 @@ export default async function SalesPage() {
   const [sales, customers, services, products, workers, cashRegister] = await Promise.all([
     prisma.sale.findMany({
       where: { clinicId: clinic.id },
-      include: { customer: true, user: true, lines: true },
+      include: {
+        customer: true, user: true, lines: true,
+        balanceMovements: { where: { type: "BALANCE_USED" }, select: { amountCents: true } },
+      },
       orderBy: { createdAt: "desc" },
       take: 200,
     }),

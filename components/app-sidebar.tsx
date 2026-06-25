@@ -14,9 +14,13 @@ import {
   Package,
   ShoppingCart,
   Wallet,
+  ShieldCheck,
+  ShieldOff,
 } from "lucide-react"
+import { useState } from "react"
 import { cn } from "@/lib/utils"
 import { LuciaMark } from "@/components/lucia-logo"
+import { SwitchModeModal } from "@/components/switch-mode-modal"
 
 const ALL_NAV = [
   { icon: LayoutGrid,   label: "Dashboard",     href: "/dashboard",     roles: ["ADMIN", "WORKER"], group: "main" },
@@ -35,20 +39,49 @@ interface Props {
   name: string
   lastName: string | null
   role: string
+  originalRole?: string
 }
 
-export function AppSidebar({ name, lastName, role }: Props) {
+export function AppSidebar({ name, lastName, role, originalRole }: Props) {
   const router = useRouter()
   const pathname = usePathname()
+  const [modalOpen, setModalOpen] = useState(false)
+  const [switching, setSwitching] = useState(false)
 
   const navItems = ALL_NAV.filter((item) => item.roles.includes(role))
   const fullName = lastName ? `${name} ${lastName}` : name
   const initials = [name[0], lastName?.[0]].filter(Boolean).join("").toUpperCase()
   const roleLabel = role === "ADMIN" ? "Administrador" : "Trabajador"
 
+  // Mostrar toggle solo si es admin real (rol actual admin) o admin en modo trabajador
+  const isAdminReal = role === "ADMIN"
+  const isAdminInWorkerMode = role === "WORKER" && originalRole === "ADMIN"
+  const showModeToggle = isAdminReal || isAdminInWorkerMode
+
   async function handleLogout() {
     await fetch("/api/auth/logout", { method: "POST" })
     router.push("/login")
+    router.refresh()
+  }
+
+  async function handleSwitchToWorker() {
+    setSwitching(true)
+    try {
+      await fetch("/api/auth/switch-mode", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: "WORKER" }),
+      })
+      router.push("/agenda")
+      router.refresh()
+    } finally {
+      setSwitching(false)
+    }
+  }
+
+  function handleModalSuccess() {
+    setModalOpen(false)
+    router.push("/dashboard")
     router.refresh()
   }
 
@@ -115,6 +148,31 @@ export function AppSidebar({ name, lastName, role }: Props) {
         )}
       </nav>
 
+      {showModeToggle && (
+        <div className="px-3 pb-2">
+          {isAdminReal ? (
+            <button
+              type="button"
+              onClick={handleSwitchToWorker}
+              disabled={switching}
+              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium text-sidebar-muted hover:bg-sidebar-accent hover:text-sidebar-foreground transition-colors disabled:opacity-50"
+            >
+              <ShieldOff className="h-4 w-4 shrink-0" />
+              Cambiar a modo Trabajador
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setModalOpen(true)}
+              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium text-sidebar-muted hover:bg-sidebar-accent hover:text-sidebar-foreground transition-colors"
+            >
+              <ShieldCheck className="h-4 w-4 shrink-0" />
+              Cambiar a modo Administrador
+            </button>
+          )}
+        </div>
+      )}
+
       <div className="border-t border-sidebar-border p-4">
         <div className="flex items-center gap-3">
           <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-sidebar-accent text-sm font-medium">
@@ -134,6 +192,12 @@ export function AppSidebar({ name, lastName, role }: Props) {
           </button>
         </div>
       </div>
+
+      <SwitchModeModal
+        open={modalOpen}
+        onClose={() => setModalOpen(false)}
+        onSuccess={handleModalSuccess}
+      />
     </aside>
   )
 }

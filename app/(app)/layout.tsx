@@ -13,7 +13,7 @@ export default async function AppLayout({
 
   return (
     <div className="min-h-screen bg-background">
-      <AppSidebar name={session.name} lastName={session.lastName} role={session.role} />
+      <AppSidebar name={session.name} lastName={session.lastName} role={session.role} originalRole={session.originalRole} />
       <main className="pl-64">
         <div className="min-h-screen">{children}</div>
       </main>

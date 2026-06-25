@@ -89,7 +89,12 @@ const PAYMENT_LABELS: Record<string, string> = { CARD: "Tarjeta", CASH: "Efectiv
 ═══════════════════════════════════════════════════════════════════════════ */
 
 function todayStr() {
-  return new Date().toISOString().slice(0, 10)
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
+}
+
+function localDateStr(d: Date) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
 }
 
 export function SalesClient({ sales, customers, services, products, workers, currentUserId, cashOpen }: Props) {
@@ -124,7 +129,7 @@ export function SalesClient({ sales, customers, services, products, workers, cur
       const day = now.getDay() === 0 ? 6 : now.getDay() - 1 // Mon=0
       const mon = new Date(now)
       mon.setDate(now.getDate() - day)
-      return { dateFrom: mon.toISOString().slice(0, 10), dateTo: today }
+      return { dateFrom: localDateStr(mon), dateTo: today }
     }
     return { dateFrom: customFrom, dateTo: customTo }
   }, [dateMode, customFrom, customTo])

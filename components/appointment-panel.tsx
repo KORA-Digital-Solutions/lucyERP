@@ -32,6 +32,7 @@ import {
   setAppointmentStatus,
   deleteAppointment,
   sendReminder,
+  checkAvailability,
 } from "@/lib/actions"
 import { STATUS_META, REMINDER_META, type AppointmentStatus } from "@/lib/enums"
 import { formatDuration, normalizeSearch } from "@/lib/format"
@@ -144,6 +145,15 @@ export function AppointmentPanel({
   const [status, setStatus] = useState(appointment?.status ?? "PENDING")
   const [notes, setNotes] = useState(appointment?.notes ?? "")
   const [customDuration, setCustomDuration] = useState(Boolean(appointment))
+  const [cabinConflict, setCabinConflict] = useState<string | null>(null)
+  const [workerConflict, setWorkerConflict] = useState<string | null>(null)
+
+  // Buscador de servicio
+  const [serviceQuery, setServiceQuery] = useState(
+    appointment ? (services.find((s) => s.id === appointment.serviceId)?.name ?? "") : ""
+  )
+  const [showServiceResults, setShowServiceResults] = useState(false)
+  const serviceRef = useRef<HTMLDivElement>(null)
 
   // Buscador de cliente
   const [query, setQuery] = useState(
@@ -167,11 +177,13 @@ export function AppointmentPanel({
       setNotes(appointment.notes ?? "")
       setCustomDuration(true)
       setQuery(customers.find((c) => c.id === appointment.customerId)?.label ?? "")
+      setServiceQuery(services.find((s) => s.id === appointment.serviceId)?.name ?? "")
     } else {
       const t = defaultTime ?? "10:00"
       const newCabinId = defaultCabinId ?? cabins[0]?.id ?? ""
       setCustomerId("")
       setServiceId("")
+      setServiceQuery("")
       setWorkerId(defaultWorkerForCabin(newCabinId) ?? workers[0]?.id ?? "")
       setCabinId(newCabinId)
       setDate(defaultDate)
@@ -188,9 +200,8 @@ export function AppointmentPanel({
   // Cierra resultados al hacer clic fuera
   useEffect(() => {
     function onDocClick(e: MouseEvent) {
-      if (searchRef.current && !searchRef.current.contains(e.target as Node)) {
-        setShowResults(false)
-      }
+      if (searchRef.current && !searchRef.current.contains(e.target as Node)) setShowResults(false)
+      if (serviceRef.current && !serviceRef.current.contains(e.target as Node)) setShowServiceResults(false)
     }
     document.addEventListener("mousedown", onDocClick)
     return () => document.removeEventListener("mousedown", onDocClick)
@@ -205,11 +216,47 @@ export function AppointmentPanel({
     onDraftChange?.({ cabinId, date, time, duration })
   }, [appointment, cabinId, date, time, duration, onDraftChange])
 
+  // Comprobación de disponibilidad en tiempo real (debounce 400ms)
+  useEffect(() => {
+    if (!cabinId || !workerId || !date || !time || duration <= 0) {
+      setCabinConflict(null)
+      setWorkerConflict(null)
+      return
+    }
+    const timer = setTimeout(async () => {
+      const result = await checkAvailability(cabinId, workerId, date, time, duration, appointment?.id)
+      setCabinConflict(result.cabinConflict)
+      setWorkerConflict(result.workerConflict)
+    }, 400)
+    return () => clearTimeout(timer)
+  }, [cabinId, workerId, date, time, duration, appointment?.id])
+
   const results = useMemo(() => {
     const q = normalizeSearch(query)
     if (!q) return []
     return customers.filter((c) => normalizeSearch(c.label).includes(q)).slice(0, 8)
   }, [query, customers])
+
+  const serviceResults = useMemo(() => {
+    const q = normalizeSearch(serviceQuery)
+    if (!q) return services.slice(0, 8)
+    return services.filter((s) => normalizeSearch(s.name).includes(q)).slice(0, 8)
+  }, [serviceQuery, services])
+
+  function selectService(s: ServiceOption) {
+    setServiceId(s.id)
+    setServiceQuery(s.name)
+    setShowServiceResults(false)
+    if (!customDuration) {
+      setDuration(s.durationMinutes)
+      setEndTime(minToTime(timeToMin(time) + s.durationMinutes))
+    }
+  }
+  function clearService() {
+    setServiceId("")
+    setServiceQuery("")
+    setShowServiceResults(false)
+  }
 
   const endError = timeToMin(endTime) <= timeToMin(time)
 
@@ -377,21 +424,52 @@ export function AppointmentPanel({
           )}
         </div>
 
-        {/* Servicio — sin precio */}
-        <div className="space-y-2">
+        {/* Servicio — buscador */}
+        <div className="space-y-2" ref={serviceRef}>
           <Label>Servicio</Label>
-          <Select value={serviceId} onValueChange={onSelectService}>
-            <SelectTrigger>
-              <SelectValue placeholder="Seleccionar servicio" />
-            </SelectTrigger>
-            <SelectContent>
-              {services.map((s) => (
-                <SelectItem key={s.id} value={s.id}>
-                  {s.name} · {formatDuration(s.durationMinutes)}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              className="pl-9 pr-9"
+              placeholder="Buscar servicio…"
+              value={serviceQuery}
+              onChange={(e) => {
+                setServiceQuery(e.target.value)
+                setShowServiceResults(true)
+                if (serviceId) setServiceId("")
+              }}
+              onFocus={() => setShowServiceResults(true)}
+              autoComplete="off"
+            />
+            {serviceQuery && (
+              <button
+                type="button"
+                onClick={clearService}
+                className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-muted-foreground hover:text-foreground"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            )}
+            {showServiceResults && (
+              <ul className="absolute z-20 mt-1 max-h-60 w-full overflow-auto rounded-md border bg-popover py-1 shadow-md">
+                {serviceResults.map((s) => (
+                  <li key={s.id}>
+                    <button
+                      type="button"
+                      onClick={() => selectService(s)}
+                      className="flex w-full items-center justify-between px-3 py-2 text-left text-sm hover:bg-accent"
+                    >
+                      <span>{s.name}</span>
+                      <span className="text-xs text-muted-foreground">{formatDuration(s.durationMinutes)}</span>
+                    </button>
+                  </li>
+                ))}
+                {serviceResults.length === 0 && (
+                  <li className="px-3 py-2 text-sm text-muted-foreground">Sin resultados</li>
+                )}
+              </ul>
+            )}
+          </div>
         </div>
 
         {/* Fecha + inicio */}
@@ -445,7 +523,7 @@ export function AppointmentPanel({
           <div className="space-y-2">
             <Label>Trabajador</Label>
             <Select value={workerId} onValueChange={setWorkerId}>
-              <SelectTrigger>
+              <SelectTrigger className={workerConflict ? "border-destructive" : ""}>
                 <SelectValue placeholder="Seleccionar" />
               </SelectTrigger>
               <SelectContent>
@@ -456,11 +534,14 @@ export function AppointmentPanel({
                 ))}
               </SelectContent>
             </Select>
+            {workerConflict && (
+              <p className="text-xs text-destructive">{workerConflict}</p>
+            )}
           </div>
           <div className="space-y-2">
             <Label>Cabina</Label>
             <Select value={cabinId} onValueChange={handleCabinChange}>
-              <SelectTrigger>
+              <SelectTrigger className={cabinConflict ? "border-destructive" : ""}>
                 <SelectValue placeholder="Seleccionar" />
               </SelectTrigger>
               <SelectContent>
@@ -471,6 +552,9 @@ export function AppointmentPanel({
                 ))}
               </SelectContent>
             </Select>
+            {cabinConflict && (
+              <p className="text-xs text-destructive">{cabinConflict}</p>
+            )}
           </div>
         </div>
 

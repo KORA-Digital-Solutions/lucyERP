@@ -312,6 +312,30 @@ export async function toggleWorkerActive(id: string, active: boolean): Promise<A
   }
 }
 
+export async function checkAvailability(
+  cabinId: string,
+  workerId: string,
+  date: string,
+  time: string,
+  durationMinutes: number,
+  excludeAppointmentId?: string,
+): Promise<{ cabinConflict: string | null; workerConflict: string | null }> {
+  try {
+    if (!cabinId || !workerId || !date || !time || durationMinutes <= 0) {
+      return { cabinConflict: null, workerConflict: null }
+    }
+    const startAt = new Date(`${date}T${time}`)
+    const endAt = new Date(startAt.getTime() + durationMinutes * 60000)
+    const conflicts = await validateAppointmentSlot({ cabinId, workerId, startAt, endAt, excludeAppointmentId })
+    return {
+      cabinConflict: conflicts.find((c) => c.type === "CABIN")?.message ?? null,
+      workerConflict: conflicts.find((c) => c.type === "WORKER")?.message ?? null,
+    }
+  } catch {
+    return { cabinConflict: null, workerConflict: null }
+  }
+}
+
 export async function deleteWorker(id: string): Promise<ActionResult> {
   try {
     const user = await prisma.user.findUniqueOrThrow({ where: { id }, select: { active: true } })

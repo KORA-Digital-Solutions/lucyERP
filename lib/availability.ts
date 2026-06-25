@@ -66,7 +66,7 @@ export async function validateAppointmentSlot(input: SlotInput): Promise<Conflic
   if (cabinClash) {
     conflicts.push({
       type: "CABIN",
-      message: `La cabina ya está ocupada en ese horario (cita de ${cabinClash.customer.firstName}).`,
+      message: "La cabina ya está ocupada en ese horario.",
     })
   }
 
@@ -74,7 +74,7 @@ export async function validateAppointmentSlot(input: SlotInput): Promise<Conflic
   if (workerClash) {
     conflicts.push({
       type: "WORKER",
-      message: `El trabajador ya tiene una cita en ese horario (cliente ${workerClash.customer.firstName}).`,
+      message: "El trabajador ya tiene una cita en ese horario.",
     })
   }
 

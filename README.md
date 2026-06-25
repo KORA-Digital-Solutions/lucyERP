@@ -30,7 +30,7 @@ npm run dev                # http://localhost:3000
 npm run worker:reminders   # worker de recordatorios (otra terminal)
 ```
 
-## Variables de entorno (`.env.local`)
+## Variables de entorno (`.env`)
 
 ```env
 DATABASE_URL="file:./prisma/dev.db"

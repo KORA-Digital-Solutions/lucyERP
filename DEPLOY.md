@@ -121,7 +121,7 @@ prisma/dev.db
 
 ## Variables de entorno (`.env`)
 
-El fichero `.env.local` debe estar en la raíz de la carpeta en el PC de la clínica:
+El fichero `.env` debe estar en la raíz de la carpeta en el PC de la clínica:
 
 ```env
 DATABASE_URL="file:./prisma/dev.db"
@@ -134,7 +134,7 @@ WHATSAPP_ACCESS_TOKEN=
 WHATSAPP_WEBHOOK_VERIFY_TOKEN=
 ```
 
-> El worker carga `.env.local` primero y cae a `.env` si no lo encuentra. Un único fichero sirve para ambos procesos.
+> El worker carga `.env`. Un único fichero sirve para ambos procesos.
 
 Si `WHATSAPP_ACCESS_TOKEN` está vacío, el worker corre en **modo simulado** sin enviar mensajes reales.
 El toggle de WhatsApp en Settings también debe estar activo para que el worker procese recordatorios.

@@ -27,6 +27,7 @@ type Sale = {
   customer: Customer | null
   user: { name: string; lastName: string | null }
   lines: SaleLine[]
+  balanceMovements: { amountCents: number }[]
 }
 
 interface Props {
@@ -100,8 +101,10 @@ export function SalesClient({ sales, customers, services, products, workers, cur
   const [debtLoading, setDebtLoading] = useState(false)
   const [clientSearch, setClientSearch] = useState("")
   const [workerFilter, setWorkerFilter] = useState("ALL")
-  const [dateFrom, setDateFrom] = useState(todayStr())
-  const [dateTo, setDateTo] = useState(todayStr())
+  const [paymentFilter, setPaymentFilter] = useState("ALL")
+  const [dateMode, setDateMode] = useState<"today" | "week" | "custom">("today")
+  const [customFrom, setCustomFrom] = useState(todayStr())
+  const [customTo, setCustomTo] = useState(todayStr())
 
   // Unique workers derived from sales for filter dropdown
   const saleWorkers = useMemo(() => {
@@ -112,6 +115,19 @@ export function SalesClient({ sales, customers, services, products, workers, cur
     })
     return Array.from(map.keys()).sort()
   }, [sales])
+
+  const { dateFrom, dateTo } = useMemo(() => {
+    const today = todayStr()
+    if (dateMode === "today") return { dateFrom: today, dateTo: today }
+    if (dateMode === "week") {
+      const now = new Date()
+      const day = now.getDay() === 0 ? 6 : now.getDay() - 1 // Mon=0
+      const mon = new Date(now)
+      mon.setDate(now.getDate() - day)
+      return { dateFrom: mon.toISOString().slice(0, 10), dateTo: today }
+    }
+    return { dateFrom: customFrom, dateTo: customTo }
+  }, [dateMode, customFrom, customTo])
 
   const filtered = useMemo(() => {
     const q = normalize(clientSearch)
@@ -126,12 +142,13 @@ export function SalesClient({ sales, customers, services, products, workers, cur
         const wName = `${s.user.name} ${s.user.lastName ?? ""}`.trim()
         if (wName !== workerFilter) return false
       }
+      if (paymentFilter !== "ALL" && s.paymentMethod !== paymentFilter) return false
       const createdAt = new Date(s.createdAt)
       if (from && createdAt < from) return false
       if (to && createdAt > to) return false
       return true
     })
-  }, [sales, clientSearch, workerFilter, dateFrom, dateTo])
+  }, [sales, clientSearch, workerFilter, paymentFilter, dateFrom, dateTo])
 
   if (mode === "pos") {
     return <POSView customers={customers} services={services} products={products} workers={workers} currentUserId={currentUserId} onBack={() => setMode("list")} />
@@ -150,43 +167,81 @@ export function SalesClient({ sales, customers, services, products, workers, cur
       </div>
 
       {/* Filtros */}
-      <div className="flex flex-wrap gap-3 items-end">
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input className="pl-9 w-52" placeholder="Buscar cliente…" value={clientSearch} onChange={(e) => setClientSearch(e.target.value)} />
+      <div className="space-y-2">
+        <div className="flex flex-wrap gap-3 items-center">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input className="pl-9 w-52" placeholder="Buscar cliente…" value={clientSearch} onChange={(e) => setClientSearch(e.target.value)} />
+          </div>
+          <div className="flex items-center gap-1">
+            <Button
+              variant={dateMode === "today" ? "default" : "outline"}
+              size="sm"
+              onClick={() => setDateMode("today")}
+            >
+              Hoy
+            </Button>
+            <Button
+              variant={dateMode === "week" ? "default" : "outline"}
+              size="sm"
+              onClick={() => setDateMode("week")}
+            >
+              Esta semana
+            </Button>
+            <Button
+              variant={dateMode === "custom" ? "default" : "outline"}
+              size="sm"
+              onClick={() => setDateMode("custom")}
+            >
+              <CalendarDays className="h-3.5 w-3.5 mr-1" /> Rango
+            </Button>
+          </div>
+          {dateMode === "custom" && (
+            <div className="flex items-center gap-2">
+              <input
+                type="date"
+                value={customFrom}
+                onChange={(e) => setCustomFrom(e.target.value)}
+                className="h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground"
+              />
+              <span className="text-muted-foreground text-sm">—</span>
+              <input
+                type="date"
+                value={customTo}
+                onChange={(e) => setCustomTo(e.target.value)}
+                className="h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground"
+              />
+            </div>
+          )}
+          <span className="text-sm text-muted-foreground ml-auto">{filtered.length} resultado{filtered.length !== 1 ? "s" : ""}</span>
         </div>
-        <div className="flex items-center gap-2">
-          <CalendarDays className="h-4 w-4 text-muted-foreground shrink-0" />
-          <input
-            type="date"
-            value={dateFrom}
-            onChange={(e) => setDateFrom(e.target.value)}
+        <div className="flex flex-wrap gap-3 items-center">
+          <select
+            value={workerFilter}
+            onChange={(e) => setWorkerFilter(e.target.value)}
             className="h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground"
-          />
-          <span className="text-muted-foreground text-sm">—</span>
-          <input
-            type="date"
-            value={dateTo}
-            onChange={(e) => setDateTo(e.target.value)}
+          >
+            <option value="ALL">Todos los trabajadores</option>
+            {saleWorkers.map((w) => <option key={w} value={w}>{w}</option>)}
+          </select>
+          <select
+            value={paymentFilter}
+            onChange={(e) => setPaymentFilter(e.target.value)}
             className="h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground"
-          />
+          >
+            <option value="ALL">Todos los pagos</option>
+            <option value="CASH">Efectivo</option>
+            <option value="CARD">Tarjeta</option>
+            <option value="DEBT">Deuda</option>
+          </select>
+          {(clientSearch || workerFilter !== "ALL" || paymentFilter !== "ALL" || dateMode !== "today") && (
+            <Button variant="ghost" size="sm" className="text-muted-foreground" onClick={() => {
+              setClientSearch(""); setWorkerFilter("ALL"); setPaymentFilter("ALL"); setDateMode("today"); setCustomFrom(todayStr()); setCustomTo(todayStr())
+            }}>
+              Limpiar filtros
+            </Button>
+          )}
         </div>
-        <select
-          value={workerFilter}
-          onChange={(e) => setWorkerFilter(e.target.value)}
-          className="h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground"
-        >
-          <option value="ALL">Todos los trabajadores</option>
-          {saleWorkers.map((w) => <option key={w} value={w}>{w}</option>)}
-        </select>
-        {(clientSearch || workerFilter !== "ALL" || dateFrom !== todayStr() || dateTo !== todayStr()) && (
-          <Button variant="ghost" size="sm" className="text-muted-foreground" onClick={() => {
-            setClientSearch(""); setWorkerFilter("ALL"); setDateFrom(todayStr()); setDateTo(todayStr())
-          }}>
-            Limpiar filtros
-          </Button>
-        )}
-        <span className="text-sm text-muted-foreground ml-auto">{filtered.length} resultado{filtered.length !== 1 ? "s" : ""}</span>
       </div>
 
       <Card>
@@ -274,6 +329,17 @@ export function SalesClient({ sales, customers, services, products, workers, cur
                   ))}
                 </tbody>
               </table>
+              {(() => {
+                const balanceUsed = detailSale.balanceMovements.reduce((s, m) => s + Math.abs(m.amountCents), 0)
+                return balanceUsed > 0 ? (
+                  <div className="rounded-lg border border-blue-200 bg-blue-50/60 px-3 py-2 flex items-center justify-between text-sm">
+                    <span className="text-blue-700 font-medium flex items-center gap-1.5">
+                      <Wallet className="h-3.5 w-3.5" /> Saldo del cliente aplicado
+                    </span>
+                    <span className="tabular-nums font-semibold text-blue-700">−{fmtEur(balanceUsed)}</span>
+                  </div>
+                ) : null
+              })()}
               <div className="text-right">
                 <span className="text-muted-foreground mr-2">Total:</span>
                 <span className="font-semibold text-base tabular-nums">{fmtEur(detailSale.totalCents)}</span>

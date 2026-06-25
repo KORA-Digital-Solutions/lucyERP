@@ -11,8 +11,16 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Email y contraseña requeridos." }, { status: 400 })
     }
 
+    const input = email.toLowerCase().trim()
+    let resolvedEmail = input
+    if (!input.includes("@")) {
+      const clinic = await prisma.clinic.findFirst({ select: { email: true } })
+      const domain = clinic?.email?.split("@")[1] ?? "centroesteticalucia.com"
+      resolvedEmail = `${input}@${domain}`
+    }
+
     const user = await prisma.user.findFirst({
-      where: { email: email.toLowerCase().trim(), active: true },
+      where: { email: resolvedEmail, active: true },
       include: { clinic: true },
     })
 

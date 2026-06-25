@@ -305,6 +305,18 @@ export async function toggleWorkerActive(id: string, active: boolean): Promise<A
   }
 }
 
+export async function deleteWorker(id: string): Promise<ActionResult> {
+  try {
+    const user = await prisma.user.findUniqueOrThrow({ where: { id }, select: { active: true } })
+    if (user.active) return { ok: false, error: "Desactiva el usuario antes de eliminarlo." }
+    await prisma.user.delete({ where: { id } })
+    revalidateAll()
+    return { ok: true }
+  } catch (e) {
+    return { ok: false, error: errMsg(e) }
+  }
+}
+
 /* ------------------------------- CABINAS -------------------------------- */
 
 export async function saveCabin(id: string | null, fd: FormData): Promise<ActionResult> {
@@ -610,15 +622,18 @@ export async function createSale(
           await tx.customerBalanceMovement.create({
             data: { clinicId, customerId, userId: session.userId, type: "DEBT_CREATED", amountCents: -remainingCents, saleId: s.id, notes: null },
           })
+          await tx.customer.update({ where: { id: customerId }, data: { balanceCents: { decrement: remainingCents } } })
         }
       }
 
       // Actualizar caja del día (solo el importe cobrado en efectivo/tarjeta, no el saldo)
       const today = new Date().toISOString().slice(0, 10)
       const existingCash = await tx.cashRegister.findUnique({ where: { clinicId_date: { clinicId, date: today } } })
-      if (existingCash && existingCash.status === "OPEN" && saleType !== "GIFT_CARD") {
-        const cardDelta = paymentMethod === "CARD" ? remainingCents : 0
-        const cashDelta = paymentMethod === "CASH" ? remainingCents : 0
+      if (existingCash && existingCash.status === "OPEN") {
+        // Para tarjetas regalo el saldo del comprador no se descuenta, así que se cobra el total íntegro
+        const amountToRecord = saleType === "GIFT_CARD" ? totalCents : remainingCents
+        const cardDelta = paymentMethod === "CARD" ? amountToRecord : 0
+        const cashDelta = paymentMethod === "CASH" ? amountToRecord : 0
         await tx.cashRegister.update({
           where: { id: existingCash.id },
           data: { totalCardCents: { increment: cardDelta }, totalCashCents: { increment: cashDelta } },
@@ -656,6 +671,7 @@ export async function payDebt(saleId: string, paymentMethod: "CARD" | "CASH"): P
         await tx.customerBalanceMovement.create({
           data: { clinicId, customerId: sale.customerId, userId: session.userId, type: "DEBT_PAID", amountCents: pending, saleId, notes: null },
         })
+        await tx.customer.update({ where: { id: sale.customerId }, data: { balanceCents: { increment: pending } } })
       }
 
       const today = new Date().toISOString().slice(0, 10)

@@ -23,5 +23,6 @@ export default async function WorkersPage() {
     mustChangePassword: w.mustChangePassword,
   }))
 
-  return <WorkersClient rows={rows} />
+  const domain = clinic.email?.split("@")[1] ?? "centroesteticalucia.com"
+  return <WorkersClient rows={rows} domain={domain} />
 }

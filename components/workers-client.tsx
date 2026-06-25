@@ -3,7 +3,7 @@
 import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
-import { Plus, Pencil, KeyRound } from "lucide-react"
+import { Plus, Pencil, KeyRound, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -12,8 +12,9 @@ import { Switch } from "@/components/ui/switch"
 import { Badge } from "@/components/ui/badge"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { saveWorker, toggleWorkerActive, setUserPassword } from "@/lib/actions"
+import { saveWorker, toggleWorkerActive, setUserPassword, deleteWorker } from "@/lib/actions"
 
 export interface WorkerRow {
   id: string
@@ -27,19 +28,36 @@ export interface WorkerRow {
   mustChangePassword: boolean
 }
 
-export function WorkersClient({ rows }: { rows: WorkerRow[] }) {
+export function WorkersClient({ rows, domain }: { rows: WorkerRow[]; domain: string }) {
   const router = useRouter()
   const [open, setOpen] = useState(false)
   const [editing, setEditing] = useState<WorkerRow | null>(null)
   const [role, setRole] = useState("WORKER")
   const [loading, setLoading] = useState(false)
+  const [nameValue, setNameValue] = useState("")
+  const [lastNameValue, setLastNameValue] = useState("")
+  const [emailValue, setEmailValue] = useState("")
+  const [emailManual, setEmailManual] = useState(false)
+
+  function buildEmail(name: string, lastName: string) {
+    const slug = (s: string) => s.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/\s+/g, ".")
+    const parts = [slug(name), slug(lastName)].filter(Boolean)
+    return parts.length ? `${parts.join(".")}@${domain}` : ""
+  }
   const [pwOpen, setPwOpen] = useState(false)
   const [pwTarget, setPwTarget] = useState<WorkerRow | null>(null)
   const [tempPw, setTempPw] = useState("")
+  const [deleteTarget, setDeleteTarget] = useState<WorkerRow | null>(null)
 
   function openForm(r: WorkerRow | null) {
     setEditing(r)
     setRole(r?.role ?? "WORKER")
+    const name = r?.name ?? ""
+    const lastName = r?.lastName ?? ""
+    setNameValue(name)
+    setLastNameValue(lastName)
+    setEmailManual(!!r?.email)
+    setEmailValue(r?.email ?? buildEmail(name, lastName))
     setOpen(true)
   }
 
@@ -61,6 +79,13 @@ export function WorkersClient({ rows }: { rows: WorkerRow[] }) {
       setOpen(false)
       router.refresh()
     } else toast.error(res.error ?? "Error al guardar.")
+  }
+
+  async function onDelete() {
+    if (!deleteTarget) return
+    const res = await deleteWorker(deleteTarget.id)
+    if (res.ok) { toast.success("Usuario eliminado."); setDeleteTarget(null); router.refresh() }
+    else toast.error(res.error ?? "Error al eliminar.")
   }
 
   async function onToggle(r: WorkerRow) {
@@ -139,6 +164,11 @@ export function WorkersClient({ rows }: { rows: WorkerRow[] }) {
                   <Button variant="ghost" size="icon" onClick={() => openForm(r)}>
                     <Pencil className="h-4 w-4" />
                   </Button>
+                  {!r.active && (
+                    <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive" title="Eliminar usuario" onClick={() => setDeleteTarget(r)}>
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  )}
                 </TableCell>
               </TableRow>
             ))}
@@ -161,17 +191,24 @@ export function WorkersClient({ rows }: { rows: WorkerRow[] }) {
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="name">Nombre</Label>
-                <Input id="name" name="name" defaultValue={editing?.name} required />
+                <Input id="name" name="name" value={nameValue} required onChange={(e) => {
+                  setNameValue(e.target.value)
+                  if (!emailManual) setEmailValue(buildEmail(e.target.value, lastNameValue))
+                }} />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="lastName">Apellidos</Label>
-                <Input id="lastName" name="lastName" defaultValue={editing?.lastName ?? ""} />
+                <Input id="lastName" name="lastName" value={lastNameValue} required onChange={(e) => {
+                  setLastNameValue(e.target.value)
+                  if (!emailManual) setEmailValue(buildEmail(nameValue, e.target.value))
+                }} />
               </div>
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="email">Email de acceso</Label>
-                <Input id="email" name="email" type="email" defaultValue={editing?.email ?? ""} required />
+                <Input id="email" name="email" type="email" value={emailValue} required
+                  onChange={(e) => { setEmailValue(e.target.value); setEmailManual(true) }} />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="phone">Teléfono</Label>
@@ -236,6 +273,23 @@ export function WorkersClient({ rows }: { rows: WorkerRow[] }) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <AlertDialog open={!!deleteTarget} onOpenChange={(o) => !o && setDeleteTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Eliminar usuario?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Se eliminará permanentemente a <strong>{deleteTarget?.name} {deleteTarget?.lastName}</strong>. Esta acción no se puede deshacer.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction onClick={onDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+              Eliminar
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

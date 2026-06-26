@@ -41,6 +41,7 @@ export interface Option {
   id: string
   name: string
   defaultWorkerId?: string | null
+  active?: boolean
 }
 export interface ServiceOption extends Option {
   durationMinutes: number

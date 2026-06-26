@@ -819,9 +819,9 @@ export async function getClientProfile(customerId: string) {
       include: {
         service: { select: { name: true } },
         worker: { select: { name: true } },
+        cabin: { select: { name: true } },
       },
       orderBy: { startAt: "desc" },
-      take: 50,
     }),
   ])
   return { customer, movements, recentSales, appointments }

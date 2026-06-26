@@ -227,7 +227,7 @@ function ClientProfileView({ row, onBack, onEdit }: { row: ClientRow; onBack: ()
                       </div>
                       <div>
                         <p className="font-medium">{a.service.name}</p>
-                        <p className="text-xs text-muted-foreground">{a.worker.name} · {a.durationMinutes} min</p>
+                        <p className="text-xs text-muted-foreground">{a.worker.name} · {a.cabin.name} · {a.durationMinutes} min</p>
                       </div>
                     </div>
                     <span className={cn("text-xs font-medium", STATUS_CLS[a.status] ?? "")}>

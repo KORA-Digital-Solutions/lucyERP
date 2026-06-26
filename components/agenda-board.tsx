@@ -282,8 +282,11 @@ export function AgendaBoard({
                     const cabinAppts = visible.filter((a) => a.cabinId === cabin.id)
                     return (
                       <div key={cabin.id} className="min-w-[200px] flex-1 border-r last:border-r-0">
-                        <div className="flex h-12 items-center justify-center border-b bg-accent/60 px-2 text-sm font-semibold text-accent-foreground">
+                        <div className="flex h-12 items-center justify-center border-b bg-accent/60 px-2 text-sm font-semibold text-accent-foreground gap-1.5">
                           {cabin.name}
+                          {cabin.active === false && (
+                            <span className="text-xs font-normal text-muted-foreground">(Inactiva)</span>
+                          )}
                         </div>
                         <div className={cn("relative", isWeekend && "bg-[#AFB9D9]/15")} style={{ height: totalHeight }}>
                           {hours.map((h) => (
@@ -291,7 +294,7 @@ export function AgendaBoard({
                               key={h}
                               className="cursor-pointer border-b hover:bg-accent/30"
                               style={{ height: HOUR_PX }}
-                              onClick={() => openNew(cabin.id, h)}
+                              onClick={() => cabin.active !== false && openNew(cabin.id, h)}
                             />
                           ))}
 

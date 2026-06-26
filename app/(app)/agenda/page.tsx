@@ -20,8 +20,11 @@ export default async function AgendaPage({
   const clinic = await getActiveClinic()
   const { start, end } = dayRange(date)
 
-  const [cabins, workers, services, customers, appointments] = await Promise.all([
-    prisma.cabin.findMany({ where: { clinicId: clinic.id, active: true }, orderBy: { sortOrder: "asc" } }),
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+
+  const [allCabins, workers, services, customers, appointments] = await Promise.all([
+    prisma.cabin.findMany({ where: { clinicId: clinic.id }, orderBy: { sortOrder: "asc" } }),
     prisma.user.findMany({ where: { clinicId: clinic.id, active: true }, orderBy: { name: "asc" } }),
     prisma.service.findMany({ where: { clinicId: clinic.id, active: true }, orderBy: { name: "asc" } }),
     prisma.customer.findMany({ where: { clinicId: clinic.id }, orderBy: { firstName: "asc" } }),
@@ -31,6 +34,21 @@ export default async function AgendaPage({
       orderBy: { startAt: "asc" },
     }),
   ])
+
+  // Include inactive cabins only if they have at least one appointment on the
+  // selected date OR any appointment in the future (startAt >= today).
+  const futureCabinIds = await (async () => {
+    const future = await prisma.appointment.findMany({
+      where: { clinicId: clinic.id, startAt: { gte: today } },
+      select: { cabinId: true },
+      distinct: ["cabinId"],
+    })
+    return new Set(future.map((a) => a.cabinId))
+  })()
+  const selectedDateCabinIds = new Set(appointments.map((a) => a.cabinId))
+  const cabins = allCabins.filter(
+    (c) => c.active || selectedDateCabinIds.has(c.id) || futureCabinIds.has(c.id),
+  )
 
   const agendaAppointments: AgendaAppointment[] = appointments.map((a) => ({
     id: a.id,
@@ -59,7 +77,7 @@ export default async function AgendaPage({
       longDate={formatLongDate(date)}
       openingMinutes={timeToMinutes(clinic.openingTime)}
       closingMinutes={timeToMinutes(clinic.closingTime)}
-      cabins={cabins.map((c) => ({ id: c.id, name: c.name, defaultWorkerId: c.defaultWorkerId }))}
+      cabins={cabins.map((c) => ({ id: c.id, name: c.name, defaultWorkerId: c.defaultWorkerId, active: c.active }))}
       workers={workers.map((w) => ({ id: w.id, name: w.name }))}
       services={services.map((s) => ({
         id: s.id,

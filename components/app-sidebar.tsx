@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation"
 import {
   LayoutGrid,
   Calendar,
+  ClipboardList,
   Users,
   Briefcase,
   UserCog,
@@ -24,13 +25,14 @@ import { SwitchModeModal } from "@/components/switch-mode-modal"
 
 const ALL_NAV = [
   { icon: LayoutGrid,   label: "Dashboard",     href: "/dashboard",     roles: ["ADMIN", "WORKER"], group: "main" },
-  { icon: Calendar,     label: "Agenda",        href: "/agenda",        roles: ["ADMIN", "WORKER"], group: "main" },
-  { icon: Users,        label: "Clientes",      href: "/clients",       roles: ["ADMIN", "WORKER"], group: "main" },
+  { icon: Calendar,      label: "Agenda",           href: "/agenda",        roles: ["ADMIN", "WORKER"], group: "main" },
+  { icon: Users,         label: "Clientes",         href: "/clients",       roles: ["ADMIN", "WORKER"], group: "main" },
   { icon: ShoppingCart, label: "Ventas",        href: "/sales",         roles: ["ADMIN", "WORKER"], group: "main" },
   { icon: Wallet,       label: "Caja",          href: "/cash-register", roles: ["ADMIN", "WORKER"], group: "main" },
   { icon: Package,      label: "Stock",         href: "/stock",         roles: ["ADMIN", "WORKER"], group: "main" },
   { icon: Briefcase,    label: "Servicios",     href: "/services",      roles: ["ADMIN"],           group: "main" },
   { icon: DoorOpen,     label: "Cabinas",       href: "/cabins",        roles: ["ADMIN"],           group: "main" },
+  { icon: ClipboardList, label: "Historial citas", href: "/appointments", roles: ["ADMIN"],          group: "history" },
   { icon: UserCog,      label: "Usuarios",      href: "/workers",       roles: ["ADMIN"],           group: "admin" },
   { icon: Settings,     label: "Configuración", href: "/settings",      roles: ["ADMIN"],           group: "admin" },
 ]
@@ -120,6 +122,32 @@ export function AppSidebar({ name, lastName, role, originalRole }: Props) {
             )
           })}
         </div>
+
+        {navItems.some(i => i.group === "history") && (
+          <>
+            <div className="my-3 border-t border-sidebar-border" />
+            <div className="space-y-1">
+              {navItems.filter(i => i.group === "history").map((item) => {
+                const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`)
+                return (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    className={cn(
+                      "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors",
+                      isActive
+                        ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                        : "text-sidebar-muted hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
+                    )}
+                  >
+                    <item.icon className="h-5 w-5" />
+                    {item.label}
+                  </Link>
+                )
+              })}
+            </div>
+          </>
+        )}
 
         {navItems.some(i => i.group === "admin") && (
           <>

@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
-import { ChevronLeft, ChevronRight, Plus, Filter, MessageCircle, CheckCircle2, XCircle, Clock, Send, Trash2, UserX } from "lucide-react"
+import { ChevronLeft, ChevronRight, Plus, Filter, MessageCircle, CheckCircle2, XCircle, Clock, Send, UserX } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import {
@@ -19,16 +19,6 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu"
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog"
 import { cn } from "@/lib/utils"
 import { STATUS_META, type AppointmentStatus } from "@/lib/enums"
 import { MiniCalendar } from "@/components/mini-calendar"
@@ -39,7 +29,7 @@ import {
   type Option,
   type ExistingAppointment,
 } from "@/components/appointment-panel"
-import { setAppointmentStatus, deleteAppointment, sendReminder } from "@/lib/actions"
+import { setAppointmentStatus, sendReminder } from "@/lib/actions"
 
 export interface AgendaAppointment {
   id: string
@@ -74,7 +64,7 @@ interface Props {
   appointments: AgendaAppointment[]
 }
 
-const HOUR_PX = 64
+const HOUR_PX = 80
 
 function timeToMin(t: string): number {
   const [h, m] = t.split(":").map(Number)
@@ -107,8 +97,6 @@ export function AgendaBoard({
   const [presetCabin, setPresetCabin] = useState<string | undefined>(undefined)
   const [presetTime, setPresetTime] = useState<string | undefined>(undefined)
   const [draft, setDraft] = useState<SlotDraft | null>(null)
-  const [deleteTarget, setDeleteTarget] = useState<{ id: string; customerName: string } | null>(null)
-
   async function quickStatusChange(apptId: string, newStatus: string) {
     await setAppointmentStatus(apptId, newStatus)
     router.refresh()
@@ -119,12 +107,6 @@ export function AgendaBoard({
     router.refresh()
   }
 
-  async function confirmDelete() {
-    if (!deleteTarget) return
-    await deleteAppointment(deleteTarget.id)
-    setDeleteTarget(null)
-    router.refresh()
-  }
 
   // Fin de semana del día seleccionado (vista diaria).
   const isWeekend = useMemo(() => {
@@ -282,8 +264,11 @@ export function AgendaBoard({
                     const cabinAppts = visible.filter((a) => a.cabinId === cabin.id)
                     return (
                       <div key={cabin.id} className="min-w-[200px] flex-1 border-r last:border-r-0">
-                        <div className="flex h-12 items-center justify-center border-b bg-accent/60 px-2 text-sm font-semibold text-accent-foreground">
+                        <div className="flex h-12 items-center justify-center border-b bg-accent/60 px-2 text-sm font-semibold text-accent-foreground gap-1.5">
                           {cabin.name}
+                          {cabin.active === false && (
+                            <span className="text-xs font-normal text-muted-foreground">(Inactiva)</span>
+                          )}
                         </div>
                         <div className={cn("relative", isWeekend && "bg-[#AFB9D9]/15")} style={{ height: totalHeight }}>
                           {hours.map((h) => (
@@ -291,38 +276,43 @@ export function AgendaBoard({
                               key={h}
                               className="cursor-pointer border-b hover:bg-accent/30"
                               style={{ height: HOUR_PX }}
-                              onClick={() => openNew(cabin.id, h)}
+                              onClick={() => cabin.active !== false && openNew(cabin.id, h)}
                             />
                           ))}
 
-                          {/* Hueco que se está reservando (nueva cita) */}
-                          {panelOpen && !editing && draft && draft.cabinId === cabin.id && draft.date === date && (
+                          {/* Hueco que se está reservando (nueva cita o modificando) */}
+                          {panelOpen && draft && draft.cabinId === cabin.id && draft.date === date && (
                             <div
                               className="pointer-events-none absolute left-1 right-1 z-0 flex flex-col justify-start rounded-md border-2 border-dashed border-primary bg-primary/10"
                               style={{
                                 top: ((timeToMin(draft.time) - openingMinutes) / 60) * HOUR_PX,
-                                height: Math.max((Math.max(draft.duration, 0) / 60) * HOUR_PX, 24),
+                                height: Math.max((Math.max(draft.duration, 0) / 60) * HOUR_PX - 1, 16),
                               }}
                             >
                               <span className="px-1.5 py-0.5 text-[11px] font-medium text-primary">
-                                Nuevo · {draft.time}
+                                {editing ? `Modificando · ${draft.time}` : `Nuevo · ${draft.time}`}
                               </span>
                             </div>
                           )}
 
                           {cabinAppts.map((a) => {
                             const top = ((a.startMinutes - openingMinutes) / 60) * HOUR_PX
-                            const height = Math.max((a.durationMinutes / 60) * HOUR_PX, 28)
+                            // Altura exactamente proporcional (-1px de separación) para que
+                            // citas consecutivas no se solapen visualmente.
+                            const height = Math.max((a.durationMinutes / 60) * HOUR_PX - 1, 16)
                             const meta = STATUS_META[a.status as AppointmentStatus] ?? STATUS_META.PENDING
                             const reminded = ["SENT", "DELIVERED", "READ"].includes(a.reminderStatus)
                             const isCancelled = a.status === "CANCELLED"
+                            // Citas de 30 min o menos no tienen alto para 2 filas: layout compacto + tooltip.
+                            const isCompact = a.durationMinutes <= 30
                             return (
                               <ContextMenu key={a.id}>
                                 <ContextMenuTrigger asChild>
                                   <button
                                     onClick={() => openEdit(a)}
                                     className={cn(
-                                      "absolute left-1 right-1 z-10 overflow-hidden rounded-md border-l-4 p-1.5 text-left shadow-sm transition hover:shadow-md",
+                                      "absolute left-1 right-1 z-10 flex flex-col overflow-hidden rounded-md border-l-4 text-left shadow-sm transition hover:shadow-md",
+                                      isCompact ? "justify-center px-1.5 py-0.5" : "p-1.5",
                                       meta.className,
                                       panelOpen && editing && editing.id !== a.id && "opacity-50",
                                       panelOpen && editing?.id === a.id &&
@@ -330,22 +320,37 @@ export function AgendaBoard({
                                     )}
                                     style={{ top, height, borderLeftColor: a.workerColor }}
                                   >
-                                    <div className="flex items-baseline justify-between gap-1">
-                                      <p className="truncate text-xs font-semibold">
-                                        [{a.workerName}] {a.serviceName}
-                                      </p>
-                                      <p className="shrink-0 text-[11px] opacity-80">
-                                        {a.startLabel}–{a.endLabel} · {a.durationMinutes} min
-                                      </p>
-                                    </div>
-                                    <div className="flex items-center justify-between gap-1">
-                                      <p className="truncate text-xs">{a.customerName}</p>
-                                      <div className="flex shrink-0 items-center gap-1 text-[11px]">
-                                        <span className={cn("inline-block h-2 w-2 rounded-full", meta.dot)} />
-                                        {meta.label}
-                                        {reminded && <MessageCircle className="h-3 w-3 text-[#1E6B34]" />}
+                                    {isCompact ? (
+                                      <div className="flex items-center justify-between gap-1">
+                                        <p className="truncate text-xs">
+                                          <span className="font-semibold">[{a.workerName}] {a.serviceName}</span> · {a.customerName}
+                                        </p>
+                                        <div className="flex shrink-0 items-center gap-1 text-[11px]">
+                                          <span className="opacity-80">{a.startLabel}–{a.endLabel}</span>
+                                          <span className={cn("inline-block h-2 w-2 rounded-full", meta.dot)} />
+                                          {reminded && <MessageCircle className="h-3 w-3 text-[#1E6B34]" />}
+                                        </div>
                                       </div>
-                                    </div>
+                                    ) : (
+                                      <>
+                                        <div className="flex items-baseline justify-between gap-1">
+                                          <p className="truncate text-xs font-semibold">
+                                            [{a.workerName}] {a.serviceName}
+                                          </p>
+                                          <p className="shrink-0 text-[11px] opacity-80">
+                                            {a.startLabel}–{a.endLabel} · {a.durationMinutes} min
+                                          </p>
+                                        </div>
+                                        <div className="flex items-center justify-between gap-1">
+                                          <p className="truncate text-xs">{a.customerName}</p>
+                                          <div className="flex shrink-0 items-center gap-1 text-[11px]">
+                                            <span className={cn("inline-block h-2 w-2 rounded-full", meta.dot)} />
+                                            {meta.label}
+                                            {reminded && <MessageCircle className="h-3 w-3 text-[#1E6B34]" />}
+                                          </div>
+                                        </div>
+                                      </>
+                                    )}
                                   </button>
                                 </ContextMenuTrigger>
                                 <ContextMenuContent className="w-52">
@@ -370,24 +375,17 @@ export function AgendaBoard({
                                   )}
                                   {a.status !== "NO_SHOW" && !isCancelled && (
                                     <ContextMenuItem onClick={() => quickStatusChange(a.id, "NO_SHOW")}>
-                                      <UserX className="mr-2 h-4 w-4 text-orange-500" /> No asistió
+                                      <UserX className="mr-2 h-4 w-4 text-red-500" /> No asistió
                                     </ContextMenuItem>
                                   )}
                                   {!isCancelled && (
                                     <ContextMenuItem onClick={() => quickStatusChange(a.id, "CANCELLED")}>
-                                      <XCircle className="mr-2 h-4 w-4 text-red-500" /> Cancelar cita
+                                      <XCircle className="mr-2 h-4 w-4 text-muted-foreground" /> Cancelar cita
                                     </ContextMenuItem>
                                   )}
                                   <ContextMenuSeparator />
                                   <ContextMenuItem onClick={() => quickSendReminder(a.id)}>
                                     <Send className="mr-2 h-4 w-4" /> Enviar recordatorio
-                                  </ContextMenuItem>
-                                  <ContextMenuSeparator />
-                                  <ContextMenuItem
-                                    className="text-red-600 focus:text-red-600"
-                                    onClick={() => setDeleteTarget({ id: a.id, customerName: a.customerName })}
-                                  >
-                                    <Trash2 className="mr-2 h-4 w-4" /> Borrar cita
                                   </ContextMenuItem>
                                 </ContextMenuContent>
                               </ContextMenu>
@@ -412,22 +410,6 @@ export function AgendaBoard({
           />
         )}
 
-        <AlertDialog open={!!deleteTarget} onOpenChange={(o) => { if (!o) setDeleteTarget(null) }}>
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>¿Borrar esta cita?</AlertDialogTitle>
-              <AlertDialogDescription>
-                Esta acción no se puede deshacer.
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel>Cancelar</AlertDialogCancel>
-              <AlertDialogAction className="bg-destructive text-destructive-foreground hover:bg-destructive/90" onClick={confirmDelete}>
-                Borrar
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
 
         {panelOpen && (
           <AppointmentPanel

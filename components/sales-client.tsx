@@ -1255,7 +1255,7 @@ function LineRow({ line, workers, onUpdate, onRemove }: {
 
       <td className="px-2 py-2">
         <button type="button" onClick={onRemove}
-          className="h-7 w-7 rounded flex items-center justify-center text-muted-foreground hover:bg-red-50 hover:text-red-600 transition-colors opacity-0 group-hover:opacity-100">
+          className="h-7 w-7 rounded flex items-center justify-center text-red-400 hover:bg-red-100 hover:text-red-600 transition-colors">
           <Trash2 className="h-3.5 w-3.5" />
         </button>
       </td>

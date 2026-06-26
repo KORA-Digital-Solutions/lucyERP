@@ -40,6 +40,7 @@ export interface ClientRow {
   whatsappOptIn: boolean
   active: boolean
   balanceCents: number
+  debtCents: number
   lastAppointment: string | null
   daysSinceLastAppt: number | null
 }
@@ -188,20 +189,24 @@ function ClientProfileView({ row, onBack, onEdit }: { row: ClientRow; onBack: ()
               </div>
               <div className={cn(
                 "rounded-xl border p-4",
-                balance > 0 ? "border-green-200 bg-green-50/60" :
-                balance < 0 ? "border-red-200 bg-red-50/60" : "border-border bg-muted/20"
+                row.debtCents > 0 ? "border-red-200 bg-red-50/60" :
+                balance > 0 ? "border-green-200 bg-green-50/60" : "border-border bg-muted/20"
               )}>
                 <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2 flex items-center gap-1">
-                  <Wallet className="h-3.5 w-3.5" /> Saldo
+                  <Wallet className="h-3.5 w-3.5" /> Saldo y deuda
                 </p>
-                <p className={cn("text-3xl font-bold tabular-nums",
-                  balance > 0 ? "text-green-700" : balance < 0 ? "text-red-600" : "text-muted-foreground"
-                )}>
-                  {balance >= 0 ? "+" : "−"}{fmtEur(balance)}
-                </p>
-                <p className="text-xs text-muted-foreground mt-1">
-                  {balance > 0 ? "Saldo a favor del cliente" : balance < 0 ? "Deuda pendiente" : "Sin saldo ni deuda"}
-                </p>
+                {balance === 0 && row.debtCents === 0 ? (
+                  <p className="text-3xl font-bold tabular-nums text-muted-foreground">+{fmtEur(0)}</p>
+                ) : (
+                  <div className="space-y-0.5">
+                    {balance > 0 && (
+                      <p className="text-2xl font-bold tabular-nums text-green-700">+{fmtEur(balance)}<span className="text-xs font-normal text-muted-foreground ml-1.5">saldo a favor</span></p>
+                    )}
+                    {row.debtCents > 0 && (
+                      <p className="text-2xl font-bold tabular-nums text-red-600">−{fmtEur(row.debtCents)}<span className="text-xs font-normal text-muted-foreground ml-1.5">deuda pendiente</span></p>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -277,8 +282,8 @@ function ClientProfileView({ row, onBack, onEdit }: { row: ClientRow; onBack: ()
                   <p className="text-xs text-muted-foreground">Sin ventas registradas.</p>
                 ) : sales.map((s) => {
                   const date = new Date(s.createdAt).toLocaleDateString("es-ES", { day: "2-digit", month: "short", year: "numeric" })
-                  const statusCls = s.status === "PAID" ? "text-green-700" : s.status === "DEBT" ? "text-red-600" : "text-orange-600"
-                  const statusLabel = s.status === "PAID" ? "Pagado" : s.status === "DEBT" ? "Debido" : "Parcial"
+                  const statusCls = s.status === "PAID" ? "text-green-700" : "text-red-600"
+                  const statusLabel = s.status === "PAID" ? "Pagado" : "Debido"
                   return (
                     <div key={s.id} className="rounded-xl border p-3 space-y-1">
                       <div className="flex justify-between items-center">
@@ -437,7 +442,8 @@ export function ClientsClient({ rows, inactivityWarningDays }: { rows: ClientRow
                   <TableHead>F. nacimiento</TableHead>
                   <TableHead>WhatsApp</TableHead>
                   <TableHead>Última cita</TableHead>
-                  <TableHead>Saldo</TableHead>
+                  <TableHead>Saldo a favor</TableHead>
+                  <TableHead>Deuda</TableHead>
                   <TableHead>Estado</TableHead>
                   <TableHead className="text-right">
                     <div className="flex justify-end text-xs font-normal text-muted-foreground">
@@ -487,13 +493,15 @@ export function ClientsClient({ rows, inactivityWarningDays }: { rows: ClientRow
                         )}
                       </TableCell>
                       <TableCell>
-                        {r.balanceCents !== 0 ? (
-                          <span className={cn(
-                            "text-sm font-medium tabular-nums",
-                            r.balanceCents > 0 ? "text-green-700" : "text-red-600"
-                          )}>
-                            {r.balanceCents > 0 ? "+" : "−"}{fmtEur(r.balanceCents)}
-                          </span>
+                        {r.balanceCents > 0 ? (
+                          <span className="text-sm font-medium tabular-nums text-green-700">+{fmtEur(r.balanceCents)}</span>
+                        ) : (
+                          <span className="text-muted-foreground text-sm">—</span>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        {r.debtCents > 0 ? (
+                          <span className="text-sm font-medium tabular-nums text-red-600">−{fmtEur(r.debtCents)}</span>
                         ) : (
                           <span className="text-muted-foreground text-sm">—</span>
                         )}
@@ -517,7 +525,7 @@ export function ClientsClient({ rows, inactivityWarningDays }: { rows: ClientRow
                 })}
                 {filtered.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={8} className="py-8 text-center text-muted-foreground">Sin resultados.</TableCell>
+                    <TableCell colSpan={9} className="py-8 text-center text-muted-foreground">Sin resultados.</TableCell>
                   </TableRow>
                 )}
               </TableBody>

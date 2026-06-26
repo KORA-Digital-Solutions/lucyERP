@@ -3,7 +3,7 @@
 import { useState, useMemo, useRef, useEffect } from "react"
 import {
   ArrowLeft, Plus, Search, CreditCard, Banknote, AlertCircle,
-  Trash2, Gift, ShoppingCart, X, Clock, Wallet, Scissors, Package, Eye, CalendarDays,
+  Trash2, Gift, ShoppingCart, X, Clock, Wallet, Scissors, Package, Eye, CalendarDays, Receipt,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -80,7 +80,6 @@ function searchCustomers(customers: Customer[], query: string): Customer[] {
 const STATUS_META: Record<string, { label: string; cls: string }> = {
   PAID:    { label: "Pagado",  cls: "bg-green-100 text-green-800 border-green-200" },
   DEBT:    { label: "Debido",  cls: "bg-red-100 text-red-800 border-red-200" },
-  PARTIAL: { label: "Parcial", cls: "bg-orange-100 text-orange-800 border-orange-200" },
 }
 const PAYMENT_LABELS: Record<string, string> = { CARD: "Tarjeta", CASH: "Efectivo", BALANCE: "Saldo", DEBT: "Deuda" }
 
@@ -101,9 +100,6 @@ export function SalesClient({ sales, customers, services, products, workers, cur
   const [mode, setMode] = useState<"list" | "pos">("list")
   const [showNoCashDialog, setShowNoCashDialog] = useState(false)
   const [detailSale, setDetailSale] = useState<Sale | null>(null)
-  const [payingDebt, setPayingDebt] = useState<Sale | null>(null)
-  const [payDebtMethod, setPayDebtMethod] = useState<"CARD" | "CASH">("CASH")
-  const [debtLoading, setDebtLoading] = useState(false)
   const [clientSearch, setClientSearch] = useState("")
   const [workerFilter, setWorkerFilter] = useState("ALL")
   const [paymentFilter, setPaymentFilter] = useState("ALL")
@@ -156,7 +152,7 @@ export function SalesClient({ sales, customers, services, products, workers, cur
   }, [sales, clientSearch, workerFilter, paymentFilter, dateFrom, dateTo])
 
   if (mode === "pos") {
-    return <POSView customers={customers} services={services} products={products} workers={workers} currentUserId={currentUserId} onBack={() => setMode("list")} />
+    return <POSView sales={sales} customers={customers} services={services} products={products} workers={workers} currentUserId={currentUserId} onBack={() => setMode("list")} />
   }
 
   return (
@@ -263,7 +259,6 @@ export function SalesClient({ sales, customers, services, products, workers, cur
                 <th className="px-4 py-3 text-right font-medium">
                   <div className="flex justify-end text-xs font-normal text-muted-foreground">
                     <span className="flex w-20 items-center justify-center gap-1"><Eye className="h-3.5 w-3.5" /> Detalle</span>
-                    <span className="flex w-20 items-center justify-center gap-1"><Banknote className="h-3.5 w-3.5 text-green-600" /> Cobrar</span>
                   </div>
                 </th>
               </tr>
@@ -294,14 +289,6 @@ export function SalesClient({ sales, customers, services, products, workers, cur
                           <Button variant="ghost" size="icon" onClick={() => setDetailSale(s)}>
                             <Eye className="h-4 w-4" />
                           </Button>
-                        </span>
-                        <span className="flex w-20 justify-center">
-                          {(s.status === "DEBT" || s.status === "PARTIAL") && (
-                            <Button variant="ghost" size="icon" className="text-green-700 hover:text-green-800 hover:bg-green-50"
-                              onClick={() => { setPayingDebt(s); setPayDebtMethod("CASH") }}>
-                              <Banknote className="h-4 w-4" />
-                            </Button>
-                          )}
                         </span>
                       </div>
                     </td>
@@ -382,33 +369,6 @@ export function SalesClient({ sales, customers, services, products, workers, cur
         </Dialog>
       )}
 
-      {/* Pay debt */}
-      {payingDebt && (
-        <Dialog open onOpenChange={() => setPayingDebt(null)}>
-          <DialogContent style={{ maxWidth: "28rem" }}>
-            <DialogHeader><DialogTitle>Cobrar deuda</DialogTitle></DialogHeader>
-            <div className="space-y-4 text-sm">
-              <p>Pendiente: <span className="font-semibold">{fmtEur(payingDebt.totalCents - payingDebt.paidCents)}</span></p>
-              <Select value={payDebtMethod} onValueChange={(v) => setPayDebtMethod(v as "CARD" | "CASH")}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="CASH">Efectivo</SelectItem>
-                  <SelectItem value="CARD">Tarjeta</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setPayingDebt(null)}>Cancelar</Button>
-              <Button onClick={async () => {
-                setDebtLoading(true)
-                const res = await payDebt(payingDebt.id, payDebtMethod)
-                setDebtLoading(false)
-                if (res.ok) setPayingDebt(null); else alert(res.error)
-              }} disabled={debtLoading}>{debtLoading ? "Guardando…" : "Confirmar cobro"}</Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-      )}
     </div>
   )
 }
@@ -417,8 +377,8 @@ export function SalesClient({ sales, customers, services, products, workers, cur
    POS — pantalla completa
 ═══════════════════════════════════════════════════════════════════════════ */
 
-function POSView({ customers, services, products, workers, currentUserId, onBack }: {
-  customers: Customer[]; services: Service[]; products: Product[]
+function POSView({ sales, customers, services, products, workers, currentUserId, onBack }: {
+  sales: Sale[]; customers: Customer[]; services: Service[]; products: Product[]
   workers: Worker[]; currentUserId: string | null; onBack: () => void
 }) {
   const [customer, setCustomer] = useState<Customer | null>(null)
@@ -433,6 +393,47 @@ function POSView({ customers, services, products, workers, currentUserId, onBack
   const [loading, setLoading] = useState(false)
   const [errors, setErrors] = useState<string[]>([])
   const [showCancel, setShowCancel] = useState(false)
+  const [selectedDebtIds, setSelectedDebtIds] = useState<Set<string>>(new Set())
+
+  // Deuda pendiente (pendiente de cobro) por cliente, derivada de las ventas DEBT.
+  const debtByCustomer = useMemo(() => {
+    const m = new Map<string, number>()
+    for (const s of sales) {
+      if (s.status === "DEBT" && s.customer) {
+        m.set(s.customer.id, (m.get(s.customer.id) ?? 0) + (s.totalCents - s.paidCents))
+      }
+    }
+    return m
+  }, [sales])
+
+  // Deudas pendientes del cliente seleccionado
+  const customerDebts = useMemo(() => {
+    if (!customer) return []
+    return sales.filter(
+      (s) => s.customer?.id === customer.id && s.status === "DEBT"
+    )
+  }, [customer, sales])
+
+  // Al cambiar de cliente: autoseleccionar sus deudas pendientes y resetear el saldo aplicado a 0.
+  useEffect(() => {
+    setSelectedDebtIds(new Set(customerDebts.map((d) => d.id)))
+    setBalanceAppliedCents(0)
+    setBalanceInput("")
+  }, [customer?.id])
+
+  // El método "Deuda" no aplica si no hay líneas nuevas o si es una venta de tarjeta regalo.
+  useEffect(() => {
+    if (paymentMethod === "DEBT" && (lines.length === 0 || lines.some((l) => l.type === "GIFT_CARD"))) {
+      setPaymentMethod("CASH")
+    }
+  }, [lines])
+
+  // Al seleccionar método DEBT, deseleccionar todas las deudas pendientes
+  useEffect(() => {
+    if (paymentMethod === "DEBT") {
+      setSelectedDebtIds(new Set())
+    }
+  }, [paymentMethod])
 
   const now = new Date()
   const timeStr = now.toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" })
@@ -443,23 +444,34 @@ function POSView({ customers, services, products, workers, currentUserId, onBack
   const totalCents = subtotalCents - discountCents
   const customerBalance = customer?.balanceCents ?? 0
   const remainingCents = Math.max(0, totalCents - balanceAppliedCents)
+  // Saldo a favor que aún podría aplicarse a esta venta
+  const maxApplicableBalance = Math.min(Math.max(0, customerBalance), totalCents)
+  // No se permite generar deuda mientras quede saldo a favor sin aplicar
+  const debtBlockedByBalance = balanceAppliedCents < maxApplicableBalance
+  // Total de deudas anteriores seleccionadas para cobrar junto con la venta
+  const debtsTotalCents = paymentMethod === "DEBT"
+    ? 0
+    : customerDebts.filter((d) => selectedDebtIds.has(d.id)).reduce((s, d) => s + (d.totalCents - d.paidCents), 0)
+  // Importe total a cobrar en efectivo/tarjeta (venta + deudas)
+  const chargeCents = remainingCents + debtsTotalCents
   const tenderedCents = Math.round(Number(tenderedInput) * 100)
-  const changeCents = paymentMethod === "CASH" && tenderedCents > remainingCents ? tenderedCents - remainingCents : 0
+  const changeCents = paymentMethod === "CASH" && tenderedCents > chargeCents ? tenderedCents - chargeCents : 0
 
   const hasGiftCard = lines.some((l) => l.type === "GIFT_CARD")
 
-  // Ajustar saldo aplicado cuando cambia el cliente o el total
+  // Si la deuda deja de ser válida (queda saldo a favor sin aplicar), volver a Efectivo.
   useEffect(() => {
-    const maxApply = Math.min(customerBalance, totalCents)
-    setBalanceAppliedCents(maxApply)
-    setBalanceInput(maxApply > 0 ? (maxApply / 100).toFixed(2) : "")
-  }, [customer?.id, totalCents])
+    if (paymentMethod === "DEBT" && debtBlockedByBalance) {
+      setPaymentMethod("CASH")
+    }
+  }, [paymentMethod, debtBlockedByBalance])
 
   function validate(): string[] {
     const errs: string[] = []
-    if (lines.length === 0) errs.push("Añade al menos una línea al ticket.")
-    if (paymentMethod === "CASH" && tenderedCents > 0 && tenderedCents < remainingCents)
-      errs.push("El importe entregado es inferior al resto a cobrar.")
+    if (!customer)
+      errs.push("Selecciona un cliente antes de registrar la venta.")
+    if (lines.length === 0 && selectedDebtIds.size === 0)
+      errs.push("Añade al menos una línea al ticket o selecciona una deuda a cobrar.")
     lines.forEach((l) => {
       if (l.type === "SERVICE" && !l.workerId)
         errs.push(`Asigna un profesional a "${l.description}".`)
@@ -475,30 +487,52 @@ function POSView({ customers, services, products, workers, currentUserId, onBack
     setErrors([])
     setLoading(true)
 
-    const saleLines: SaleLineInput[] = lines.map((l) => ({
-      type: l.type,
-      serviceId: l.type === "SERVICE" ? l.itemId : undefined,
-      productId: l.type === "PRODUCT" ? l.itemId : undefined,
-      description: l.description,
-      quantity: l.quantity,
-      unitPriceCents: l.unitPriceCents,
-      discountPercent: l.discountPercent,
-      durationMinutes: l.durationMinutes ?? undefined,
-      totalCents: lineTotal(l),
-    }))
+    // Sólo se crea una venta nueva si hay líneas en el ticket
+    if (lines.length > 0) {
+      const saleLines: SaleLineInput[] = lines.map((l) => ({
+        type: l.type,
+        serviceId: l.type === "SERVICE" ? l.itemId : undefined,
+        productId: l.type === "PRODUCT" ? l.itemId : undefined,
+        description: l.description,
+        quantity: l.quantity,
+        unitPriceCents: l.unitPriceCents,
+        discountPercent: l.discountPercent,
+        durationMinutes: l.durationMinutes ?? undefined,
+        totalCents: lineTotal(l),
+      }))
 
-    const res = await createSale(
-      customer?.id ?? null,
-      hasGiftCard ? "GIFT_CARD" : "SALE",
-      paymentMethod,
-      saleLines,
-      notes || null,
-      giftRecipient?.id ?? null,
-      balanceAppliedCents,
-    )
+      const res = await createSale(
+        customer?.id ?? null,
+        hasGiftCard ? "GIFT_CARD" : "SALE",
+        paymentMethod,
+        saleLines,
+        notes || null,
+        giftRecipient?.id ?? null,
+        balanceAppliedCents,
+      )
+
+      if (!res.ok) {
+        setLoading(false)
+        setErrors([res.error ?? "Error inesperado"])
+        return
+      }
+    }
+
+    // Pagar deudas seleccionadas (sólo si el método no es DEBT)
+    if (selectedDebtIds.size > 0 && paymentMethod !== "DEBT") {
+      const debtPayMethod = paymentMethod as "CASH" | "CARD"
+      for (const debtId of selectedDebtIds) {
+        const debtRes = await payDebt(debtId, debtPayMethod)
+        if (!debtRes.ok) {
+          setLoading(false)
+          setErrors([`Error al cobrar deuda: ${debtRes.error ?? "Error inesperado"}`])
+          return
+        }
+      }
+    }
+
     setLoading(false)
-    if (res.ok) onBack()
-    else setErrors([res.error ?? "Error inesperado"])
+    onBack()
   }
 
   function addLine(line: DraftLine) {
@@ -530,9 +564,80 @@ function POSView({ customers, services, products, workers, currentUserId, onBack
             label="Cliente"
             customers={customers}
             selected={customer}
-            onSelect={setCustomer}
+            onSelect={(c) => { setCustomer(c); setErrors([]) }}
             onClear={() => setCustomer(null)}
+            debtByCustomerId={debtByCustomer}
           />
+          {!customer && (
+            <p className="text-xs text-destructive flex items-center gap-1.5 -mt-3">
+              <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+              Debes seleccionar un cliente para poder registrar la venta.
+            </p>
+          )}
+
+          {/* Deudas pendientes del cliente */}
+          {customerDebts.length > 0 && (
+            <div>
+              <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2 flex items-center gap-1.5">
+                <Receipt className="h-3.5 w-3.5 text-red-500" />
+                Deudas pendientes
+                <span className="ml-1 rounded-full bg-red-100 text-red-700 px-1.5 py-0.5 text-[10px] font-semibold">{customerDebts.length}</span>
+              </h3>
+              <div className="rounded-xl border border-red-200 bg-red-50/40 overflow-hidden">
+                {customerDebts.map((debt, i) => {
+                  const pending = debt.totalCents - debt.paidCents
+                  const checked = selectedDebtIds.has(debt.id)
+                  return (
+                    <label
+                      key={debt.id}
+                      className={cn(
+                        "flex items-center gap-3 px-4 py-3 cursor-pointer transition-colors",
+                        i > 0 && "border-t border-red-100",
+                        checked ? "bg-red-100/60" : "hover:bg-red-50"
+                      )}
+                    >
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4 rounded accent-red-600 shrink-0"
+                        checked={checked}
+                        disabled={paymentMethod === "DEBT"}
+                        onChange={(e) => {
+                          setSelectedDebtIds((prev) => {
+                            const next = new Set(prev)
+                            if (e.target.checked) next.add(debt.id)
+                            else next.delete(debt.id)
+                            return next
+                          })
+                        }}
+                      />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-red-800">
+                          {new Date(debt.createdAt).toLocaleDateString("es-ES", { day: "2-digit", month: "short", year: "numeric" })}
+                        </p>
+                        <p className="text-xs text-red-600 truncate">
+                          {debt.lines.map((l) => l.description).join(", ")}
+                        </p>
+                      </div>
+                      <span className="tabular-nums text-sm font-semibold text-red-700 shrink-0">{fmtEur(pending)}</span>
+                    </label>
+                  )
+                })}
+                {paymentMethod === "DEBT" && (
+                  <p className="px-4 py-2 text-xs text-muted-foreground border-t border-red-100 bg-white/60">
+                    No se pueden cobrar deudas anteriores con método "Deuda".
+                  </p>
+                )}
+                {selectedDebtIds.size > 0 && paymentMethod !== "DEBT" && (
+                  <div className="px-4 py-2.5 border-t border-red-200 bg-red-100/50 flex justify-between items-center text-sm font-medium text-red-800">
+                    <span>{selectedDebtIds.size} deuda{selectedDebtIds.size !== 1 ? "s" : ""} seleccionada{selectedDebtIds.size !== 1 ? "s" : ""}</span>
+                    <span className="tabular-nums">
+                      {fmtEur(customerDebts.filter((d) => selectedDebtIds.has(d.id)).reduce((s, d) => s + d.totalCents - d.paidCents, 0))}
+                    </span>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
 
           {/* Añadir línea */}
           <AddLinePanel
@@ -544,6 +649,8 @@ function POSView({ customers, services, products, workers, currentUserId, onBack
             giftRecipient={giftRecipient}
             onGiftRecipientChange={setGiftRecipient}
             onAdd={addLine}
+            hasGiftCard={hasGiftCard}
+            hasRegularLines={lines.some((l) => l.type !== "GIFT_CARD")}
           />
 
           {/* Líneas */}
@@ -594,21 +701,47 @@ function POSView({ customers, services, products, workers, currentUserId, onBack
           {/* Resumen */}
           <div className="rounded-xl border bg-background p-4 space-y-2 text-sm">
             <h3 className="font-semibold mb-3">Resumen</h3>
-            <div className="flex justify-between text-muted-foreground">
-              <span>Subtotal</span><span className="tabular-nums">{fmtEur(subtotalCents)}</span>
-            </div>
+
+            {/* Desglose de descuentos: solo si hay descuento (si no, Subtotal = Total) */}
             {discountCents > 0 && (
-              <div className="flex justify-between text-green-700">
-                <span>Descuentos</span><span className="tabular-nums">−{fmtEur(discountCents)}</span>
+              <>
+                <div className="flex justify-between text-muted-foreground">
+                  <span>Subtotal</span><span className="tabular-nums">{fmtEur(subtotalCents)}</span>
+                </div>
+                <div className="flex justify-between text-green-700">
+                  <span>Descuentos</span><span className="tabular-nums">−{fmtEur(discountCents)}</span>
+                </div>
+              </>
+            )}
+
+            {/* Línea de la venta nueva: "Venta" si además hay deudas, "Total" si va sola */}
+            {(debtsTotalCents === 0 || totalCents > 0) && (
+              <div className={cn(
+                "flex justify-between",
+                debtsTotalCents > 0 ? "text-muted-foreground" : "font-bold text-lg border-t pt-2 mt-1"
+              )}>
+                <span>{debtsTotalCents > 0 ? "Venta" : "Total"}</span>
+                <span className="tabular-nums">{fmtEur(totalCents)}</span>
               </div>
             )}
-            <div className="flex justify-between font-bold text-lg border-t pt-2 mt-1">
-              <span>Total</span><span className="tabular-nums">{fmtEur(totalCents)}</span>
-            </div>
+
+            {/* Deudas anteriores incluidas en el cobro */}
+            {debtsTotalCents > 0 && (
+              <>
+                <div className="flex justify-between text-red-700">
+                  <span className="flex items-center gap-1.5"><Receipt className="h-3.5 w-3.5" /> Deudas pendientes</span>
+                  <span className="tabular-nums">+{fmtEur(debtsTotalCents)}</span>
+                </div>
+                <div className="flex justify-between font-bold text-lg border-t pt-2 mt-1">
+                  <span>A cobrar ahora</span><span className="tabular-nums">{fmtEur(chargeCents)}</span>
+                </div>
+              </>
+            )}
+
             {discountCents > 0 && <p className="text-xs text-green-700">Ahorro: {fmtEur(discountCents)}</p>}
 
-            {/* Saldo del cliente */}
-            {customerBalance > 0 && (
+            {/* Saldo del cliente (no aplica al vender una tarjeta regalo) */}
+            {customerBalance > 0 && !hasGiftCard && (
               <div className="border-t pt-3 mt-1 space-y-2">
                 <div className="flex items-center justify-between text-xs text-muted-foreground">
                   <span className="flex items-center gap-1.5"><Wallet className="h-3.5 w-3.5" /> Saldo del cliente</span>
@@ -661,43 +794,72 @@ function POSView({ customers, services, products, workers, currentUserId, onBack
           {/* Pago */}
           <div className="rounded-xl border bg-background p-4 space-y-3 text-sm">
             <h3 className="font-semibold">
-              {remainingCents === 0 ? "Forma de pago" : `Cobrar ${fmtEur(remainingCents)}`}
+              {chargeCents === 0 ? "Forma de pago" : `Cobrar ${fmtEur(chargeCents)}`}
             </h3>
 
-            {remainingCents === 0 ? (
-              <div className="rounded-lg bg-green-50 border border-green-200 px-3 py-2.5 text-xs text-green-700 text-center font-medium">
-                Cubierto completamente con saldo del cliente
-              </div>
+            {chargeCents === 0 ? (
+              totalCents > 0 && remainingCents === 0 ? (
+                <div className="rounded-lg bg-green-50 border border-green-200 px-3 py-2.5 text-xs text-green-700 text-center font-medium">
+                  Cubierto completamente con saldo del cliente
+                </div>
+              ) : (
+                <div className="rounded-lg bg-muted/40 border px-3 py-2.5 text-xs text-muted-foreground text-center">
+                  Añade líneas al ticket o selecciona deudas para cobrar.
+                </div>
+              )
             ) : (
               <>
-                <div className="grid grid-cols-3 gap-2">
+                <div className={cn("grid gap-2", hasGiftCard ? "grid-cols-2" : "grid-cols-3")}>
                   {([
                     { id: "CASH", Icon: Banknote,    label: "Efectivo" },
                     { id: "CARD", Icon: CreditCard,  label: "Tarjeta" },
-                    { id: "DEBT", Icon: AlertCircle, label: "Deuda" },
-                  ] as const).map(({ id, Icon, label }) => (
-                    <button key={id} type="button" onClick={() => setPaymentMethod(id)}
-                      className={cn(
-                        "flex flex-col items-center gap-1.5 rounded-lg border-2 py-3 px-1 text-xs font-medium transition-colors",
-                        paymentMethod === id
-                          ? "border-primary bg-primary/5 text-primary"
-                          : "border-border text-muted-foreground hover:border-primary/40 hover:text-foreground"
-                      )}>
-                      <Icon className="h-5 w-5" />{label}
-                    </button>
-                  ))}
+                    // Una tarjeta regalo no se vende a crédito: sin método "Deuda".
+                    ...(hasGiftCard ? [] : [{ id: "DEBT", Icon: AlertCircle, label: "Deuda" }]),
+                  ] as const).map(({ id, Icon, label }) => {
+                    const debtDisabled = id === "DEBT" && (
+                      (lines.length === 0 && selectedDebtIds.size > 0) || debtBlockedByBalance
+                    )
+                    return (
+                      <button key={id} type="button"
+                        onClick={() => !debtDisabled && setPaymentMethod(id)}
+                        disabled={debtDisabled}
+                        className={cn(
+                          "flex flex-col items-center gap-1.5 rounded-lg border-2 py-3 px-1 text-xs font-medium transition-colors",
+                          debtDisabled
+                            ? "border-border text-muted-foreground/40 cursor-not-allowed opacity-40"
+                            : paymentMethod === id
+                              ? "border-primary bg-primary/5 text-primary"
+                              : "border-border text-muted-foreground hover:border-primary/40 hover:text-foreground"
+                        )}>
+                        <Icon className="h-5 w-5" />{label}
+                      </button>
+                    )
+                  })}
                 </div>
+
+                {debtBlockedByBalance && (
+                  <p className="text-xs text-muted-foreground flex items-start gap-1.5">
+                    <AlertCircle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+                    No se puede dejar a deuda mientras el cliente tenga saldo a favor sin aplicar. Aplica el saldo disponible primero.
+                  </p>
+                )}
 
                 {paymentMethod === "CASH" && (
                   <div className="space-y-2">
                     <label className="text-xs text-muted-foreground">Importe entregado (€)</label>
                     <Input
                       type="number" step="0.01" min="0"
-                      placeholder={(remainingCents / 100).toFixed(2)}
+                      placeholder={(chargeCents / 100).toFixed(2)}
                       value={tenderedInput}
-                      onChange={(e) => setTenderedInput(e.target.value)}
-                      className="tabular-nums"
+                      onChange={(e) => { setTenderedInput(e.target.value); setErrors([]) }}
+                      className={cn("tabular-nums", tenderedInput !== "" && tenderedCents < chargeCents && "border-destructive focus-visible:ring-destructive")}
                     />
+                    {tenderedInput !== "" && tenderedCents < chargeCents && (
+                      <p className="text-xs text-destructive flex items-center gap-1">
+                        <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+                        El importe entregado es inferior al total a cobrar.
+                      </p>
+                    )}
                     {changeCents > 0 && (
                       <div className="flex justify-between rounded-lg bg-green-50 border border-green-200 px-3 py-2">
                         <span className="text-green-700">Cambio</span>
@@ -732,8 +894,8 @@ function POSView({ customers, services, products, workers, currentUserId, onBack
           {/* Actions */}
           <div className="space-y-2 mt-auto pt-2">
             <Button className="w-full h-12 text-base font-semibold" onClick={handleSubmit}
-              disabled={loading || lines.length === 0}>
-              {loading ? "Registrando…" : remainingCents === 0 ? `Registrar · ${fmtEur(totalCents)}` : `Cobrar · ${fmtEur(remainingCents)}`}
+              disabled={loading || !customer || (lines.length === 0 && selectedDebtIds.size === 0) || (paymentMethod === "CASH" && tenderedInput !== "" && tenderedCents < chargeCents)}>
+              {loading ? "Registrando…" : `Registrar · ${fmtEur(chargeCents > 0 ? chargeCents : totalCents)}`}
             </Button>
             <Button variant="outline" className="w-full" onClick={handleBack}>Cancelar</Button>
           </div>
@@ -758,9 +920,10 @@ function POSView({ customers, services, products, workers, currentUserId, onBack
 
 /* ─── Customer selector (shared) ─────────────────────────────────────────── */
 
-function CustomerSelector({ label, customers, selected, onSelect, onClear, placeholder }: {
+function CustomerSelector({ label, customers, selected, onSelect, onClear, placeholder, debtByCustomerId }: {
   label: string; customers: Customer[]; selected: Customer | null
   onSelect: (c: Customer) => void; onClear: () => void; placeholder?: string
+  debtByCustomerId?: Map<string, number>
 }) {
   const [query, setQuery] = useState("")
   const [open, setOpen] = useState(false)
@@ -783,11 +946,14 @@ function CustomerSelector({ label, customers, selected, onSelect, onClear, place
         <div className="flex items-center gap-3 rounded-xl border bg-background px-4 py-2.5">
           <div className="flex-1 min-w-0">
             <p className="font-medium truncate">{customerLabel(selected)}</p>
-            {selected.balanceCents !== 0 && (
-              <p className={cn("text-xs", selected.balanceCents > 0 ? "text-green-700" : "text-red-600")}>
-                {selected.balanceCents > 0 ? "Saldo:" : "Debe:"} {fmtEur(selected.balanceCents)}
-              </p>
-            )}
+            <div className="flex gap-3 text-xs">
+              {selected.balanceCents > 0 && (
+                <span className="text-green-700">Saldo: {fmtEur(selected.balanceCents)}</span>
+              )}
+              {(debtByCustomerId?.get(selected.id) ?? 0) > 0 && (
+                <span className="text-red-600">Debe: {fmtEur(debtByCustomerId!.get(selected.id)!)}</span>
+              )}
+            </div>
           </div>
           <Button variant="ghost" size="sm" className="text-muted-foreground shrink-0 h-7 w-7 p-0" onClick={onClear}>
             <X className="h-4 w-4" />
@@ -820,11 +986,12 @@ function CustomerSelector({ label, customers, selected, onSelect, onClear, place
                 className="w-full flex items-center justify-between px-4 py-2.5 hover:bg-muted/60 text-left transition-colors"
                 onClick={() => { onSelect(c); setQuery(""); setOpen(false) }}>
                 <span className="text-sm font-medium truncate">{customerLabel(c)}</span>
-                {c.balanceCents !== 0 && (
-                  <span className={cn("text-xs ml-3 shrink-0", c.balanceCents > 0 ? "text-green-700" : "text-red-600")}>
-                    {c.balanceCents > 0 ? "+" : "−"}{fmtEur(c.balanceCents)}
-                  </span>
-                )}
+                <span className="flex gap-2 ml-3 shrink-0 text-xs">
+                  {c.balanceCents > 0 && <span className="text-green-700">+{fmtEur(c.balanceCents)}</span>}
+                  {(debtByCustomerId?.get(c.id) ?? 0) > 0 && (
+                    <span className="text-red-600">−{fmtEur(debtByCustomerId!.get(c.id)!)}</span>
+                  )}
+                </span>
               </button>
             ))
           )}
@@ -838,13 +1005,15 @@ function CustomerSelector({ label, customers, selected, onSelect, onClear, place
 
 type AddLineTab = "SERVICE" | "PRODUCT" | "GIFT_CARD"
 
-function AddLinePanel({ services, products, workers, currentUserId, customers, giftRecipient, onGiftRecipientChange, onAdd }: {
+function AddLinePanel({ services, products, workers, currentUserId, customers, giftRecipient, onGiftRecipientChange, onAdd, hasGiftCard, hasRegularLines }: {
   services: Service[]; products: Product[]; workers: Worker[]
   currentUserId: string | null
   customers: Customer[]
   giftRecipient: Customer | null
   onGiftRecipientChange: (c: Customer | null) => void
   onAdd: (line: DraftLine) => void
+  hasGiftCard: boolean
+  hasRegularLines: boolean
 }) {
   const [tab, setTab] = useState<AddLineTab>("SERVICE")
   const [query, setQuery] = useState("")
@@ -891,20 +1060,33 @@ function AddLinePanel({ services, products, workers, currentUserId, customers, g
         <div className="flex gap-1">
           {tabs.map((t) => {
             const Icon = t.icon
+            // Una tarjeta regalo se vende sola: no se mezcla con servicios/productos.
+            const disabled = t.id === "GIFT_CARD" ? hasRegularLines : hasGiftCard
             return (
               <button key={t.id} type="button"
-                onClick={() => { setTab(t.id); setQuery(""); setOpen(false) }}
+                disabled={disabled}
+                onClick={() => { if (disabled) return; setTab(t.id); setQuery(""); setOpen(false) }}
                 className={cn(
                   "flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
-                  tab === t.id
-                    ? "bg-primary text-primary-foreground"
-                    : "bg-muted text-muted-foreground hover:bg-muted/80 hover:text-foreground"
+                  disabled
+                    ? "bg-muted/50 text-muted-foreground/40 cursor-not-allowed"
+                    : tab === t.id
+                      ? "bg-primary text-primary-foreground"
+                      : "bg-muted text-muted-foreground hover:bg-muted/80 hover:text-foreground"
                 )}>
                 <Icon className="h-3.5 w-3.5" />{t.label}
               </button>
             )
           })}
         </div>
+        {(hasGiftCard || hasRegularLines) && (
+          <p className="text-xs text-muted-foreground flex items-start gap-1.5">
+            <AlertCircle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+            {hasGiftCard
+              ? "Una tarjeta regalo se vende en un ticket aparte. Quita la tarjeta para añadir servicios o productos."
+              : "No se puede añadir una tarjeta regalo a una venta con servicios o productos."}
+          </p>
+        )}
 
         {tab === "GIFT_CARD" ? (
           <div className="space-y-3">

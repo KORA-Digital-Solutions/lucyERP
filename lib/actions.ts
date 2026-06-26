@@ -567,27 +567,40 @@ export async function createSale(
     const discountCents = lines.reduce((s, l) => s + Math.round(l.unitPriceCents * l.quantity * l.discountPercent / 100), 0)
     const totalCents = lines.reduce((s, l) => s + l.totalCents, 0)
 
-    const balanceUsed = customerId ? Math.min(Math.max(0, balanceAppliedCents), totalCents) : 0
-    const remainingCents = totalCents - balanceUsed
-
-    let status: "PAID" | "DEBT" | "PARTIAL" = "PAID"
-    let paidCents = totalCents
-
-    if (saleType === "GIFT_CARD") {
-      status = "PAID"
-      paidCents = totalCents
-    } else if (paymentMethod === "DEBT") {
-      paidCents = balanceUsed
-      if (paidCents >= totalCents) status = "PAID"
-      else if (paidCents > 0) status = "PARTIAL"
-      else status = "DEBT"
-    } else {
-      // CASH or CARD: remainder is fully paid now
-      paidCents = totalCents
-      status = "PAID"
-    }
-
     const sale = await prisma.$transaction(async (tx) => {
+      // Saldo a favor disponible (solo positivo) del cliente comprador
+      let availableBalance = 0
+      if (customerId && saleType !== "GIFT_CARD") {
+        const cust = await tx.customer.findUnique({ where: { id: customerId }, select: { balanceCents: true } })
+        availableBalance = Math.max(0, cust?.balanceCents ?? 0)
+      }
+
+      // Saldo aplicado a la venta:
+      //  - CASH/CARD: se respeta lo que eligió el usuario (puede dejar parte sin cubrir y pagar el resto).
+      //  - DEBT: el saldo a favor cubre la deuda automáticamente; sólo el exceso queda como deuda.
+      // Nunca supera el saldo disponible ni el total de la venta.
+      let balanceUsed = customerId ? Math.min(Math.max(0, balanceAppliedCents), totalCents, availableBalance) : 0
+      if (paymentMethod === "DEBT") {
+        balanceUsed = Math.min(totalCents, availableBalance)
+      }
+      const remainingCents = totalCents - balanceUsed
+
+      let status: "PAID" | "DEBT" = "PAID"
+      let paidCents = totalCents
+      if (saleType === "GIFT_CARD") {
+        status = "PAID"
+        paidCents = totalCents
+      } else if (paymentMethod === "DEBT") {
+        // El saldo a favor cubre parte; si queda algo pendiente es deuda ("Debido"),
+        // no un pago parcial. Sólo es "Pagado" si el saldo cubre el total.
+        paidCents = balanceUsed
+        status = paidCents >= totalCents ? "PAID" : "DEBT"
+      } else {
+        // CASH or CARD: remainder is fully paid now
+        paidCents = totalCents
+        status = "PAID"
+      }
+
       const s = await tx.sale.create({
         data: {
           clinicId,
@@ -641,20 +654,13 @@ export async function createSale(
         }
       }
 
-      // Movimientos de saldo/deuda del cliente comprador
-      if (customerId && saleType !== "GIFT_CARD") {
-        if (balanceUsed > 0) {
-          await tx.customerBalanceMovement.create({
-            data: { clinicId, customerId, userId: session.userId, type: "BALANCE_USED", amountCents: -balanceUsed, saleId: s.id, notes: null },
-          })
-          await tx.customer.update({ where: { id: customerId }, data: { balanceCents: { decrement: balanceUsed } } })
-        }
-        if (paymentMethod === "DEBT" && remainingCents > 0) {
-          await tx.customerBalanceMovement.create({
-            data: { clinicId, customerId, userId: session.userId, type: "DEBT_CREATED", amountCents: -remainingCents, saleId: s.id, notes: null },
-          })
-          await tx.customer.update({ where: { id: customerId }, data: { balanceCents: { decrement: remainingCents } } })
-        }
+      // Saldo a favor usado (el saldo es solo crédito, nunca negativo).
+      // La deuda NO toca el saldo: vive en el estado de la venta (status = DEBT).
+      if (customerId && saleType !== "GIFT_CARD" && balanceUsed > 0) {
+        await tx.customerBalanceMovement.create({
+          data: { clinicId, customerId, userId: session.userId, type: "BALANCE_USED", amountCents: -balanceUsed, saleId: s.id, notes: null },
+        })
+        await tx.customer.update({ where: { id: customerId }, data: { balanceCents: { decrement: balanceUsed } } })
       }
 
       // Actualizar caja del día (solo el importe cobrado en efectivo/tarjeta, no el saldo)
@@ -696,14 +702,8 @@ export async function payDebt(saleId: string, paymentMethod: "CARD" | "CASH"): P
       const pending = sale.totalCents - sale.paidCents
       if (pending <= 0) return
 
+      // Pagar la deuda cierra la venta y entra en caja. El saldo a favor no se toca.
       await tx.sale.update({ where: { id: saleId }, data: { status: "PAID", paidCents: sale.totalCents, paymentMethod } })
-
-      if (sale.customerId) {
-        await tx.customerBalanceMovement.create({
-          data: { clinicId, customerId: sale.customerId, userId: session.userId, type: "DEBT_PAID", amountCents: pending, saleId, notes: null },
-        })
-        await tx.customer.update({ where: { id: sale.customerId }, data: { balanceCents: { increment: pending } } })
-      }
 
       const today = new Date().toISOString().slice(0, 10)
       const existingCash = await tx.cashRegister.findUnique({ where: { clinicId_date: { clinicId, date: today } } })

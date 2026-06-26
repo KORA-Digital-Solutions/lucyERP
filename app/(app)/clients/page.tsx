@@ -16,6 +16,10 @@ export default async function ClientsPage() {
         orderBy: { startAt: "desc" },
         take: 1,
       },
+      sales: {
+        where: { status: "DEBT" },
+        select: { totalCents: true, paidCents: true },
+      },
     },
   })
 
@@ -41,6 +45,7 @@ export default async function ClientsPage() {
       whatsappOptIn: c.whatsappOptIn,
       active: c.active ?? true,
       balanceCents: c.balanceCents,
+      debtCents: c.sales.reduce((s, x) => s + (x.totalCents - x.paidCents), 0),
       lastAppointment: lastApptDate
         ? lastApptDate.toLocaleString("es-ES", { day: "2-digit", month: "short", year: "numeric" })
         : null,

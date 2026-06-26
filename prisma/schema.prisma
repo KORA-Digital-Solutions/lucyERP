@@ -96,7 +96,7 @@ model Customer {
   notes         String?
   whatsappOptIn Boolean   @default(true)
   active        Boolean   @default(true)
-  balanceCents  Int       @default(0)
+  balanceCents  Int       @default(0) // Saldo a favor (crédito), siempre >= 0. La deuda vive en Sale.status = DEBT.
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
@@ -210,7 +210,7 @@ model StockMovement {
 }
 
 // saleType: "SALE" | "GIFT_CARD"
-// status: "PAID" | "DEBT" | "PARTIAL"
+// status: "PAID" | "DEBT"
 // paymentMethod: "CARD" | "CASH" | "BALANCE" | "DEBT"
 model Sale {
   id            String   @id @default(cuid())
@@ -258,7 +258,7 @@ model SaleLine {
   @@index([saleId])
 }
 
-// type: "GIFT_CARD_IN" | "BALANCE_USED" | "DEBT_CREATED" | "DEBT_PAID"
+// type: "GIFT_CARD_IN" | "BALANCE_USED"  (DEBT_CREATED/DEBT_PAID: legacy, ya no se generan)
 model CustomerBalanceMovement {
   id          String   @id @default(cuid())
   clinicId    String

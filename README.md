@@ -47,7 +47,7 @@ WHATSAPP_WEBHOOK_VERIFY_TOKEN=
 
 - **Agenda** — vista diaria por cabinas, crear/editar/cancelar citas, validación de solapamientos de cabina y trabajador
 - **Clientes** — CRUD con saldo/monedero (gift cards, deuda), historial de movimientos, alerta de inactividad
-- **Ventas** — TPV con líneas de servicio y producto, métodos de pago, descuentos, deuda parcial
+- **Ventas** — TPV con líneas de servicio y producto, métodos de pago, descuentos, deuda
 - **Caja** — apertura y cierre diario con desglose de billetes y cuadre
 - **Stock** — productos, proveedores, movimientos de entrada/consumo/venta, alertas de mínimo
 - **Servicios, trabajadores y cabinas** — CRUD completo con configuración por defecto

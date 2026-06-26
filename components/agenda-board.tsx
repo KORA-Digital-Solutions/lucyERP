@@ -31,6 +31,7 @@ import {
 } from "@/components/ui/alert-dialog"
 import { cn } from "@/lib/utils"
 import { STATUS_META, type AppointmentStatus } from "@/lib/enums"
+import { MiniCalendar } from "@/components/mini-calendar"
 import {
   AppointmentPanel,
   type CustomerOption,
@@ -212,10 +213,13 @@ export function AgendaBoard({
               </Button>
             </div>
           </div>
-          <p className="capitalize text-muted-foreground">
-            {longDate}
-            {isWeekend && <span className="ml-2 text-xs uppercase tracking-wide">· fin de semana</span>}
-          </p>
+          <div className="flex items-center gap-1.5">
+            <MiniCalendar
+              date={date}
+              longDate={longDate + (isWeekend ? " · fin de semana" : "")}
+              onSelect={(iso) => router.push(`/agenda?date=${iso}`)}
+            />
+          </div>
         </div>
 
         <div className="flex flex-wrap items-center gap-3">

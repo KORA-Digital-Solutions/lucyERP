@@ -736,6 +736,9 @@ export async function openCashRegister(openingCashCents: number): Promise<Action
     const clinicId = await getActiveClinicId()
     const today = new Date().toISOString().slice(0, 10)
 
+    if (!Number.isFinite(openingCashCents) || openingCashCents < 0)
+      return { ok: false, error: "El saldo inicial no puede ser negativo." }
+
     const existing = await prisma.cashRegister.findUnique({ where: { clinicId_date: { clinicId, date: today } } })
     if (existing) return { ok: false, error: "Ya hay una caja abierta para hoy." }
 

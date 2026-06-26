@@ -51,8 +51,13 @@ export function CashRegisterClient({ todayRegister, history, suggestedOpeningCen
   const [error, setError] = useState("")
 
   async function handleOpen() {
+    const openingCents = Math.round(Number(openingInput) * 100)
+    if (!Number.isFinite(openingCents) || openingCents < 0) {
+      setError("El saldo inicial no puede ser negativo.")
+      return
+    }
     setLoading(true); setError("")
-    const res = await openCashRegister(Math.round(Number(openingInput) * 100))
+    const res = await openCashRegister(openingCents)
     setLoading(false)
     if (res.ok) setShowOpen(false)
     else setError(res.error ?? "Error")
@@ -219,7 +224,7 @@ export function CashRegisterClient({ todayRegister, history, suggestedOpeningCen
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowOpen(false)}>Cancelar</Button>
-            <Button onClick={handleOpen} disabled={loading}>{loading ? "Abriendo…" : "Abrir caja"}</Button>
+            <Button onClick={handleOpen} disabled={loading || Number(openingInput) < 0}>{loading ? "Abriendo…" : "Abrir caja"}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

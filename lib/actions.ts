@@ -827,6 +827,29 @@ export async function getClientProfile(customerId: string) {
   return { customer, movements, recentSales, appointments }
 }
 
+export async function getMonthOccupancy(
+  year: number,
+  month: number,
+): Promise<Record<string, string[]>> {
+  const session = await getSession()
+  if (!session) return {}
+  const clinicId = await getActiveClinicId()
+  const start = new Date(year, month, 1)
+  const end = new Date(year, month + 1, 0, 23, 59, 59, 999)
+  const appts = await prisma.appointment.findMany({
+    where: { clinicId, startAt: { gte: start, lte: end }, status: { not: "CANCELLED" } },
+    select: { startAt: true, status: true },
+  })
+  const result: Record<string, string[]> = {}
+  for (const a of appts) {
+    const d = a.startAt
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
+    if (!result[key]) result[key] = []
+    result[key].push(a.status)
+  }
+  return result
+}
+
 function errMsg(e: unknown): string {
   return e instanceof Error ? e.message : "Error inesperado"
 }

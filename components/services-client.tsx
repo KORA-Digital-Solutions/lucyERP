@@ -3,7 +3,7 @@
 import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
-import { Plus, Pencil } from "lucide-react"
+import { Plus, Pencil, ToggleRight } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -79,7 +79,12 @@ export function ServicesClient({ rows }: { rows: ServiceRow[] }) {
               <TableHead>Precio</TableHead>
               <TableHead>Tipo tarifa</TableHead>
               <TableHead>Activo</TableHead>
-              <TableHead className="text-right">Acciones</TableHead>
+              <TableHead className="text-right">
+                <div className="flex justify-end text-xs font-normal text-muted-foreground">
+                  <span className="flex w-36 items-center justify-center gap-1"><ToggleRight className="h-3.5 w-3.5 text-primary" /> Activar/Desactivar</span>
+                  <span className="flex w-20 items-center justify-center gap-1"><Pencil className="h-3.5 w-3.5" /> Editar</span>
+                </div>
+              </TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -102,11 +107,17 @@ export function ServicesClient({ rows }: { rows: ServiceRow[] }) {
                     {r.active ? "Activo" : "Inactivo"}
                   </Badge>
                 </TableCell>
-                <TableCell className="text-right">
-                  <Switch checked={r.active} onCheckedChange={() => onToggle(r)} className="mr-2 align-middle" />
-                  <Button variant="ghost" size="icon" onClick={() => openEdit(r)}>
-                    <Pencil className="h-4 w-4" />
-                  </Button>
+                <TableCell>
+                  <div className="flex items-center justify-end">
+                    <span className="flex w-36 justify-center">
+                      <Switch checked={r.active} onCheckedChange={() => onToggle(r)} />
+                    </span>
+                    <span className="flex w-20 justify-center">
+                      <Button variant="ghost" size="icon" onClick={() => openEdit(r)}>
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                    </span>
+                  </div>
                 </TableCell>
               </TableRow>
             ))}

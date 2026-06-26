@@ -439,7 +439,11 @@ export function ClientsClient({ rows, inactivityWarningDays }: { rows: ClientRow
                   <TableHead>Última cita</TableHead>
                   <TableHead>Saldo</TableHead>
                   <TableHead>Estado</TableHead>
-                  <TableHead className="text-right">Acciones</TableHead>
+                  <TableHead className="text-right">
+                    <div className="flex justify-end text-xs font-normal text-muted-foreground">
+                      <span className="flex w-20 items-center justify-center gap-1"><Pencil className="h-3.5 w-3.5" /> Editar</span>
+                    </div>
+                  </TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -499,15 +503,14 @@ export function ClientsClient({ rows, inactivityWarningDays }: { rows: ClientRow
                           {badge.icon} {badge.label}
                         </Badge>
                       </TableCell>
-                      <TableCell className="text-right">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          title="Editar"
-                          onClick={(e) => { e.stopPropagation(); openEdit(r) }}
-                        >
-                          <Pencil className="h-4 w-4" />
-                        </Button>
+                      <TableCell>
+                        <div className="flex items-center justify-end">
+                          <span className="flex w-20 justify-center">
+                            <Button variant="ghost" size="icon" onClick={(e) => { e.stopPropagation(); openEdit(r) }}>
+                              <Pencil className="h-4 w-4" />
+                            </Button>
+                          </span>
+                        </div>
                       </TableCell>
                     </TableRow>
                   )

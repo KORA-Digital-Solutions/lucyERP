@@ -30,7 +30,7 @@ export default async function DashboardPage() {
     }),
     prisma.appointment.findMany({
       where: { clinicId: clinic.id, startAt: { gte: now }, status: { in: ["PENDING", "CONFIRMED"] } },
-      include: { customer: true, service: true },
+      include: { customer: true, service: true, worker: true },
       orderBy: { startAt: "asc" },
       take: 6,
     }),
@@ -89,7 +89,9 @@ export default async function DashboardPage() {
                 const reminded = ["SENT", "DELIVERED", "READ"].includes(a.reminderStatus)
                 return (
                   <div key={a.id} className="flex items-center gap-4 rounded-lg p-3 transition-colors hover:bg-muted/50">
-                    <span className="w-14 shrink-0 text-sm font-medium">{toTimeString(a.startAt)}</span>
+                    <div className="w-20 shrink-0 text-xs text-muted-foreground">
+                      <span className="font-medium text-foreground">{toTimeString(a.startAt)}</span>
+                    </div>
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-sm font-medium">
                         {a.customer.firstName} {a.customer.lastName ?? ""}
@@ -114,21 +116,29 @@ export default async function DashboardPage() {
           <CardContent>
             <div className="space-y-1">
               {upcoming.length === 0 && <p className="py-6 text-center text-sm text-muted-foreground">Sin próximas citas.</p>}
-              {upcoming.map((a) => (
-                <div key={a.id} className="flex items-center gap-4 rounded-lg p-3 transition-colors hover:bg-muted/50">
-                  <div className="w-20 shrink-0 text-xs text-muted-foreground">
-                    {a.startAt.toLocaleDateString("es-ES", { day: "2-digit", month: "short" })}
-                    <br />
-                    {toTimeString(a.startAt)}
+              {upcoming.map((a) => {
+                const meta = STATUS_META[a.status as AppointmentStatus] ?? STATUS_META.PENDING
+                return (
+                  <div key={a.id} className="flex items-center gap-4 rounded-lg p-3 transition-colors hover:bg-muted/50">
+                    <div className="w-20 shrink-0 text-xs text-muted-foreground">
+                      <span className="font-medium text-foreground">
+                        {a.startAt.toLocaleDateString("es-ES", { day: "2-digit", month: "short" })}
+                      </span>
+                      <br />
+                      {toTimeString(a.startAt)}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium">
+                        {a.customer.firstName} {a.customer.lastName ?? ""}
+                      </p>
+                      <p className="truncate text-xs text-muted-foreground">
+                        {a.service.name} · {a.worker.name}
+                      </p>
+                    </div>
+                    <span className={`shrink-0 rounded-full border px-2 py-0.5 text-xs ${meta.className}`}>{meta.label}</span>
                   </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium">
-                      {a.customer.firstName} {a.customer.lastName ?? ""}
-                    </p>
-                    <p className="truncate text-xs text-muted-foreground">{a.service.name}</p>
-                  </div>
-                </div>
-              ))}
+                )
+              })}
             </div>
           </CardContent>
         </Card>

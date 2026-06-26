@@ -375,7 +375,13 @@ export function StockClient({ products, suppliers }: { products: ProductRow[]; s
                   <TableHead>Precio venta</TableHead>
                   <TableHead>Coste</TableHead>
                   <TableHead>Activo</TableHead>
-                  <TableHead className="text-right">Acciones</TableHead>
+                  <TableHead className="text-right">
+                    <div className="flex justify-end text-xs font-normal text-muted-foreground">
+                      <span className="flex w-20 items-center justify-center gap-1"><ArrowDownCircle className="h-3.5 w-3.5 text-green-600" /> Entrada</span>
+                      <span className="flex w-20 items-center justify-center gap-1"><ArrowUpCircle className="h-3.5 w-3.5 text-orange-500" /> Consumo</span>
+                      <span className="flex w-20 items-center justify-center gap-1"><Pencil className="h-3.5 w-3.5" /> Editar</span>
+                    </div>
+                  </TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -392,17 +398,25 @@ export function StockClient({ products, suppliers }: { products: ProductRow[]; s
                     <TableCell>
                       <Badge variant={p.active ? "secondary" : "outline"}>{p.active ? "Sí" : "No"}</Badge>
                     </TableCell>
-                    <TableCell className="text-right space-x-1">
-                      <Button variant="ghost" size="icon" title="Entrada de stock" onClick={() => setEntryTarget(p)}>
-                        <ArrowDownCircle className="h-4 w-4 text-green-600" />
-                      </Button>
-                      <Button variant="ghost" size="icon" title="Consumo interno"
-                        onClick={() => setConsumeTarget(p)} disabled={p.stock === 0}>
-                        <ArrowUpCircle className="h-4 w-4 text-orange-500" />
-                      </Button>
-                      <Button variant="ghost" size="icon" onClick={() => openProductForm(p)}>
-                        <Pencil className="h-4 w-4" />
-                      </Button>
+                    <TableCell>
+                      <div className="flex items-center justify-end">
+                        <span className="flex w-20 justify-center">
+                          <Button variant="ghost" size="icon" onClick={() => setEntryTarget(p)}>
+                            <ArrowDownCircle className="h-4 w-4 text-green-600" />
+                          </Button>
+                        </span>
+                        <span className="flex w-20 justify-center">
+                          <Button variant="ghost" size="icon"
+                            onClick={() => setConsumeTarget(p)} disabled={p.stock === 0}>
+                            <ArrowUpCircle className="h-4 w-4 text-orange-500" />
+                          </Button>
+                        </span>
+                        <span className="flex w-20 justify-center">
+                          <Button variant="ghost" size="icon" onClick={() => openProductForm(p)}>
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+                        </span>
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -427,7 +441,12 @@ export function StockClient({ products, suppliers }: { products: ProductRow[]; s
                   <TableHead>Teléfono</TableHead>
                   <TableHead>Email</TableHead>
                   <TableHead>Notas</TableHead>
-                  <TableHead className="text-right">Acciones</TableHead>
+                  <TableHead className="text-right">
+                    <div className="flex justify-end text-xs font-normal text-muted-foreground">
+                      <span className="flex w-20 items-center justify-center gap-1"><Pencil className="h-3.5 w-3.5" /> Editar</span>
+                      <span className="flex w-20 items-center justify-center gap-1"><Trash2 className="h-3.5 w-3.5 text-destructive" /> Eliminar</span>
+                    </div>
+                  </TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -437,13 +456,19 @@ export function StockClient({ products, suppliers }: { products: ProductRow[]; s
                     <TableCell className="text-muted-foreground text-sm">{s.phone ?? "—"}</TableCell>
                     <TableCell className="text-muted-foreground text-sm">{s.email ?? "—"}</TableCell>
                     <TableCell className="text-muted-foreground text-sm max-w-xs truncate">{s.notes ?? "—"}</TableCell>
-                    <TableCell className="text-right space-x-1">
-                      <Button variant="ghost" size="icon" onClick={() => { setEditingSupplier(s); setSupplierOpen(true) }}>
-                        <Pencil className="h-4 w-4" />
-                      </Button>
-                      <Button variant="ghost" size="icon" onClick={() => setDeleteSupplierTarget(s)}>
-                        <Trash2 className="h-4 w-4 text-destructive" />
-                      </Button>
+                    <TableCell>
+                      <div className="flex items-center justify-end">
+                        <span className="flex w-20 justify-center">
+                          <Button variant="ghost" size="icon" onClick={() => { setEditingSupplier(s); setSupplierOpen(true) }}>
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+                        </span>
+                        <span className="flex w-20 justify-center">
+                          <Button variant="ghost" size="icon" onClick={() => setDeleteSupplierTarget(s)}>
+                            <Trash2 className="h-4 w-4 text-destructive" />
+                          </Button>
+                        </span>
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}

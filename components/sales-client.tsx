@@ -260,7 +260,12 @@ export function SalesClient({ sales, customers, services, products, workers, cur
                 <th className="px-4 py-3 text-right font-medium">Total</th>
                 <th className="px-4 py-3 text-left font-medium">Estado</th>
                 <th className="px-4 py-3 text-left font-medium">Trabajador</th>
-                <th className="px-4 py-3 text-right font-medium">Acciones</th>
+                <th className="px-4 py-3 text-right font-medium">
+                  <div className="flex justify-end text-xs font-normal text-muted-foreground">
+                    <span className="flex w-20 items-center justify-center gap-1"><Eye className="h-3.5 w-3.5" /> Detalle</span>
+                    <span className="flex w-20 items-center justify-center gap-1"><Banknote className="h-3.5 w-3.5 text-green-600" /> Cobrar</span>
+                  </div>
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -284,16 +289,20 @@ export function SalesClient({ sales, customers, services, products, workers, cur
                     </td>
                     <td className="px-4 py-3 text-muted-foreground">{workerName}</td>
                     <td className="px-4 py-3">
-                      <div className="flex gap-1 justify-end">
-                        <Button variant="ghost" size="sm" className="gap-1.5" onClick={() => setDetailSale(s)}>
-                          <Eye className="h-3.5 w-3.5" /> Ver detalle
-                        </Button>
-                        {(s.status === "DEBT" || s.status === "PARTIAL") && (
-                          <Button variant="outline" size="sm" className="text-green-700 border-green-300 hover:bg-green-50"
-                            onClick={() => { setPayingDebt(s); setPayDebtMethod("CASH") }}>
-                            Cobrar
+                      <div className="flex items-center justify-end">
+                        <span className="flex w-20 justify-center">
+                          <Button variant="ghost" size="icon" onClick={() => setDetailSale(s)}>
+                            <Eye className="h-4 w-4" />
                           </Button>
-                        )}
+                        </span>
+                        <span className="flex w-20 justify-center">
+                          {(s.status === "DEBT" || s.status === "PARTIAL") && (
+                            <Button variant="ghost" size="icon" className="text-green-700 hover:text-green-800 hover:bg-green-50"
+                              onClick={() => { setPayingDebt(s); setPayDebtMethod("CASH") }}>
+                              <Banknote className="h-4 w-4" />
+                            </Button>
+                          )}
+                        </span>
                       </div>
                     </td>
                   </tr>
@@ -353,7 +362,6 @@ export function SalesClient({ sales, customers, services, products, workers, cur
                 )}
               </div>
             </div>
-            <DialogFooter><Button variant="outline" onClick={() => setDetailSale(null)}>Cerrar</Button></DialogFooter>
           </DialogContent>
         </Dialog>
       )}

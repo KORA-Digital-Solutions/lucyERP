@@ -128,7 +128,13 @@ export function WorkersClient({ rows, domain }: { rows: WorkerRow[]; domain: str
               <TableHead>Teléfono</TableHead>
               <TableHead>Acceso</TableHead>
               <TableHead>Activo</TableHead>
-              <TableHead className="text-right">Acciones</TableHead>
+              <TableHead className="text-right">
+                <div className="flex justify-end text-xs font-normal text-muted-foreground">
+                  <span className="flex w-24 items-center justify-center gap-1"><KeyRound className="h-3.5 w-3.5" /> Contraseña</span>
+                  <span className="flex w-20 items-center justify-center gap-1"><Pencil className="h-3.5 w-3.5" /> Editar</span>
+                  <span className="flex w-20 items-center justify-center gap-1"><Trash2 className="h-3.5 w-3.5 text-destructive" /> Eliminar</span>
+                </div>
+              </TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -157,18 +163,26 @@ export function WorkersClient({ rows, domain }: { rows: WorkerRow[]; domain: str
                 <TableCell>
                   <Switch checked={r.active} onCheckedChange={() => onToggle(r)} />
                 </TableCell>
-                <TableCell className="text-right space-x-1">
-                  <Button variant="ghost" size="icon" title={r.email ? "Asignar contraseña" : "Añade un email para poder asignar contraseña"} onClick={() => openSetPassword(r)} disabled={!r.email}>
-                    <KeyRound className="h-4 w-4" />
-                  </Button>
-                  <Button variant="ghost" size="icon" onClick={() => openForm(r)}>
-                    <Pencil className="h-4 w-4" />
-                  </Button>
-                  {!r.active && (
-                    <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive" title="Eliminar usuario" onClick={() => setDeleteTarget(r)}>
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  )}
+                <TableCell className="text-right">
+                  <div className="flex justify-end">
+                    <span className="flex w-24 justify-center">
+                      <Button variant="ghost" size="icon" title="Asignar contraseña" onClick={() => openSetPassword(r)}>
+                        <KeyRound className="h-4 w-4" />
+                      </Button>
+                    </span>
+                    <span className="flex w-20 justify-center">
+                      <Button variant="ghost" size="icon" onClick={() => openForm(r)}>
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                    </span>
+                    <span className="flex w-20 justify-center">
+                      {!r.active && (
+                        <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive" title="Eliminar usuario" onClick={() => setDeleteTarget(r)}>
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      )}
+                    </span>
+                  </div>
                 </TableCell>
               </TableRow>
             ))}

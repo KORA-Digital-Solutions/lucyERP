@@ -5,10 +5,10 @@ import { prisma } from "@/lib/db"
 
 const BLOCKING_STATUSES = ["PENDING", "CONFIRMED", "DONE", "NO_SHOW"]
 
-type Conflict = { type: "CABIN" | "WORKER"; message: string }
+type Conflict = { type: "CABIN" | "WORKER" | "CUSTOMER"; message: string }
 
 async function findOverlap(
-  field: "cabinId" | "workerId",
+  field: "cabinId" | "workerId" | "customerId",
   id: string,
   startAt: Date,
   endAt: Date,
@@ -48,6 +48,7 @@ export async function checkWorkerAvailability(
 export interface SlotInput {
   cabinId: string
   workerId: string
+  customerId: string
   startAt: Date
   endAt: Date
   excludeAppointmentId?: string
@@ -75,6 +76,14 @@ export async function validateAppointmentSlot(input: SlotInput): Promise<Conflic
     conflicts.push({
       type: "WORKER",
       message: "El trabajador ya tiene una cita en ese horario.",
+    })
+  }
+
+  const customerClash = await findOverlap("customerId", input.customerId, input.startAt, input.endAt, input.excludeAppointmentId)
+  if (customerClash) {
+    conflicts.push({
+      type: "CUSTOMER",
+      message: "El cliente ya tiene una cita en ese horario.",
     })
   }
 

@@ -57,8 +57,9 @@ export async function createAppointment(fd: FormData): Promise<ActionResult> {
     const endAt = new Date(startAt.getTime() + duration * 60000)
     const cabinId = str(fd, "cabinId")
     const workerId = str(fd, "workerId")
+    const customerId = str(fd, "customerId")
 
-    const conflicts = await validateAppointmentSlot({ cabinId, workerId, startAt, endAt })
+    const conflicts = await validateAppointmentSlot({ cabinId, workerId, customerId, startAt, endAt })
     if (conflicts.length > 0) {
       return { ok: false, error: conflicts.map((c) => c.message).join(" ") }
     }
@@ -66,7 +67,7 @@ export async function createAppointment(fd: FormData): Promise<ActionResult> {
     const appt = await prisma.appointment.create({
       data: {
         clinicId,
-        customerId: str(fd, "customerId"),
+        customerId,
         serviceId,
         workerId,
         cabinId,
@@ -94,29 +95,52 @@ export async function updateAppointment(id: string, fd: FormData): Promise<Actio
     const endAt = new Date(startAt.getTime() + duration * 60000)
     const cabinId = str(fd, "cabinId")
     const workerId = str(fd, "workerId")
+    const customerId = str(fd, "customerId")
 
-    const conflicts = await validateAppointmentSlot({ cabinId, workerId, startAt, endAt, excludeAppointmentId: id })
+    const conflicts = await validateAppointmentSlot({ cabinId, workerId, customerId, startAt, endAt, excludeAppointmentId: id })
     if (conflicts.length > 0) {
       return { ok: false, error: conflicts.map((c) => c.message).join(" ") }
     }
 
     const existing = await prisma.appointment.findUniqueOrThrow({ where: { id } })
-    // Si se reprograma una cita cuyo recordatorio ya se envió, re-programar (RN 19.6).
-    const rescheduled = existing.startAt.getTime() !== startAt.getTime()
+    const formStatus = str(fd, "status")
+
+    // ¿Cambió algún parámetro de la cita (no estado/notas)? Si es así, la cita
+    // vuelve a "pendiente de confirmar" y el recordatorio se reprograma.
+    const materialChanged =
+      customerId !== existing.customerId ||
+      serviceId !== existing.serviceId ||
+      workerId !== existing.workerId ||
+      cabinId !== existing.cabinId ||
+      startAt.getTime() !== existing.startAt.getTime() ||
+      duration !== existing.durationMinutes
+
+    // El estado explícito del usuario manda; si no tocó el estado y cambió un
+    // parámetro, se fuerza PENDING.
+    const statusChangedByUser = Boolean(formStatus) && formStatus !== existing.status
+    const status = statusChangedByUser
+      ? formStatus
+      : materialChanged
+        ? "PENDING"
+        : existing.status
+
+    // Solo se reprograma el recordatorio cuando cambian datos de la cita.
     const reminderStatus =
-      rescheduled && existing.reminderStatus === "SENT" ? "PENDING" : existing.reminderStatus
+      materialChanged && ["SENT", "DELIVERED", "READ"].includes(existing.reminderStatus)
+        ? "PENDING"
+        : existing.reminderStatus
 
     await prisma.appointment.update({
       where: { id },
       data: {
-        customerId: str(fd, "customerId"),
+        customerId,
         serviceId,
         workerId,
         cabinId,
         startAt,
         endAt,
         durationMinutes: duration,
-        status: str(fd, "status") || existing.status,
+        status,
         notes: optStr(fd, "notes"),
         reminderStatus,
       },
@@ -315,24 +339,26 @@ export async function toggleWorkerActive(id: string, active: boolean): Promise<A
 export async function checkAvailability(
   cabinId: string,
   workerId: string,
+  customerId: string,
   date: string,
   time: string,
   durationMinutes: number,
   excludeAppointmentId?: string,
-): Promise<{ cabinConflict: string | null; workerConflict: string | null }> {
+): Promise<{ cabinConflict: string | null; workerConflict: string | null; customerConflict: string | null }> {
   try {
-    if (!cabinId || !workerId || !date || !time || durationMinutes <= 0) {
-      return { cabinConflict: null, workerConflict: null }
+    if (!cabinId || !workerId || !customerId || !date || !time || durationMinutes <= 0) {
+      return { cabinConflict: null, workerConflict: null, customerConflict: null }
     }
     const startAt = new Date(`${date}T${time}`)
     const endAt = new Date(startAt.getTime() + durationMinutes * 60000)
-    const conflicts = await validateAppointmentSlot({ cabinId, workerId, startAt, endAt, excludeAppointmentId })
+    const conflicts = await validateAppointmentSlot({ cabinId, workerId, customerId, startAt, endAt, excludeAppointmentId })
     return {
       cabinConflict: conflicts.find((c) => c.type === "CABIN")?.message ?? null,
       workerConflict: conflicts.find((c) => c.type === "WORKER")?.message ?? null,
+      customerConflict: conflicts.find((c) => c.type === "CUSTOMER")?.message ?? null,
     }
   } catch {
-    return { cabinConflict: null, workerConflict: null }
+    return { cabinConflict: null, workerConflict: null, customerConflict: null }
   }
 }
 

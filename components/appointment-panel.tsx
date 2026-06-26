@@ -3,7 +3,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
-import { Search, X, Send, Trash2, XCircle, Clock } from "lucide-react"
+import { Search, X, Send, XCircle, Clock, CheckCircle2, UserX, type LucideIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -17,25 +17,23 @@ import {
 } from "@/components/ui/select"
 import { cn } from "@/lib/utils"
 import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog"
-import {
   createAppointment,
   updateAppointment,
   setAppointmentStatus,
-  deleteAppointment,
   sendReminder,
   checkAvailability,
 } from "@/lib/actions"
 import { STATUS_META, REMINDER_META, type AppointmentStatus } from "@/lib/enums"
 import { formatDuration, normalizeSearch } from "@/lib/format"
+
+// Mismos iconos/colores que las acciones rápidas de la agenda.
+const STATUS_ICON: Record<AppointmentStatus, { Icon: LucideIcon; className: string }> = {
+  PENDING: { Icon: Clock, className: "text-yellow-600" },
+  CONFIRMED: { Icon: CheckCircle2, className: "text-green-600" },
+  DONE: { Icon: CheckCircle2, className: "text-blue-600" },
+  NO_SHOW: { Icon: UserX, className: "text-red-500" },
+  CANCELLED: { Icon: XCircle, className: "text-muted-foreground" },
+}
 
 export interface Option {
   id: string
@@ -112,7 +110,6 @@ export function AppointmentPanel({
   const router = useRouter()
   const isEdit = Boolean(appointment)
   const [loading, setLoading] = useState(false)
-  const [confirmDelete, setConfirmDelete] = useState(false)
 
   const initTime = appointment ? appointment.time : (defaultTime ?? "10:00")
   const initDuration = appointment ? appointment.durationMinutes : 60
@@ -148,6 +145,7 @@ export function AppointmentPanel({
   const [customDuration, setCustomDuration] = useState(Boolean(appointment))
   const [cabinConflict, setCabinConflict] = useState<string | null>(null)
   const [workerConflict, setWorkerConflict] = useState<string | null>(null)
+  const [customerConflict, setCustomerConflict] = useState<string | null>(null)
 
   // Buscador de servicio
   const [serviceQuery, setServiceQuery] = useState(
@@ -208,29 +206,27 @@ export function AppointmentPanel({
     return () => document.removeEventListener("mousedown", onDocClick)
   }, [])
 
-  // Emite el "borrador" del hueco para previsualizarlo en la agenda (solo al crear).
+  // Emite el "borrador" del hueco para previsualizarlo en la agenda (crear y editar).
   useEffect(() => {
-    if (appointment) {
-      onDraftChange?.(null)
-      return
-    }
     onDraftChange?.({ cabinId, date, time, duration })
-  }, [appointment, cabinId, date, time, duration, onDraftChange])
+  }, [cabinId, date, time, duration, onDraftChange])
 
   // Comprobación de disponibilidad en tiempo real (debounce 400ms)
   useEffect(() => {
-    if (!cabinId || !workerId || !date || !time || duration <= 0) {
+    if (!cabinId || !workerId || !customerId || !date || !time || duration <= 0) {
       setCabinConflict(null)
       setWorkerConflict(null)
+      setCustomerConflict(null)
       return
     }
     const timer = setTimeout(async () => {
-      const result = await checkAvailability(cabinId, workerId, date, time, duration, appointment?.id)
+      const result = await checkAvailability(cabinId, workerId, customerId, date, time, duration, appointment?.id)
       setCabinConflict(result.cabinConflict)
       setWorkerConflict(result.workerConflict)
+      setCustomerConflict(result.customerConflict)
     }, 400)
     return () => clearTimeout(timer)
-  }, [cabinId, workerId, date, time, duration, appointment?.id])
+  }, [cabinId, workerId, customerId, date, time, duration, appointment?.id])
 
   const results = useMemo(() => {
     const q = normalizeSearch(query)
@@ -418,6 +414,9 @@ export function AppointmentPanel({
               </div>
             )}
           </div>
+          {customerConflict && (
+            <p className="text-xs text-destructive">{customerConflict}</p>
+          )}
           {selectedCustomer && !selectedCustomer.whatsappOptIn && (
             <p className="text-xs text-[#B31412]">
               Este cliente no ha autorizado recordatorios por WhatsApp.
@@ -567,11 +566,17 @@ export function AppointmentPanel({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {(Object.keys(STATUS_META) as AppointmentStatus[]).map((s) => (
-                  <SelectItem key={s} value={s}>
-                    {STATUS_META[s].label}
-                  </SelectItem>
-                ))}
+                {(Object.keys(STATUS_META) as AppointmentStatus[]).map((s) => {
+                  const { Icon, className } = STATUS_ICON[s]
+                  return (
+                    <SelectItem key={s} value={s}>
+                      <span className="flex items-center gap-2">
+                        <Icon className={cn("h-4 w-4", className)} />
+                        {STATUS_META[s].label}
+                      </span>
+                    </SelectItem>
+                  )
+                })}
               </SelectContent>
             </Select>
           </div>
@@ -604,29 +609,6 @@ export function AppointmentPanel({
                   <XCircle className="mr-1 h-3.5 w-3.5" /> Cancelar cita
                 </Button>
               )}
-              <Button type="button" size="sm" variant="ghost" className="text-[#B31412]" disabled={loading}
-                onClick={() => setConfirmDelete(true)}>
-                <Trash2 className="mr-1 h-3.5 w-3.5" /> Borrar
-              </Button>
-              <AlertDialog open={confirmDelete} onOpenChange={setConfirmDelete}>
-                <AlertDialogContent>
-                  <AlertDialogHeader>
-                    <AlertDialogTitle>¿Borrar esta cita?</AlertDialogTitle>
-                    <AlertDialogDescription>
-                      Esta acción no se puede deshacer.
-                    </AlertDialogDescription>
-                  </AlertDialogHeader>
-                  <AlertDialogFooter>
-                    <AlertDialogCancel>Cancelar</AlertDialogCancel>
-                    <AlertDialogAction
-                      className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                      onClick={() => runAction(() => deleteAppointment(appointment.id), "Cita borrada.")}
-                    >
-                      Borrar
-                    </AlertDialogAction>
-                  </AlertDialogFooter>
-                </AlertDialogContent>
-              </AlertDialog>
             </div>
           </div>
         )}

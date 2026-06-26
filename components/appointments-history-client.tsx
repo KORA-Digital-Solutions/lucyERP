@@ -2,14 +2,26 @@
 
 import { useMemo, useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
-import { Search, ClipboardList } from "lucide-react"
+import { Search, ClipboardList, Trash2 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { cn } from "@/lib/utils"
 import { normalizeSearch } from "@/lib/format"
+import { deleteAppointment } from "@/lib/actions"
 
 export interface AppointmentRow {
   id: string
@@ -23,17 +35,20 @@ export interface AppointmentRow {
 }
 
 const STATUS_LABEL: Record<string, string> = {
-  DONE: "Realizada",
+  PENDING:   "Pendiente",
   CONFIRMED: "Confirmada",
-  PENDING: "Pendiente",
+  DONE:      "Realizada",
+  NO_SHOW:   "No asistió",
   CANCELLED: "Cancelada",
 }
 
+// Mismos colores que STATUS_META en lib/enums.ts
 const STATUS_BADGE_CLS: Record<string, string> = {
-  DONE:      "bg-[#E6F4EA] text-[#1E6B34] border-[#A8D5B5]",
-  CONFIRMED: "bg-[#E3F0FB] text-[#1565A3] border-[#90CAF9]",
-  PENDING:   "bg-[#FFF3E0] text-[#E65100] border-[#FFCC80]",
-  CANCELLED: "bg-[#F5F5F5] text-[#757575] border-[#E0E0E0]",
+  PENDING:   "bg-[#FEF3E2] border-[#F59E0B] text-[#92400E]",
+  CONFIRMED: "bg-[#E6F4EA] border-[#34A853] text-[#1E6B34]",
+  DONE:      "bg-[#E5E9F7] border-[#3C54A4] text-[#274775]",
+  NO_SHOW:   "bg-[#FCE8E6] border-[#EA4335] text-[#B31412]",
+  CANCELLED: "bg-[#F1F2F4] border-[#9AA0A6] text-[#5F6368]",
 }
 
 function formatDate(iso: string) {
@@ -68,6 +83,14 @@ export function AppointmentsHistoryClient({ rows, defaultFrom, defaultTo, defaul
   const [from, setFrom] = useState(defaultFrom)
   const [to, setTo] = useState(defaultTo)
   const [status, setStatus] = useState(defaultStatus)
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; customerName: string } | null>(null)
+
+  async function confirmDelete() {
+    if (!deleteTarget) return
+    await deleteAppointment(deleteTarget.id)
+    setDeleteTarget(null)
+    router.refresh()
+  }
 
   function pushParams(overrides: Partial<{ from: string; to: string; status: string }>) {
     const next = { from, to, status, ...overrides }
@@ -181,6 +204,7 @@ export function AppointmentsHistoryClient({ rows, defaultFrom, defaultTo, defaul
                 <TableHead>Cabina</TableHead>
                 <TableHead>Duración</TableHead>
                 <TableHead>Estado</TableHead>
+                <TableHead />
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -211,11 +235,21 @@ export function AppointmentsHistoryClient({ rows, defaultFrom, defaultTo, defaul
                       {STATUS_LABEL[r.status] ?? r.status}
                     </Badge>
                   </TableCell>
+                  <TableCell onClick={(e) => e.stopPropagation()}>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                      onClick={() => setDeleteTarget({ id: r.id, customerName: r.customerName })}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  </TableCell>
                 </TableRow>
               ))}
               {filtered.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={8} className="py-10 text-center text-muted-foreground">
+                  <TableCell colSpan={9} className="py-10 text-center text-muted-foreground">
                     No hay citas en el período seleccionado.
                   </TableCell>
                 </TableRow>
@@ -224,6 +258,26 @@ export function AppointmentsHistoryClient({ rows, defaultFrom, defaultTo, defaul
           </Table>
         </Card>
       </div>
+
+      <AlertDialog open={!!deleteTarget} onOpenChange={(o) => { if (!o) setDeleteTarget(null) }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Borrar esta cita?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Se borrará la cita de {deleteTarget?.customerName}. Esta acción no se puede deshacer.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={confirmDelete}
+            >
+              Borrar
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

@@ -29,7 +29,7 @@ export default async function AgendaPage({
     prisma.service.findMany({ where: { clinicId: clinic.id, active: true }, orderBy: { name: "asc" } }),
     prisma.customer.findMany({ where: { clinicId: clinic.id }, orderBy: { firstName: "asc" } }),
     prisma.appointment.findMany({
-      where: { clinicId: clinic.id, startAt: { gte: start, lte: end } },
+      where: { clinicId: clinic.id, startAt: { gte: start, lte: end }, status: { not: "CANCELLED" } },
       include: { customer: true, service: true, worker: true },
       orderBy: { startAt: "asc" },
     }),

@@ -88,22 +88,30 @@ async function main() {
     prisma.cabin.create({ data: { clinicId: clinic.id, name: "Cabina 3", sortOrder: 3, active: true, defaultWorkerId: admin.id } }),
   ])
 
+  // Familias de servicio
+  const [familyFacial, familyDepilacion, familyCorporal, familyManicura] = await Promise.all([
+    prisma.serviceFamily.create({ data: { clinicId: clinic.id, name: "Facial", sortOrder: 1 } }),
+    prisma.serviceFamily.create({ data: { clinicId: clinic.id, name: "Depilación", sortOrder: 2 } }),
+    prisma.serviceFamily.create({ data: { clinicId: clinic.id, name: "Corporal", sortOrder: 3 } }),
+    prisma.serviceFamily.create({ data: { clinicId: clinic.id, name: "Manicura", sortOrder: 4 } }),
+  ])
+
   // Servicios
   const [facial, laser, electrica, masaje, manicura] = await Promise.all([
     prisma.service.create({
-      data: { clinicId: clinic.id, name: "Tratamiento facial", durationMinutes: 60, priceCents: 6500 },
+      data: { clinicId: clinic.id, familyId: familyFacial.id, name: "Tratamiento facial", durationMinutes: 60, priceCents: 6500 },
     }),
     prisma.service.create({
-      data: { clinicId: clinic.id, name: "Depilación láser", durationMinutes: 60, priceCents: 8000 },
+      data: { clinicId: clinic.id, familyId: familyDepilacion.id, name: "Depilación láser", durationMinutes: 60, priceCents: 8000 },
     }),
     prisma.service.create({
-      data: { clinicId: clinic.id, name: "Depilación eléctrica", durationMinutes: 45, priceCents: 5000 },
+      data: { clinicId: clinic.id, familyId: familyDepilacion.id, name: "Depilación eléctrica", durationMinutes: 45, priceCents: 5000 },
     }),
     prisma.service.create({
-      data: { clinicId: clinic.id, name: "Masaje relajante", durationMinutes: 90, priceCents: 7000 },
+      data: { clinicId: clinic.id, familyId: familyCorporal.id, name: "Masaje relajante", durationMinutes: 90, priceCents: 7000 },
     }),
     prisma.service.create({
-      data: { clinicId: clinic.id, name: "Manicura", durationMinutes: 30, priceCents: 2500 },
+      data: { clinicId: clinic.id, familyId: familyManicura.id, name: "Manicura", durationMinutes: 30, priceCents: 2500 },
     }),
   ])
 

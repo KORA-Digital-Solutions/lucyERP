@@ -238,7 +238,10 @@ export async function saveService(id: string | null, fd: FormData): Promise<Acti
     const clinicId = await getActiveClinicId()
     const pricingType = str(fd, "pricingType") || "FIXED"
     const pricePerMinute = str(fd, "pricePerMinute")
+    const familyId = str(fd, "familyId")
+    if (!familyId) return { ok: false, error: "La familia es obligatoria." }
     const data = {
+      familyId,
       name: str(fd, "name"),
       description: optStr(fd, "description"),
       durationMinutes: int(fd, "durationMinutes", 60),
@@ -264,6 +267,40 @@ export async function saveService(id: string | null, fd: FormData): Promise<Acti
 export async function toggleServiceActive(id: string, active: boolean): Promise<ActionResult> {
   try {
     await prisma.service.update({ where: { id }, data: { active } })
+    revalidateAll()
+    return { ok: true }
+  } catch (e) {
+    return { ok: false, error: errMsg(e) }
+  }
+}
+
+/* -------------------------- FAMILIAS DE SERVICIO ------------------------- */
+
+export async function saveServiceFamily(id: string | null, fd: FormData): Promise<ActionResult> {
+  try {
+    const clinicId = await getActiveClinicId()
+    const data = {
+      name: str(fd, "name"),
+      active: bool(fd, "active"),
+    }
+    if (!data.name) return { ok: false, error: "El nombre es obligatorio." }
+    if (id) {
+      const updated = await prisma.serviceFamily.update({ where: { id }, data })
+      revalidateAll()
+      return { ok: true, id: updated.id }
+    } else {
+      const created = await prisma.serviceFamily.create({ data: { ...data, clinicId } })
+      revalidateAll()
+      return { ok: true, id: created.id }
+    }
+  } catch (e) {
+    return { ok: false, error: errMsg(e) }
+  }
+}
+
+export async function toggleServiceFamilyActive(id: string, active: boolean): Promise<ActionResult> {
+  try {
+    await prisma.serviceFamily.update({ where: { id }, data: { active } })
     revalidateAll()
     return { ok: true }
   } catch (e) {

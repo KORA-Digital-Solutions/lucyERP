@@ -34,9 +34,10 @@ interface Props {
   date: string
   longDate: string
   onSelect: (date: string) => void
+  disableWeekends?: boolean
 }
 
-export function MiniCalendar({ date, longDate, onSelect }: Props) {
+export function MiniCalendar({ date, longDate, onSelect, disableWeekends }: Props) {
   const [y, m] = parseDateStr(date)
   const [viewYear, setViewYear] = useState(y)
   const [viewMonth, setViewMonth] = useState(m)
@@ -110,17 +111,22 @@ export function MiniCalendar({ date, longDate, onSelect }: Props) {
             const isSelected = iso === date
             const isToday = iso === todayIso
             const isPast = iso < todayIso
+            const dow = new Date(viewYear, viewMonth - 1, day).getDay()
+            const isWeekendDay = dow === 0 || dow === 6
+            const disabled = Boolean(disableWeekends) && isWeekendDay && !isSelected
 
             return (
               <button
                 key={iso}
-                onClick={() => handleSelect(iso)}
+                onClick={() => !disabled && handleSelect(iso)}
+                disabled={disabled}
                 className={cn(
                   "rounded-md py-1.5 text-center text-[13px] transition-colors",
                   isSelected && "bg-primary text-primary-foreground",
                   !isSelected && isToday && "bg-accent text-accent-foreground font-medium",
-                  !isSelected && !isToday && "hover:bg-muted",
+                  !isSelected && !isToday && !disabled && "hover:bg-muted",
                   isPast && !isSelected && "text-muted-foreground",
+                  disabled && "cursor-not-allowed text-muted-foreground/40",
                 )}
               >
                 {day}

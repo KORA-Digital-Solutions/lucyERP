@@ -8,6 +8,8 @@ import { validateAppointmentSlot } from "@/lib/availability"
 import { sendReminderForAppointmentId } from "@/lib/whatsapp"
 import { combineDateTime } from "@/lib/format"
 import { getSession, createSession, setSessionCookie } from "@/lib/session"
+import { WEEKDAY_LABELS } from "@/lib/enums"
+import { dayOfWeekFromDateStr } from "@/lib/schedule"
 
 export type ActionResult = { ok: boolean; error?: string; id?: string }
 
@@ -59,7 +61,7 @@ export async function createAppointment(fd: FormData): Promise<ActionResult> {
     const workerId = str(fd, "workerId")
     const customerId = str(fd, "customerId")
 
-    const conflicts = await validateAppointmentSlot({ cabinId, workerId, customerId, startAt, endAt })
+    const conflicts = await validateAppointmentSlot({ clinicId, cabinId, workerId, customerId, startAt, endAt })
     if (conflicts.length > 0) {
       return { ok: false, error: conflicts.map((c) => c.message).join(" ") }
     }
@@ -88,6 +90,7 @@ export async function createAppointment(fd: FormData): Promise<ActionResult> {
 
 export async function updateAppointment(id: string, fd: FormData): Promise<ActionResult> {
   try {
+    const clinicId = await getActiveClinicId()
     const serviceId = str(fd, "serviceId")
     const service = await prisma.service.findUniqueOrThrow({ where: { id: serviceId } })
     const duration = int(fd, "durationMinutes", service.durationMinutes) || service.durationMinutes
@@ -97,7 +100,7 @@ export async function updateAppointment(id: string, fd: FormData): Promise<Actio
     const workerId = str(fd, "workerId")
     const customerId = str(fd, "customerId")
 
-    const conflicts = await validateAppointmentSlot({ cabinId, workerId, customerId, startAt, endAt, excludeAppointmentId: id })
+    const conflicts = await validateAppointmentSlot({ clinicId, cabinId, workerId, customerId, startAt, endAt, excludeAppointmentId: id })
     if (conflicts.length > 0) {
       return { ok: false, error: conflicts.map((c) => c.message).join(" ") }
     }
@@ -381,21 +384,28 @@ export async function checkAvailability(
   time: string,
   durationMinutes: number,
   excludeAppointmentId?: string,
-): Promise<{ cabinConflict: string | null; workerConflict: string | null; customerConflict: string | null }> {
+): Promise<{
+  cabinConflict: string | null
+  workerConflict: string | null
+  customerConflict: string | null
+  scheduleConflict: string | null
+}> {
   try {
     if (!cabinId || !workerId || !customerId || !date || !time || durationMinutes <= 0) {
-      return { cabinConflict: null, workerConflict: null, customerConflict: null }
+      return { cabinConflict: null, workerConflict: null, customerConflict: null, scheduleConflict: null }
     }
+    const clinicId = await getActiveClinicId()
     const startAt = new Date(`${date}T${time}`)
     const endAt = new Date(startAt.getTime() + durationMinutes * 60000)
-    const conflicts = await validateAppointmentSlot({ cabinId, workerId, customerId, startAt, endAt, excludeAppointmentId })
+    const conflicts = await validateAppointmentSlot({ clinicId, cabinId, workerId, customerId, startAt, endAt, excludeAppointmentId })
     return {
       cabinConflict: conflicts.find((c) => c.type === "CABIN")?.message ?? null,
       workerConflict: conflicts.find((c) => c.type === "WORKER")?.message ?? null,
       customerConflict: conflicts.find((c) => c.type === "CUSTOMER")?.message ?? null,
+      scheduleConflict: conflicts.find((c) => c.type === "SCHEDULE")?.message ?? null,
     }
   } catch {
-    return { cabinConflict: null, workerConflict: null, customerConflict: null }
+    return { cabinConflict: null, workerConflict: null, customerConflict: null, scheduleConflict: null }
   }
 }
 
@@ -421,7 +431,6 @@ export async function saveCabin(id: string | null, fd: FormData): Promise<Action
       description: optStr(fd, "description"),
       sortOrder: int(fd, "sortOrder", 0),
       active: bool(fd, "active"),
-      defaultWorkerId: optStr(fd, "defaultWorkerId"),
     }
     if (id) {
       await prisma.cabin.update({ where: { id }, data })
@@ -911,6 +920,402 @@ export async function getMonthOccupancy(
     result[key].push(a.status)
   }
   return result
+}
+
+/* ------------------------------ HORARIOS -------------------------------- */
+
+export type WeeklySlotInput = { startTime: string; endTime: string }
+export type WeeklyDayInput = { dayOfWeek: number; slots: WeeklySlotInput[] }
+
+function validateSlots(slots: WeeklySlotInput[]): string | null {
+  for (const s of slots) {
+    if (!s.startTime || !s.endTime) return "Cada franja necesita hora de inicio y fin."
+    if (s.startTime >= s.endTime) return "La hora de fin debe ser posterior a la de inicio en cada franja."
+  }
+  // Comparación lexicográfica válida: "HH:MM" con ceros a la izquierda.
+  const sorted = [...slots].sort((a, b) => a.startTime.localeCompare(b.startTime))
+  for (let i = 1; i < sorted.length; i++) {
+    if (sorted[i].startTime < sorted[i - 1].endTime) {
+      return `Las franjas no pueden solaparse (${sorted[i - 1].startTime}–${sorted[i - 1].endTime} y ${sorted[i].startTime}–${sorted[i].endTime}).`
+    }
+  }
+  return null
+}
+
+export async function saveClinicWeeklySchedule(days: WeeklyDayInput[]): Promise<ActionResult> {
+  try {
+    const clinicId = await getActiveClinicId()
+    for (const d of days) {
+      const err = validateSlots(d.slots)
+      if (err) return { ok: false, error: `${WEEKDAY_LABELS[d.dayOfWeek]}: ${err}` }
+    }
+    await prisma.$transaction([
+      prisma.clinicWeeklySlot.deleteMany({ where: { clinicId } }),
+      ...days.flatMap((d) =>
+        d.slots.map((s) =>
+          prisma.clinicWeeklySlot.create({
+            data: { clinicId, dayOfWeek: d.dayOfWeek, startTime: s.startTime, endTime: s.endTime },
+          }),
+        ),
+      ),
+    ])
+    revalidatePath("/settings")
+    revalidateAll()
+    return { ok: true }
+  } catch (e) {
+    return { ok: false, error: errMsg(e) }
+  }
+}
+
+export async function saveWorkerWeeklySchedule(workerId: string, days: WeeklyDayInput[]): Promise<ActionResult> {
+  try {
+    const clinicId = await getActiveClinicId()
+    for (const d of days) {
+      const err = validateSlots(d.slots)
+      if (err) return { ok: false, error: `${WEEKDAY_LABELS[d.dayOfWeek]}: ${err}` }
+    }
+    await prisma.$transaction([
+      prisma.workerWeeklySlot.deleteMany({ where: { workerId } }),
+      ...days.flatMap((d) =>
+        d.slots.map((s) =>
+          prisma.workerWeeklySlot.create({
+            data: { clinicId, workerId, dayOfWeek: d.dayOfWeek, startTime: s.startTime, endTime: s.endTime },
+          }),
+        ),
+      ),
+    ])
+    revalidatePath("/settings")
+    revalidateAll()
+    return { ok: true }
+  } catch (e) {
+    return { ok: false, error: errMsg(e) }
+  }
+}
+
+export async function saveClinicScheduleOverride(
+  date: string,
+  closed: boolean,
+  slots: WeeklySlotInput[],
+  reason: string | null,
+): Promise<ActionResult> {
+  try {
+    const clinicId = await getActiveClinicId()
+    if (!closed) {
+      const err = validateSlots(slots)
+      if (err) return { ok: false, error: err }
+    }
+    const existing = await prisma.clinicScheduleOverride.findUnique({ where: { clinicId_date: { clinicId, date } } })
+    const override = existing
+      ? await prisma.clinicScheduleOverride.update({ where: { id: existing.id }, data: { closed, reason } })
+      : await prisma.clinicScheduleOverride.create({ data: { clinicId, date, closed, reason } })
+    await prisma.clinicScheduleOverrideSlot.deleteMany({ where: { overrideId: override.id } })
+    if (!closed && slots.length > 0) {
+      await prisma.clinicScheduleOverrideSlot.createMany({
+        data: slots.map((s) => ({ overrideId: override.id, startTime: s.startTime, endTime: s.endTime })),
+      })
+    }
+    revalidatePath("/settings")
+    revalidateAll()
+    return { ok: true, id: override.id }
+  } catch (e) {
+    return { ok: false, error: errMsg(e) }
+  }
+}
+
+export async function deleteClinicScheduleOverride(id: string): Promise<ActionResult> {
+  try {
+    await prisma.clinicScheduleOverride.delete({ where: { id } })
+    revalidatePath("/settings")
+    revalidateAll()
+    return { ok: true }
+  } catch (e) {
+    return { ok: false, error: errMsg(e) }
+  }
+}
+
+export async function saveWorkerScheduleOverride(
+  workerId: string,
+  date: string,
+  closed: boolean,
+  slots: WeeklySlotInput[],
+  reason: string | null,
+): Promise<ActionResult> {
+  try {
+    const clinicId = await getActiveClinicId()
+    if (!closed) {
+      const err = validateSlots(slots)
+      if (err) return { ok: false, error: err }
+    }
+    const existing = await prisma.workerScheduleOverride.findUnique({
+      where: { clinicId_workerId_date: { clinicId, workerId, date } },
+    })
+    const override = existing
+      ? await prisma.workerScheduleOverride.update({ where: { id: existing.id }, data: { closed, reason } })
+      : await prisma.workerScheduleOverride.create({ data: { clinicId, workerId, date, closed, reason } })
+    await prisma.workerScheduleOverrideSlot.deleteMany({ where: { overrideId: override.id } })
+    if (!closed && slots.length > 0) {
+      await prisma.workerScheduleOverrideSlot.createMany({
+        data: slots.map((s) => ({ overrideId: override.id, startTime: s.startTime, endTime: s.endTime })),
+      })
+    }
+    revalidatePath("/settings")
+    revalidateAll()
+    return { ok: true, id: override.id }
+  } catch (e) {
+    return { ok: false, error: errMsg(e) }
+  }
+}
+
+export async function deleteWorkerScheduleOverride(id: string): Promise<ActionResult> {
+  try {
+    await prisma.workerScheduleOverride.delete({ where: { id } })
+    revalidatePath("/settings")
+    revalidateAll()
+    return { ok: true }
+  } catch (e) {
+    return { ok: false, error: errMsg(e) }
+  }
+}
+
+export async function saveHoliday(id: string | null, fd: FormData): Promise<ActionResult> {
+  try {
+    const clinicId = await getActiveClinicId()
+    const data = {
+      date: str(fd, "date"),
+      name: str(fd, "name"),
+      scope: str(fd, "scope") || "LOCAL",
+    }
+    if (!data.date || !data.name) return { ok: false, error: "Fecha y nombre son obligatorios." }
+    if (id) {
+      await prisma.holiday.update({ where: { id }, data })
+    } else {
+      await prisma.holiday.create({ data: { ...data, clinicId } })
+    }
+    revalidatePath("/settings")
+    revalidateAll()
+    return { ok: true }
+  } catch (e) {
+    return { ok: false, error: errMsg(e) }
+  }
+}
+
+export async function deleteHoliday(id: string): Promise<ActionResult> {
+  try {
+    await prisma.holiday.delete({ where: { id } })
+    revalidatePath("/settings")
+    revalidateAll()
+    return { ok: true }
+  } catch (e) {
+    return { ok: false, error: errMsg(e) }
+  }
+}
+
+// Copia los festivos de fecha civil fija (mismo día/mes cada año) de un año a
+// otro. Los movibles (Semana Santa) y los locales/autonómicos quedan fuera:
+// solo se publican unos meses antes y hay que revisarlos a mano.
+const FIXED_CIVIL_HOLIDAYS = [
+  { month: 1, day: 1, name: "Año Nuevo", scope: "NATIONAL" },
+  { month: 1, day: 6, name: "Epifanía del Señor", scope: "NATIONAL" },
+  { month: 5, day: 1, name: "Fiesta del Trabajo", scope: "NATIONAL" },
+  { month: 8, day: 15, name: "Asunción de la Virgen", scope: "NATIONAL" },
+  { month: 10, day: 12, name: "Fiesta Nacional de España", scope: "NATIONAL" },
+  { month: 12, day: 8, name: "Inmaculada Concepción", scope: "NATIONAL" },
+  { month: 12, day: 25, name: "Natividad del Señor", scope: "NATIONAL" },
+]
+
+export async function copyFixedHolidaysToYear(targetYear: number): Promise<ActionResult> {
+  try {
+    const clinicId = await getActiveClinicId()
+    let created = 0
+    for (const h of FIXED_CIVIL_HOLIDAYS) {
+      const date = `${targetYear}-${String(h.month).padStart(2, "0")}-${String(h.day).padStart(2, "0")}`
+      const existing = await prisma.holiday.findUnique({ where: { clinicId_date: { clinicId, date } } })
+      if (existing) continue
+      await prisma.holiday.create({ data: { clinicId, date, name: h.name, scope: h.scope } })
+      created++
+    }
+    revalidatePath("/settings")
+    return { ok: true, id: String(created) }
+  } catch (e) {
+    return { ok: false, error: errMsg(e) }
+  }
+}
+
+export type BulkHolidayEntry = { date: string; name: string; scope: string }
+
+// Importación masiva: crea o actualiza (por fecha) cada entrada. Devuelve el
+// recuento "creados|actualizados" codificado en `id` (mismo patrón que el
+// resto de acciones de este archivo que no tienen un id único que devolver).
+export async function bulkImportHolidays(entries: BulkHolidayEntry[]): Promise<ActionResult> {
+  try {
+    const clinicId = await getActiveClinicId()
+    if (entries.length === 0) return { ok: false, error: "No hay festivos para importar." }
+    let created = 0
+    let updated = 0
+    for (const e of entries) {
+      if (!e.date || !e.name) continue
+      const existing = await prisma.holiday.findUnique({ where: { clinicId_date: { clinicId, date: e.date } } })
+      if (existing) {
+        await prisma.holiday.update({ where: { id: existing.id }, data: { name: e.name, scope: e.scope || "LOCAL" } })
+        updated++
+      } else {
+        await prisma.holiday.create({ data: { clinicId, date: e.date, name: e.name, scope: e.scope || "LOCAL" } })
+        created++
+      }
+    }
+    revalidatePath("/settings")
+    return { ok: true, id: `${created}|${updated}` }
+  } catch (e) {
+    return { ok: false, error: errMsg(e) }
+  }
+}
+
+/* ----------------------------- VACACIONES -------------------------------- */
+
+export async function saveLeaveBalance(
+  workerId: string,
+  year: number,
+  vacationDaysTotal: number,
+  personalDaysTotal: number,
+): Promise<ActionResult> {
+  try {
+    const clinicId = await getActiveClinicId()
+    await prisma.workerLeaveBalance.upsert({
+      where: { clinicId_workerId_year: { clinicId, workerId, year } },
+      update: { vacationDaysTotal, personalDaysTotal },
+      create: { clinicId, workerId, year, vacationDaysTotal, personalDaysTotal },
+    })
+    revalidatePath("/workers")
+    return { ok: true }
+  } catch (e) {
+    return { ok: false, error: errMsg(e) }
+  }
+}
+
+export type AddLeaveRangeResult = {
+  ok: boolean
+  error?: string
+  assignedCount?: number
+  skippedWeekendCount?: number
+  skippedHolidayCount?: number
+}
+
+function addDaysToDateStr(date: string, days: number): string {
+  const [y, m, d] = date.split("-").map(Number)
+  const dt = new Date(y, m - 1, d + days)
+  return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}-${String(dt.getDate()).padStart(2, "0")}`
+}
+
+// Asigna un día libre o un rango [startDate, endDate] (ambos inclusive; para
+// un solo día basta con pasar el mismo valor en los dos). Los fines de semana
+// y los festivos dentro del rango se saltan automáticamente: no se crean
+// como día libre ni descuentan saldo, porque la empleada no iba a trabajar
+// esos días de todos modos.
+export async function addWorkerLeaveRange(
+  workerId: string,
+  startDate: string,
+  endDate: string,
+  type: "VACATION" | "PERSONAL",
+  notes: string | null,
+): Promise<AddLeaveRangeResult> {
+  try {
+    if (!startDate || !endDate) return { ok: false, error: "Indica la fecha de inicio y fin." }
+    if (startDate > endDate) return { ok: false, error: "La fecha de fin debe ser posterior o igual a la de inicio." }
+
+    const dates: string[] = []
+    for (let d = startDate; d <= endDate; d = addDaysToDateStr(d, 1)) {
+      dates.push(d)
+      if (dates.length > 366) return { ok: false, error: "El rango es demasiado largo." }
+    }
+
+    const clinicId = await getActiveClinicId()
+    const holidays = await prisma.holiday.findMany({
+      where: { clinicId, date: { in: dates } },
+      select: { date: true },
+    })
+    const holidaySet = new Set(holidays.map((h) => h.date))
+
+    let skippedWeekendCount = 0
+    let skippedHolidayCount = 0
+    const chargeable: string[] = []
+    for (const date of dates) {
+      const dow = dayOfWeekFromDateStr(date)
+      if (dow === 0 || dow === 6) {
+        skippedWeekendCount++
+        continue
+      }
+      if (holidaySet.has(date)) {
+        skippedHolidayCount++
+        continue
+      }
+      chargeable.push(date)
+    }
+
+    if (chargeable.length === 0) {
+      return { ok: false, error: "Ese rango no tiene ningún día laborable (todo son fines de semana o festivos)." }
+    }
+
+    const conflicts = await prisma.workerLeave.findMany({
+      where: { clinicId, workerId, date: { in: chargeable } },
+      select: { date: true },
+    })
+    if (conflicts.length > 0) {
+      return {
+        ok: false,
+        error: `Ya hay día(s) libre(s) asignados en ese rango: ${conflicts.map((c) => c.date).join(", ")}.`,
+      }
+    }
+
+    const chargeableByYear = new Map<number, string[]>()
+    for (const date of chargeable) {
+      const year = Number(date.slice(0, 4))
+      if (!chargeableByYear.has(year)) chargeableByYear.set(year, [])
+      chargeableByYear.get(year)!.push(date)
+    }
+    for (const [year, yearDates] of chargeableByYear) {
+      const balance = await prisma.workerLeaveBalance.findUnique({
+        where: { clinicId_workerId_year: { clinicId, workerId, year } },
+      })
+      const total = type === "VACATION" ? (balance?.vacationDaysTotal ?? 0) : (balance?.personalDaysTotal ?? 0)
+      const used = await prisma.workerLeave.count({
+        where: { clinicId, workerId, type, date: { startsWith: `${year}-` } },
+      })
+      if (used + yearDates.length > total) {
+        return {
+          ok: false,
+          error: `Saldo insuficiente de ${type === "VACATION" ? "vacaciones" : "asuntos propios"} en ${year} (disponibles ${total - used}, necesarios ${yearDates.length}).`,
+        }
+      }
+    }
+
+    const session = await getSession()
+    await prisma.workerLeave.createMany({
+      data: chargeable.map((date) => ({
+        clinicId,
+        workerId,
+        date,
+        type,
+        notes,
+        createdByUserId: session?.userId ?? null,
+      })),
+    })
+    revalidatePath("/workers")
+    revalidateAll()
+    return { ok: true, assignedCount: chargeable.length, skippedWeekendCount, skippedHolidayCount }
+  } catch (e) {
+    return { ok: false, error: errMsg(e) }
+  }
+}
+
+export async function deleteWorkerLeave(id: string): Promise<ActionResult> {
+  try {
+    await prisma.workerLeave.delete({ where: { id } })
+    revalidatePath("/workers")
+    revalidateAll()
+    return { ok: true }
+  } catch (e) {
+    return { ok: false, error: errMsg(e) }
+  }
 }
 
 function errMsg(e: unknown): string {

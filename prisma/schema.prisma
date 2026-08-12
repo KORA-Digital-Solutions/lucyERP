@@ -43,6 +43,13 @@ model Clinic {
   products     Product[]
   sales        Sale[]
   cashRegisters CashRegister[]
+  clinicWeeklySlots       ClinicWeeklySlot[]
+  workerWeeklySlots       WorkerWeeklySlot[]
+  clinicScheduleOverrides ClinicScheduleOverride[]
+  workerScheduleOverrides WorkerScheduleOverride[]
+  holidays                Holiday[]
+  workerLeaveBalances     WorkerLeaveBalance[]
+  workerLeaves            WorkerLeave[]
 }
 
 // role: "ADMIN" | "WORKER"
@@ -66,19 +73,22 @@ model User {
   sales                Sale[]
   balanceMovements     CustomerBalanceMovement[]
   cashRegistersClosedBy CashRegister[]
+  weeklySlots          WorkerWeeklySlot[]
+  scheduleOverrides    WorkerScheduleOverride[]
+  leaveBalances        WorkerLeaveBalance[]
+  leaves               WorkerLeave[]
 }
 
 model Cabin {
-  id              String   @id @default(cuid())
-  clinicId        String
-  clinic          Clinic   @relation(fields: [clinicId], references: [id])
-  name            String
-  description     String?
-  active          Boolean  @default(true)
-  sortOrder       Int      @default(0)
-  defaultWorkerId String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id          String   @id @default(cuid())
+  clinicId    String
+  clinic      Clinic   @relation(fields: [clinicId], references: [id])
+  name        String
+  description String?
+  active      Boolean  @default(true)
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
   appointments Appointment[]
 }
@@ -347,4 +357,153 @@ model WhatsappMessage {
 
   @@index([clinicId, appointmentId])
   @@index([providerMessageId])
+}
+
+// ---------------------------------------------------------------------------
+// Horarios (centro + empleadas) y vacaciones/asuntos propios
+// ---------------------------------------------------------------------------
+
+// Horario semanal por defecto del centro. Varias filas por dayOfWeek permiten
+// horario partido (mañana + tarde). dayOfWeek: 0=domingo .. 6=sábado.
+model ClinicWeeklySlot {
+  id        String   @id @default(cuid())
+  clinicId  String
+  clinic    Clinic   @relation(fields: [clinicId], references: [id])
+  dayOfWeek Int
+  startTime String
+  endTime   String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([clinicId, dayOfWeek])
+}
+
+// Horario semanal por defecto de una empleada. Varias filas por dayOfWeek
+// permiten turno partido.
+model WorkerWeeklySlot {
+  id        String   @id @default(cuid())
+  clinicId  String
+  clinic    Clinic   @relation(fields: [clinicId], references: [id])
+  workerId  String
+  worker    User     @relation(fields: [workerId], references: [id])
+  dayOfWeek Int
+  startTime String
+  endTime   String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([workerId, dayOfWeek])
+}
+
+// Excepción puntual del horario del CENTRO para una fecha concreta. Si existe
+// fila para (clinicId, date), sustituye por completo al horario semanal base
+// de ese día (closed=true o sin slots = cerrado todo el día). Tiene prioridad
+// sobre Holiday: un festivo con excepción explícita del admin usa esta.
+model ClinicScheduleOverride {
+  id        String   @id @default(cuid())
+  clinicId  String
+  clinic    Clinic   @relation(fields: [clinicId], references: [id])
+  date      String
+  closed    Boolean  @default(false)
+  reason    String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  slots ClinicScheduleOverrideSlot[]
+
+  @@unique([clinicId, date])
+}
+
+model ClinicScheduleOverrideSlot {
+  id         String                 @id @default(cuid())
+  overrideId String
+  override   ClinicScheduleOverride @relation(fields: [overrideId], references: [id], onDelete: Cascade)
+  startTime  String
+  endTime    String
+
+  @@index([overrideId])
+}
+
+// Excepción puntual del horario de una EMPLEADA para una fecha concreta.
+// Misma semántica que ClinicScheduleOverride pero a nivel individual.
+model WorkerScheduleOverride {
+  id        String   @id @default(cuid())
+  clinicId  String
+  clinic    Clinic   @relation(fields: [clinicId], references: [id])
+  workerId  String
+  worker    User     @relation(fields: [workerId], references: [id])
+  date      String
+  closed    Boolean  @default(false)
+  reason    String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  slots WorkerScheduleOverrideSlot[]
+
+  @@unique([clinicId, workerId, date])
+}
+
+model WorkerScheduleOverrideSlot {
+  id         String                 @id @default(cuid())
+  overrideId String
+  override   WorkerScheduleOverride @relation(fields: [overrideId], references: [id], onDelete: Cascade)
+  startTime  String
+  endTime    String
+
+  @@index([overrideId])
+}
+
+// Festivo del calendario laboral. Afecta solo al horario del CENTRO (cerrado
+// por defecto), salvo que exista un ClinicScheduleOverride explícito para esa
+// fecha, en cuyo caso este último manda y las empleadas recuperan su horario
+// semanal base normal ese día (la resolución de horario de empleada nunca
+// consulta Holiday directamente).
+// scope: "NATIONAL" | "REGIONAL" | "LOCAL" (informativo)
+model Holiday {
+  id        String   @id @default(cuid())
+  clinicId  String
+  clinic    Clinic   @relation(fields: [clinicId], references: [id])
+  date      String
+  name      String
+  scope     String   @default("LOCAL")
+  createdAt DateTime @default(now())
+
+  @@unique([clinicId, date])
+}
+
+// Saldo anual de días de vacaciones y asuntos propios de una empleada.
+model WorkerLeaveBalance {
+  id                String   @id @default(cuid())
+  clinicId          String
+  clinic            Clinic   @relation(fields: [clinicId], references: [id])
+  workerId          String
+  worker            User     @relation(fields: [workerId], references: [id])
+  year              Int
+  vacationDaysTotal Float    @default(0)
+  personalDaysTotal Float    @default(0)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@unique([clinicId, workerId, year])
+}
+
+// Día libre concreto asignado a una empleada (día completo). El saldo
+// restante se calcula al vuelo: total (WorkerLeaveBalance) - nº de filas del
+// año correspondiente, sin contador redundante. Bloquea la agenda ese día
+// igual que una excepción de horario "closed".
+// type: "VACATION" | "PERSONAL"
+model WorkerLeave {
+  id              String   @id @default(cuid())
+  clinicId        String
+  clinic          Clinic   @relation(fields: [clinicId], references: [id])
+  workerId        String
+  worker          User     @relation(fields: [workerId], references: [id])
+  date            String
+  type            String
+  notes           String?
+  createdByUserId String?
+  createdAt       DateTime @default(now())
+
+  @@unique([clinicId, workerId, date])
+  @@index([workerId, date])
 }

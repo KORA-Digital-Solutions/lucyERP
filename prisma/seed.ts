@@ -34,8 +34,17 @@ async function main() {
   await prisma.product.deleteMany()
   await prisma.supplier.deleteMany()
   await prisma.service.deleteMany()
+  await prisma.serviceFamily.deleteMany()
   await prisma.customer.deleteMany()
   await prisma.cabin.deleteMany()
+  // Horarios/vacaciones: dependen de User/Clinic, deben borrarse antes.
+  await prisma.workerLeave.deleteMany()
+  await prisma.workerLeaveBalance.deleteMany()
+  await prisma.workerScheduleOverride.deleteMany() // cascade -> slots
+  await prisma.workerWeeklySlot.deleteMany()
+  await prisma.clinicScheduleOverride.deleteMany() // cascade -> slots
+  await prisma.clinicWeeklySlot.deleteMany()
+  await prisma.holiday.deleteMany()
   await prisma.user.deleteMany()
   await prisma.clinic.deleteMany()
 
@@ -81,11 +90,50 @@ async function main() {
     }),
   ])
 
-  // Cabinas
+  // Horario semanal del centro: lunes a viernes 9:00-20:00 (sábado y domingo cerrado).
+  await prisma.clinicWeeklySlot.createMany({
+    data: [1, 2, 3, 4, 5].map((dayOfWeek) => ({
+      clinicId: clinic.id,
+      dayOfWeek,
+      startTime: "09:00",
+      endTime: "20:00",
+    })),
+  })
+
+  // Horario semanal por empleada (ejemplo del contrato de cada una).
+  await prisma.workerWeeklySlot.createMany({
+    data: [
+      // Lola: 40h/semana, lunes a viernes 9:00-17:00.
+      ...[1, 2, 3, 4, 5].map((dayOfWeek) => ({
+        clinicId: clinic.id, workerId: lola.id, dayOfWeek, startTime: "09:00", endTime: "17:00",
+      })),
+      // Marta: jornada parcial partida, martes tarde y jueves mañana.
+      { clinicId: clinic.id, workerId: marta.id, dayOfWeek: 2, startTime: "16:00", endTime: "20:00" },
+      { clinicId: clinic.id, workerId: marta.id, dayOfWeek: 4, startTime: "09:00", endTime: "13:00" },
+      // Lucía (admin): jornada completa igual que el centro.
+      ...[1, 2, 3, 4, 5].map((dayOfWeek) => ({
+        clinicId: clinic.id, workerId: admin.id, dayOfWeek, startTime: "09:00", endTime: "20:00",
+      })),
+    ],
+  })
+
+  // Saldo anual de vacaciones/asuntos propios: 21 días de vacaciones y 1 de
+  // libre disposición por empleada.
+  const currentYear = new Date().getFullYear()
+  await prisma.workerLeaveBalance.createMany({
+    data: [admin, marta, lola].map((w) => ({
+      clinicId: clinic.id,
+      workerId: w.id,
+      year: currentYear,
+      vacationDaysTotal: 21,
+      personalDaysTotal: 1,
+    })),
+  })
+
+  // Cabinas: recurso compartido, cualquier empleada puede usar cualquiera.
   const cabins = await Promise.all([
-    prisma.cabin.create({ data: { clinicId: clinic.id, name: "Cabina 1", sortOrder: 1, active: true, defaultWorkerId: marta.id } }),
-    prisma.cabin.create({ data: { clinicId: clinic.id, name: "Cabina 2", sortOrder: 2, active: true, defaultWorkerId: lola.id } }),
-    prisma.cabin.create({ data: { clinicId: clinic.id, name: "Cabina 3", sortOrder: 3, active: true, defaultWorkerId: admin.id } }),
+    prisma.cabin.create({ data: { clinicId: clinic.id, name: "Cabina 1", sortOrder: 1, active: true } }),
+    prisma.cabin.create({ data: { clinicId: clinic.id, name: "Cabina 2", sortOrder: 2, active: true } }),
   ])
 
   // Familias de servicio
@@ -167,7 +215,7 @@ async function main() {
   await Promise.all([
     appt({ customerId: maria.id, serviceId: laser.id, workerId: marta.id, cabinId: cabins[0].id, startHour: 9, startMinute: 45, duration: 60, status: "CONFIRMED", reminderStatus: "SENT" }),
     appt({ customerId: pepita.id, serviceId: facial.id, workerId: lola.id, cabinId: cabins[1].id, startHour: 11, startMinute: 30, duration: 60, status: "PENDING", reminderStatus: "PENDING" }),
-    appt({ customerId: fernando.id, serviceId: electrica.id, workerId: lola.id, cabinId: cabins[2].id, startHour: 11, startMinute: 30, duration: 45, status: "CONFIRMED", reminderStatus: "DELIVERED" }),
+    appt({ customerId: fernando.id, serviceId: electrica.id, workerId: admin.id, cabinId: cabins[0].id, startHour: 11, startMinute: 30, duration: 45, status: "CONFIRMED", reminderStatus: "DELIVERED" }),
     appt({ customerId: carlos.id, serviceId: masaje.id, workerId: marta.id, cabinId: cabins[0].id, startHour: 13, startMinute: 0, duration: 90, status: "PENDING", reminderStatus: "PENDING" }),
     appt({ customerId: ana.id, serviceId: manicura.id, workerId: lola.id, cabinId: cabins[1].id, startHour: 16, startMinute: 0, duration: 30, status: "DONE", reminderStatus: "NOT_SCHEDULED" }),
   ])

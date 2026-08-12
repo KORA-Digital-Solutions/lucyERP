@@ -1,10 +1,15 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
-import { ChevronLeft, ChevronRight, Plus, Filter, MessageCircle, CheckCircle2, XCircle, Clock, Send, UserX } from "lucide-react"
+import { toast } from "sonner"
+import { ChevronLeft, ChevronRight, Plus, Filter, MessageCircle, CheckCircle2, XCircle, Clock, Send, UserX, Pencil } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
+import { Switch } from "@/components/ui/switch"
+import { Label } from "@/components/ui/label"
+import { Input } from "@/components/ui/input"
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import {
   Select,
   SelectContent,
@@ -29,7 +34,14 @@ import {
   type Option,
   type ExistingAppointment,
 } from "@/components/appointment-panel"
-import { setAppointmentStatus, sendReminder } from "@/lib/actions"
+import { SlotRows, overlappingIndices, emptySlot } from "@/components/schedules-client"
+import {
+  setAppointmentStatus,
+  sendReminder,
+  saveClinicScheduleOverride,
+  saveWorkerScheduleOverride,
+  type WeeklySlotInput,
+} from "@/lib/actions"
 
 export interface AgendaAppointment {
   id: string
@@ -52,16 +64,37 @@ export interface AgendaAppointment {
   time: string
 }
 
+interface WorkingRange {
+  startTime: string
+  endTime: string
+}
+
+interface WorkerWithColor extends Option {
+  color: string
+}
+
 interface Props {
   date: string
   longDate: string
   openingMinutes: number
   closingMinutes: number
+  clinicClosed: boolean
+  closedReason?: string
+  clinicRanges: WorkingRange[]
+  workerHours: Record<string, WorkingRange[]>
+  workerLeaveType: Record<string, string>
+  isAdmin: boolean
   cabins: Option[]
-  workers: Option[]
+  workers: WorkerWithColor[]
   services: ServiceOption[]
   customers: CustomerOption[]
   appointments: AgendaAppointment[]
+}
+
+const LEAVE_LABELS: Record<string, string> = { VACATION: "Vacaciones", PERSONAL: "Asuntos propios" }
+
+function formatRanges(ranges: WorkingRange[]): string {
+  return ranges.map((r) => `${r.startTime}–${r.endTime}`).join(", ")
 }
 
 const HOUR_PX = 80
@@ -78,11 +111,127 @@ interface SlotDraft {
   duration: number
 }
 
+type OverrideScope = { type: "CLINIC" } | { type: "WORKER"; workerId: string; workerName: string }
+
+interface DayOverrideDialogState {
+  scope: OverrideScope
+  currentRanges: WorkingRange[]
+}
+
+// Excepción puntual del día que se está viendo en la agenda, editable desde
+// la propia leyenda (centro o una empleada concreta) sin ir a Configuración.
+function DayOverrideDialog({
+  state,
+  date,
+  onClose,
+}: {
+  state: DayOverrideDialogState | null
+  date: string
+  onClose: () => void
+}) {
+  const router = useRouter()
+  const [closed, setClosed] = useState(true)
+  const [slots, setSlots] = useState<WeeklySlotInput[]>([])
+  const [reason, setReason] = useState("")
+  const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    if (!state) return
+    setClosed(state.currentRanges.length === 0)
+    setSlots(state.currentRanges.length > 0 ? state.currentRanges : [])
+    setReason("")
+  }, [state])
+
+  const hasOverlap = !closed && overlappingIndices(slots).size > 0
+  const label = state?.scope.type === "WORKER" ? state.scope.workerName : "el centro"
+
+  async function handleSave() {
+    if (!state) return
+    if (hasOverlap) {
+      toast.error("Corrige las franjas solapadas antes de guardar.")
+      return
+    }
+    setLoading(true)
+    const res =
+      state.scope.type === "CLINIC"
+        ? await saveClinicScheduleOverride(date, closed, closed ? [] : slots, reason || null)
+        : await saveWorkerScheduleOverride(state.scope.workerId, date, closed, closed ? [] : slots, reason || null)
+    setLoading(false)
+    if (res.ok) {
+      toast.success("Horario del día actualizado.")
+      onClose()
+      router.refresh()
+    } else toast.error(res.error ?? "Error al guardar.")
+  }
+
+  return (
+    <Dialog open={!!state} onOpenChange={(v) => !v && onClose()}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Excepción de horario · {date}</DialogTitle>
+        </DialogHeader>
+        {state && (
+          <div className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              Ajuste solo para este día en <strong>{label}</strong>. El horario semanal por defecto no cambia.
+            </p>
+
+            <div className="flex items-center justify-between rounded-lg border p-3">
+              <div>
+                <Label>No trabaja / cerrado ese día</Label>
+                <p className="text-xs text-muted-foreground">
+                  {state.scope.type === "CLINIC" ? "El centro cierra completamente." : "No genera huecos ese día."}
+                </p>
+              </div>
+              <Switch checked={closed} onCheckedChange={(v) => { setClosed(v); if (v) setSlots([]) }} />
+            </div>
+
+            {!closed && (
+              <div className="space-y-2">
+                <Label>Horario ese día</Label>
+                {slots.length === 0 ? (
+                  <Button type="button" variant="outline" size="sm" onClick={() => setSlots([emptySlot()])}>
+                    <Plus className="mr-1 h-3 w-3" /> Añadir franja
+                  </Button>
+                ) : (
+                  <SlotRows slots={slots} onChange={setSlots} />
+                )}
+              </div>
+            )}
+
+            <div className="space-y-2">
+              <Label>Motivo (opcional)</Label>
+              <Input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Ej. cierre anticipado, cita médica…" />
+            </div>
+
+            {hasOverlap && (
+              <p className="text-xs text-destructive">Corrige las franjas solapadas antes de guardar.</p>
+            )}
+
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={onClose}>Cancelar</Button>
+              <Button onClick={handleSave} disabled={loading || hasOverlap}>
+                {loading ? "Guardando…" : "Guardar"}
+              </Button>
+            </DialogFooter>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 export function AgendaBoard({
   date,
   longDate,
   openingMinutes,
   closingMinutes,
+  clinicClosed,
+  closedReason,
+  clinicRanges,
+  workerHours,
+  workerLeaveType,
+  isAdmin,
   cabins,
   workers,
   services,
@@ -92,6 +241,17 @@ export function AgendaBoard({
   const router = useRouter()
   const [workerFilter, setWorkerFilter] = useState("all")
   const [statusFilter, setStatusFilter] = useState("all")
+  const [overrideDialogState, setOverrideDialogState] = useState<DayOverrideDialogState | null>(null)
+  // Filtro visual (todos los roles): oculta sáb/dom en navegación y minicalendario. Por defecto oculto.
+  const [hideWeekends, setHideWeekends] = useState(true)
+  useEffect(() => {
+    const stored = localStorage.getItem("agenda:hideWeekends")
+    if (stored !== null) setHideWeekends(stored === "true")
+  }, [])
+  function toggleHideWeekends(v: boolean) {
+    setHideWeekends(v)
+    localStorage.setItem("agenda:hideWeekends", String(v))
+  }
   const [panelOpen, setPanelOpen] = useState(false)
   const [editing, setEditing] = useState<ExistingAppointment | null>(null)
   const [presetCabin, setPresetCabin] = useState<string | undefined>(undefined)
@@ -135,7 +295,13 @@ export function AgendaBoard({
 
   function goToDate(offset: number) {
     const [y, m, d] = date.split("-").map(Number)
-    const nd = new Date(y, m - 1, d + offset)
+    let nd = new Date(y, m - 1, d + offset)
+    if (hideWeekends) {
+      const step = offset >= 0 ? 1 : -1
+      while (nd.getDay() === 0 || nd.getDay() === 6) {
+        nd = new Date(nd.getFullYear(), nd.getMonth(), nd.getDate() + step)
+      }
+    }
     const iso = `${nd.getFullYear()}-${String(nd.getMonth() + 1).padStart(2, "0")}-${String(nd.getDate()).padStart(2, "0")}`
     router.push(`/agenda?date=${iso}`)
   }
@@ -200,11 +366,19 @@ export function AgendaBoard({
               date={date}
               longDate={longDate + (isWeekend ? " · fin de semana" : "")}
               onSelect={(iso) => router.push(`/agenda?date=${iso}`)}
+              disableWeekends={hideWeekends}
             />
           </div>
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
+          <div className="flex items-center gap-2 rounded-lg border px-3 py-1.5">
+            <Label htmlFor="hide-weekends" className="text-xs font-normal text-muted-foreground">
+              Ocultar fines de semana
+            </Label>
+            <Switch id="hide-weekends" checked={hideWeekends} onCheckedChange={toggleHideWeekends} />
+          </div>
+
           <Select value={workerFilter} onValueChange={setWorkerFilter}>
             <SelectTrigger className="w-44">
               <Filter className="mr-2 h-4 w-4" />
@@ -240,11 +414,56 @@ export function AgendaBoard({
         </div>
       </div>
 
+      {/* Resumen del día: horario del centro + de cada empleada (vacaciones incluidas).
+          Admin: clic en cualquier chip para ajustar el horario de ese día. */}
+      <div className="flex flex-wrap items-center gap-2 border-b bg-muted/30 px-6 py-2 text-xs">
+        {isAdmin ? (
+          <button
+            type="button"
+            title="Ajustar horario del centro para hoy"
+            onClick={() => setOverrideDialogState({ scope: { type: "CLINIC" }, currentRanges: clinicRanges })}
+            className="flex items-center gap-1 rounded-full px-1.5 py-0.5 font-medium text-muted-foreground hover:bg-card hover:underline"
+          >
+            <Pencil className="h-3 w-3 opacity-50" />
+            Centro: {clinicClosed ? (closedReason ?? "Cerrado") : formatRanges(clinicRanges)}
+          </button>
+        ) : (
+          <span className="font-medium text-muted-foreground">
+            Centro: {clinicClosed ? (closedReason ?? "Cerrado") : formatRanges(clinicRanges)}
+          </span>
+        )}
+        <span className="text-muted-foreground/50">·</span>
+        {workers.map((w) => {
+          const leaveType = workerLeaveType[w.id]
+          const ranges = workerHours[w.id] ?? []
+          const statusLabel = leaveType ? LEAVE_LABELS[leaveType] ?? leaveType : ranges.length === 0 ? "Cerrado" : formatRanges(ranges)
+          const Chip = isAdmin ? "button" : "span"
+          return (
+            <Chip
+              key={w.id}
+              type={isAdmin ? "button" : undefined}
+              title={isAdmin ? `Ajustar horario de ${w.name} para hoy` : undefined}
+              onClick={isAdmin ? () => setOverrideDialogState({ scope: { type: "WORKER", workerId: w.id, workerName: w.name }, currentRanges: ranges }) : undefined}
+              className={cn(
+                "flex items-center gap-1.5 rounded-full border bg-card px-2 py-0.5",
+                isAdmin && "hover:bg-accent/60",
+              )}
+            >
+              <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: w.color }} />
+              <span className="font-medium">{w.name}</span>
+              <span className={leaveType ? "text-[#B31412]" : "text-muted-foreground"}>{statusLabel}</span>
+            </Chip>
+          )
+        })}
+      </div>
+
       {/* Cuerpo: calendario + panel lateral */}
       <div className="flex flex-1 overflow-hidden">
         <div className="flex-1 overflow-auto p-6">
           {cabins.length === 0 ? (
             <EmptyState />
+          ) : clinicClosed ? (
+            <ClosedState reason={closedReason} />
           ) : (
             <Card className={cn("overflow-hidden p-0", isWeekend && "bg-[#E5E9F7]/40")}>
               <div className="flex">
@@ -258,7 +477,8 @@ export function AgendaBoard({
                   ))}
                 </div>
 
-                {/* Columnas por cabina */}
+                {/* Columnas por cabina: recurso compartido, no atado a una empleada
+                    concreta (el horario de cada empleada se ve en el resumen de arriba). */}
                 <div className="flex flex-1 overflow-x-auto">
                   {cabins.map((cabin) => {
                     const cabinAppts = visible.filter((a) => a.cabinId === cabin.id)
@@ -429,6 +649,12 @@ export function AgendaBoard({
           />
         )}
       </div>
+
+      <DayOverrideDialog
+        state={overrideDialogState}
+        date={date}
+        onClose={() => setOverrideDialogState(null)}
+      />
     </div>
   )
 }
@@ -439,5 +665,14 @@ function EmptyState() {
       <p className="text-lg font-medium">No hay cabinas activas</p>
       <p className="text-sm">Crea una cabina en la sección Cabinas para empezar a agendar.</p>
     </div>
+  )
+}
+
+function ClosedState({ reason }: { reason?: string }) {
+  return (
+    <Card className="flex h-64 flex-col items-center justify-center gap-1 bg-[#E5E9F7]/40 text-center text-muted-foreground">
+      <p className="text-lg font-medium">Centro cerrado</p>
+      <p className="text-sm">{reason ?? "No hay horario configurado para este día."}</p>
+    </Card>
   )
 }

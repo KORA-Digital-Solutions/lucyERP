@@ -11,6 +11,7 @@
     "db:migrate": "prisma migrate dev",
     "db:push": "prisma db push",
     "db:seed": "tsx prisma/seed.ts",
+    "db:seed-holidays": "tsx scripts/seed-holidays-albacete.ts",
     "db:studio": "prisma studio",
     "worker:reminders": "tsx scripts/reminder-worker.ts",
     "start:local": "concurrently -n web,worker -c blue,magenta \"npm run dev\" \"npm run worker:reminders\""

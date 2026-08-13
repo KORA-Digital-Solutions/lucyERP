@@ -32,7 +32,6 @@ import {
   resetScheduleData,
   setWorkerWeekly,
   TUESDAY,
-  TUESDAY_DOW,
   WEDNESDAY,
   THURSDAY,
   THURSDAY_DOW,

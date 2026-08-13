@@ -6,10 +6,11 @@ import { prisma } from "@/lib/db"
 import { getActiveClinicId } from "@/lib/clinic"
 import { validateAppointmentSlot } from "@/lib/availability"
 import { sendReminderForAppointmentId } from "@/lib/whatsapp"
-import { combineDateTime } from "@/lib/format"
+import { combineDateTime, dayRange } from "@/lib/format"
 import { getSession, createSession, setSessionCookie } from "@/lib/session"
 import { WEEKDAY_LABELS, LEAVE_TYPE_META, type LeaveType } from "@/lib/enums"
 import { dayOfWeekFromDateStr } from "@/lib/schedule"
+import { DEFAULT_REMINDER_ALERT_DAYS } from "@/lib/reminders"
 
 export type ActionResult = { ok: boolean; error?: string; id?: string }
 
@@ -898,6 +899,65 @@ export async function getClientProfile(customerId: string) {
     }),
   ])
   return { customer, movements, recentSales, appointments }
+}
+
+export async function getCustomerReminders(customerId: string) {
+  return prisma.customerReminder.findMany({
+    where: { customerId },
+    include: {
+      createdByUser: { select: { name: true, lastName: true } },
+      completedByUser: { select: { name: true, lastName: true } },
+    },
+    orderBy: { dueDate: "asc" },
+  })
+}
+
+export async function createCustomerReminder(customerId: string, fd: FormData): Promise<ActionResult> {
+  try {
+    const session = await getSession()
+    if (!session) return { ok: false, error: "No autenticado." }
+
+    const title = str(fd, "title")
+    const dueDateStr = str(fd, "dueDate")
+    if (!title) return { ok: false, error: "Escribe el recordatorio." }
+    if (!dueDateStr) return { ok: false, error: "Indica la fecha del recordatorio." }
+
+    const alertDaysBefore = int(fd, "alertDaysBefore", DEFAULT_REMINDER_ALERT_DAYS)
+    const clinicId = await getActiveClinicId()
+
+    const created = await prisma.customerReminder.create({
+      data: {
+        clinicId,
+        customerId,
+        createdByUserId: session.userId,
+        title,
+        dueDate: dayRange(dueDateStr).start,
+        alertDaysBefore,
+      },
+    })
+    revalidatePath("/dashboard")
+    revalidatePath("/clients")
+    return { ok: true, id: created.id }
+  } catch (e) {
+    return { ok: false, error: errMsg(e) }
+  }
+}
+
+export async function completeCustomerReminder(id: string): Promise<ActionResult> {
+  try {
+    const session = await getSession()
+    if (!session) return { ok: false, error: "No autenticado." }
+
+    await prisma.customerReminder.update({
+      where: { id },
+      data: { completedAt: new Date(), completedByUserId: session.userId },
+    })
+    revalidatePath("/dashboard")
+    revalidatePath("/clients")
+    return { ok: true }
+  } catch (e) {
+    return { ok: false, error: errMsg(e) }
+  }
 }
 
 export async function getMonthOccupancy(

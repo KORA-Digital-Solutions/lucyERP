@@ -1,12 +1,14 @@
 import Link from "next/link"
-import { Calendar, Clock, AlertTriangle, CheckCircle2, ArrowRight, MessageCircle, Package, ShoppingCart } from "lucide-react"
+import { Calendar, AlertTriangle, CheckCircle2, ArrowRight, Package, ShoppingCart } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { KPICard } from "@/components/kpi-card"
+import { DashboardRemindersCard, type DashboardReminderRow } from "@/components/dashboard-reminders-card"
 import { prisma } from "@/lib/db"
 import { getActiveClinic } from "@/lib/clinic"
 import { dayRange, toDateInputValue, toTimeString } from "@/lib/format"
 import { STATUS_META, type AppointmentStatus } from "@/lib/enums"
+import { isReminderActive, isReminderOverdue } from "@/lib/reminders"
 
 export const dynamic = "force-dynamic"
 
@@ -16,14 +18,11 @@ export default async function DashboardPage() {
   const { start, end } = dayRange(today)
   const now = new Date()
 
-  const [todays, pending, failed, upcoming, lowStockProducts, todaySales] = await Promise.all([
+  const [todays, failed, upcoming, lowStockProducts, todaySales, activeReminders] = await Promise.all([
     prisma.appointment.findMany({
       where: { clinicId: clinic.id, startAt: { gte: start, lte: end }, status: { not: "CANCELLED" } },
       include: { customer: true, service: true, worker: true },
       orderBy: { startAt: "asc" },
-    }),
-    prisma.appointment.count({
-      where: { clinicId: clinic.id, startAt: { gte: now }, status: "PENDING" },
     }),
     prisma.appointment.count({
       where: { clinicId: clinic.id, reminderStatus: "FAILED" },
@@ -42,7 +41,21 @@ export default async function DashboardPage() {
       where: { clinicId: clinic.id, createdAt: { gte: start, lte: end } },
       select: { totalCents: true, paymentMethod: true, saleType: true },
     }),
+    prisma.customerReminder.findMany({
+      where: { clinicId: clinic.id, completedAt: null },
+      include: { customer: { select: { firstName: true, lastName: true } } },
+      orderBy: { dueDate: "asc" },
+    }).then((rs) => rs.filter((r) => isReminderActive(r.dueDate, r.alertDaysBefore, now))),
   ])
+
+  const reminderRows: DashboardReminderRow[] = activeReminders.map((r) => ({
+    id: r.id,
+    customerId: r.customerId,
+    customerName: [r.customer.firstName, r.customer.lastName].filter(Boolean).join(" "),
+    title: r.title,
+    dueDate: r.dueDate.toISOString(),
+    overdue: isReminderOverdue(r.dueDate, now),
+  }))
 
   const confirmed = todays.filter((a) => a.status === "CONFIRMED").length
   const todaySalesTotal = todaySales.reduce((s, x) => s + x.totalCents, 0)
@@ -64,91 +77,77 @@ export default async function DashboardPage() {
         </Button>
       </div>
 
-      <div className="grid gap-6 md:grid-cols-4">
-        <KPICard title="Citas hoy" value={String(todays.length)} trend={`${confirmed} confirmadas`} trendUp icon={Calendar} />
-        <KPICard title="Pendientes de confirmar" value={String(pending)} trend="Próximas citas" trendUp={false} icon={Clock} />
+      <div className="grid gap-6 md:grid-cols-2">
+        <Card className="overflow-hidden">
+          <CardContent className="p-6">
+            <div className="flex items-start gap-4">
+              <div className="rounded-lg bg-accent p-2">
+                <Calendar className="h-4 w-4 text-accent-foreground" />
+              </div>
+              <div className="space-y-2">
+                <p className="text-sm font-medium text-muted-foreground">Citas hoy</p>
+                <p className="text-3xl font-bold tracking-tight">{todays.length}</p>
+                <p className="text-sm text-muted-foreground">
+                  Confirmadas {confirmed}/{todays.length}
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
         <KPICard title="Recordatorios fallidos" value={String(failed)} trend="Revisar WhatsApp" trendUp={false} icon={AlertTriangle} />
-        <KPICard title="Confirmadas hoy" value={String(confirmed)} trend="De las de hoy" trendUp icon={CheckCircle2} />
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-2">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-base font-medium">Citas de hoy</CardTitle>
-            <Button variant="ghost" size="sm" asChild>
-              <Link href="/agenda">
-                Ver agenda <ArrowRight className="ml-1 h-4 w-4" />
-              </Link>
-            </Button>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-1">
-              {todays.length === 0 && <p className="py-6 text-center text-sm text-muted-foreground">No hay citas hoy.</p>}
-              {todays.map((a) => {
-                const meta = STATUS_META[a.status as AppointmentStatus] ?? STATUS_META.PENDING
-                const reminded = ["SENT", "DELIVERED", "READ"].includes(a.reminderStatus)
-                return (
-                  <div key={a.id} className="flex items-center gap-4 rounded-lg p-3 transition-colors hover:bg-muted/50">
-                    <div className="w-20 shrink-0 text-xs text-muted-foreground">
-                      <span className="font-medium text-foreground">{toTimeString(a.startAt)}</span>
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-medium">
-                        {a.customer.firstName} {a.customer.lastName ?? ""}
-                      </p>
-                      <p className="truncate text-xs text-muted-foreground">
-                        {a.service.name} · {a.worker.name}
-                      </p>
-                    </div>
-                    {reminded && <MessageCircle className="h-4 w-4 shrink-0 text-[#1E6B34]" />}
-                    <span className={`shrink-0 rounded-full border px-2 py-0.5 text-xs ${meta.className}`}>{meta.label}</span>
-                  </div>
-                )
-              })}
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between pb-2">
+          <div className="flex items-center gap-2">
+            <div className="rounded-lg bg-accent p-2">
+              <Calendar className="h-4 w-4 text-accent-foreground" />
             </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-2">
             <CardTitle className="text-base font-medium">Próximas citas</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-1">
-              {upcoming.length === 0 && <p className="py-6 text-center text-sm text-muted-foreground">Sin próximas citas.</p>}
-              {upcoming.map((a) => {
-                const meta = STATUS_META[a.status as AppointmentStatus] ?? STATUS_META.PENDING
-                return (
-                  <div key={a.id} className="flex items-center gap-4 rounded-lg p-3 transition-colors hover:bg-muted/50">
-                    <div className="w-20 shrink-0 text-xs text-muted-foreground">
-                      <span className="font-medium text-foreground">
-                        {a.startAt.toLocaleDateString("es-ES", { day: "2-digit", month: "short" })}
-                      </span>
-                      <br />
-                      {toTimeString(a.startAt)}
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-medium">
-                        {a.customer.firstName} {a.customer.lastName ?? ""}
-                      </p>
-                      <p className="truncate text-xs text-muted-foreground">
-                        {a.service.name} · {a.worker.name}
-                      </p>
-                    </div>
-                    <span className={`shrink-0 rounded-full border px-2 py-0.5 text-xs ${meta.className}`}>{meta.label}</span>
+          </div>
+          <Button variant="ghost" size="sm" asChild>
+            <Link href="/agenda">
+              Ver agenda <ArrowRight className="ml-1 h-4 w-4" />
+            </Link>
+          </Button>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-1">
+            {upcoming.length === 0 && <p className="py-6 text-center text-sm text-muted-foreground">Sin próximas citas.</p>}
+            {upcoming.map((a) => {
+              const meta = STATUS_META[a.status as AppointmentStatus] ?? STATUS_META.PENDING
+              return (
+                <div key={a.id} className="flex items-center gap-4 rounded-lg p-3 transition-colors hover:bg-muted/50">
+                  <div className="w-20 shrink-0 text-xs text-muted-foreground">
+                    <span className="font-medium text-foreground">
+                      {a.startAt.toLocaleDateString("es-ES", { day: "2-digit", month: "short" })}
+                    </span>
+                    <br />
+                    {toTimeString(a.startAt)}
                   </div>
-                )
-              })}
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-medium">
+                      {a.customer.firstName} {a.customer.lastName ?? ""}
+                    </p>
+                    <p className="truncate text-xs text-muted-foreground">
+                      {a.service.name} · {a.worker.name}
+                    </p>
+                  </div>
+                  <span className={`shrink-0 rounded-full border px-2 py-0.5 text-xs ${meta.className}`}>{meta.label}</span>
+                </div>
+              )
+            })}
+          </div>
+        </CardContent>
+      </Card>
 
       {todaySales.length > 0 && (
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <div className="flex items-center gap-2">
-              <ShoppingCart className="h-4 w-4 text-muted-foreground" />
+              <div className="rounded-lg bg-accent p-2">
+                <ShoppingCart className="h-4 w-4 text-accent-foreground" />
+              </div>
               <CardTitle className="text-base font-medium">Ventas de hoy</CardTitle>
             </div>
             <Button variant="ghost" size="sm" asChild>
@@ -178,31 +177,45 @@ export default async function DashboardPage() {
         </Card>
       )}
 
-      {lowStockProducts.length > 0 && (
-        <Card className="border-orange-200 bg-orange-50/50">
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
+      <div className="grid gap-6 lg:grid-cols-2">
+        <DashboardRemindersCard reminders={reminderRows} />
+
+        <Card className="flex min-h-[260px] flex-col">
+          <CardHeader className="flex flex-row items-center justify-between pb-2 shrink-0">
             <div className="flex items-center gap-2">
-              <Package className="h-4 w-4 text-orange-600" />
-              <CardTitle className="text-base font-medium text-orange-800">Stock bajo mínimo</CardTitle>
+              <div className="rounded-lg bg-accent p-2">
+                <Package className="h-4 w-4 text-accent-foreground" />
+              </div>
+              <CardTitle className="text-base font-medium">Stock bajo mínimo</CardTitle>
             </div>
-            <Button variant="ghost" size="sm" asChild>
-              <Link href="/stock" className="text-orange-700 hover:text-orange-900">
-                Ver stock <ArrowRight className="ml-1 h-4 w-4" />
-              </Link>
-            </Button>
+            {lowStockProducts.length > 0 && (
+              <Button variant="ghost" size="sm" asChild>
+                <Link href="/stock">
+                  Ver stock <ArrowRight className="ml-1 h-4 w-4" />
+                </Link>
+              </Button>
+            )}
           </CardHeader>
-          <CardContent>
-            <div className="space-y-1">
-              {lowStockProducts.map((p) => (
-                <div key={p.id} className="flex items-center justify-between rounded-lg px-3 py-2 hover:bg-orange-100/50 transition-colors">
-                  <span className="text-sm font-medium">{p.name}</span>
-                  <span className="text-sm text-orange-700 font-medium">{p.stock} ud · mín. {p.stockMin}</span>
-                </div>
-              ))}
-            </div>
+          <CardContent className="flex-1 overflow-y-auto">
+            {lowStockProducts.length === 0 ? (
+              <div className="flex h-full flex-col items-center justify-center gap-2 text-center text-sm text-muted-foreground">
+                <CheckCircle2 className="h-6 w-6 opacity-40" />
+                <p className="font-medium text-foreground">Stock OK</p>
+                <p>Todos los productos tienen stock suficiente.</p>
+              </div>
+            ) : (
+              <div className="space-y-1">
+                {lowStockProducts.map((p) => (
+                  <div key={p.id} className="flex items-center justify-between rounded-lg px-3 py-2 hover:bg-muted/50 transition-colors">
+                    <span className="text-sm font-medium">{p.name}</span>
+                    <span className="text-sm font-medium text-amber-700">{p.stock} ud · mín. {p.stockMin}</span>
+                  </div>
+                ))}
+              </div>
+            )}
           </CardContent>
         </Card>
-      )}
+      </div>
     </div>
   )
 }

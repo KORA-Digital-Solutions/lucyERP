@@ -43,6 +43,7 @@ model Clinic {
   products     Product[]
   sales        Sale[]
   cashRegisters CashRegister[]
+  customerReminders CustomerReminder[]
 }
 
 // role: "ADMIN" | "WORKER"
@@ -66,6 +67,8 @@ model User {
   sales                Sale[]
   balanceMovements     CustomerBalanceMovement[]
   cashRegistersClosedBy CashRegister[]
+  customerReminders    CustomerReminder[] @relation("CustomerReminderCreatedBy")
+  customerRemindersCompleted CustomerReminder[] @relation("CustomerReminderCompletedBy")
 }
 
 model Cabin {
@@ -105,6 +108,7 @@ model Customer {
   whatsappMessages WhatsappMessage[]
   sales            Sale[]
   balanceMovements CustomerBalanceMovement[]
+  reminders        CustomerReminder[]
 }
 
 model ServiceFamily {
@@ -347,4 +351,27 @@ model WhatsappMessage {
 
   @@index([clinicId, appointmentId])
   @@index([providerMessageId])
+}
+
+// Notas/recordatorios de las empleadas sobre un cliente
+// (ej. "se hizo un láser, cita de seguimiento en 6 meses").
+model CustomerReminder {
+  id              String    @id @default(cuid())
+  clinicId        String
+  clinic          Clinic    @relation(fields: [clinicId], references: [id])
+  customerId      String
+  customer        Customer  @relation(fields: [customerId], references: [id])
+  createdByUserId String
+  createdByUser   User      @relation("CustomerReminderCreatedBy", fields: [createdByUserId], references: [id])
+  title           String
+  dueDate         DateTime
+  alertDaysBefore Int       @default(7)
+  completedAt     DateTime?
+  completedByUserId String?
+  completedByUser   User?   @relation("CustomerReminderCompletedBy", fields: [completedByUserId], references: [id])
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([clinicId, completedAt, dueDate])
+  @@index([customerId])
 }

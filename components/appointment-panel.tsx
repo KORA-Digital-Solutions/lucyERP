@@ -38,7 +38,6 @@ const STATUS_ICON: Record<AppointmentStatus, { Icon: LucideIcon; className: stri
 export interface Option {
   id: string
   name: string
-  defaultWorkerId?: string | null
   active?: boolean
 }
 export interface ServiceOption extends Option {
@@ -114,28 +113,12 @@ export function AppointmentPanel({
   const initTime = appointment ? appointment.time : (defaultTime ?? "10:00")
   const initDuration = appointment ? appointment.durationMinutes : 60
   const initCabinId = appointment ? appointment.cabinId : (defaultCabinId ?? cabins[0]?.id ?? "")
-
-  function defaultWorkerForCabin(cId: string) {
-    return cabins.find((c) => c.id === cId)?.defaultWorkerId ?? null
-  }
-
-  const initWorkerId = appointment?.workerId
-    ?? defaultWorkerForCabin(initCabinId)
-    ?? workers[0]?.id
-    ?? ""
+  const initWorkerId = appointment?.workerId ?? workers[0]?.id ?? ""
 
   const [customerId, setCustomerId] = useState(appointment?.customerId ?? "")
   const [serviceId, setServiceId] = useState(appointment?.serviceId ?? "")
   const [workerId, setWorkerId] = useState(initWorkerId)
   const [cabinId, setCabinId] = useState(initCabinId)
-
-  function handleCabinChange(newCabinId: string) {
-    setCabinId(newCabinId)
-    if (!isEdit) {
-      const def = defaultWorkerForCabin(newCabinId)
-      if (def) setWorkerId(def)
-    }
-  }
   const [date, setDate] = useState(appointment?.date ?? defaultDate)
   const [time, setTime] = useState(initTime)
   const [duration, setDuration] = useState(initDuration)
@@ -146,6 +129,7 @@ export function AppointmentPanel({
   const [cabinConflict, setCabinConflict] = useState<string | null>(null)
   const [workerConflict, setWorkerConflict] = useState<string | null>(null)
   const [customerConflict, setCustomerConflict] = useState<string | null>(null)
+  const [scheduleConflict, setScheduleConflict] = useState<string | null>(null)
 
   // Buscador de servicio
   const [serviceQuery, setServiceQuery] = useState(
@@ -161,7 +145,7 @@ export function AppointmentPanel({
   const [showResults, setShowResults] = useState(false)
   const searchRef = useRef<HTMLDivElement>(null)
 
-  // Inicialización al montar / cambiar de cita
+  // Inicialización al cambiar de cita a editar (o volver a "nueva")
   useEffect(() => {
     if (appointment) {
       setCustomerId(appointment.customerId)
@@ -177,24 +161,20 @@ export function AppointmentPanel({
       setCustomDuration(true)
       setQuery(customers.find((c) => c.id === appointment.customerId)?.label ?? "")
       setServiceQuery(services.find((s) => s.id === appointment.serviceId)?.name ?? "")
-    } else {
-      const t = defaultTime ?? "10:00"
-      const newCabinId = defaultCabinId ?? cabins[0]?.id ?? ""
-      setCustomerId("")
-      setServiceId("")
-      setServiceQuery("")
-      setWorkerId(defaultWorkerForCabin(newCabinId) ?? workers[0]?.id ?? "")
-      setCabinId(newCabinId)
-      setDate(defaultDate)
-      setTime(t)
-      setDuration(60)
-      setEndTime(minToTime(timeToMin(t) + 60))
-      setStatus("PENDING")
-      setNotes("")
-      setCustomDuration(false)
-      setQuery("")
     }
-  }, [appointment, defaultDate, defaultCabinId, defaultTime, workers, cabins, customers])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [appointment])
+
+  // Al crear una cita nueva, el usuario puede reubicar el hueco haciendo clic en otra
+  // celda del calendario (defaultCabinId/defaultTime cambian sin desmontar el panel).
+  // Solo actualizamos cabina/hora: no debe perderse cliente, servicio, trabajador ni notas
+  // ya introducidos.
+  useEffect(() => {
+    if (appointment) return
+    if (defaultCabinId !== undefined) setCabinId(defaultCabinId)
+    if (defaultTime !== undefined) onChangeStart(defaultTime)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [appointment, defaultCabinId, defaultTime])
 
   // Cierra resultados al hacer clic fuera
   useEffect(() => {
@@ -217,6 +197,7 @@ export function AppointmentPanel({
       setCabinConflict(null)
       setWorkerConflict(null)
       setCustomerConflict(null)
+      setScheduleConflict(null)
       return
     }
     const timer = setTimeout(async () => {
@@ -224,6 +205,7 @@ export function AppointmentPanel({
       setCabinConflict(result.cabinConflict)
       setWorkerConflict(result.workerConflict)
       setCustomerConflict(result.customerConflict)
+      setScheduleConflict(result.scheduleConflict)
     }, 400)
     return () => clearTimeout(timer)
   }, [cabinId, workerId, customerId, date, time, duration, appointment?.id])
@@ -523,7 +505,7 @@ export function AppointmentPanel({
           <div className="space-y-2">
             <Label>Trabajador</Label>
             <Select value={workerId} onValueChange={setWorkerId}>
-              <SelectTrigger className={workerConflict ? "border-destructive" : ""}>
+              <SelectTrigger className={workerConflict || scheduleConflict ? "border-destructive" : ""}>
                 <SelectValue placeholder="Seleccionar" />
               </SelectTrigger>
               <SelectContent>
@@ -537,10 +519,13 @@ export function AppointmentPanel({
             {workerConflict && (
               <p className="text-xs text-destructive">{workerConflict}</p>
             )}
+            {scheduleConflict && (
+              <p className="text-xs text-destructive">{scheduleConflict}</p>
+            )}
           </div>
           <div className="space-y-2">
             <Label>Cabina</Label>
-            <Select value={cabinId} onValueChange={handleCabinChange}>
+            <Select value={cabinId} onValueChange={setCabinId}>
               <SelectTrigger className={cabinConflict ? "border-destructive" : ""}>
                 <SelectValue placeholder="Seleccionar" />
               </SelectTrigger>

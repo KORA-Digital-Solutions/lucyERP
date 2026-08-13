@@ -30,8 +30,10 @@ export async function POST(req: NextRequest) {
     const endAt = new Date(startAt.getTime() + duration * 60000)
 
     const conflicts = await validateAppointmentSlot({
+      clinicId,
       cabinId: body.cabinId,
       workerId: body.workerId,
+      customerId: body.customerId,
       startAt,
       endAt,
     })

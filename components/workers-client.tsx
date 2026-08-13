@@ -28,7 +28,13 @@ export interface WorkerRow {
   mustChangePassword: boolean
 }
 
-export function WorkersClient({ rows, domain }: { rows: WorkerRow[]; domain: string }) {
+export function WorkersClient({
+  rows,
+  domain,
+}: {
+  rows: WorkerRow[]
+  domain: string
+}) {
   const router = useRouter()
   const [open, setOpen] = useState(false)
   const [editing, setEditing] = useState<WorkerRow | null>(null)
@@ -108,11 +114,13 @@ export function WorkersClient({ rows, domain }: { rows: WorkerRow[]; domain: str
 
   return (
     <div className="p-6 space-y-6">
+      <div>
+        <h1 className="text-2xl font-semibold tracking-tight">Usuarios</h1>
+        <p className="text-muted-foreground">Empleadas, accesos y roles.</p>
+      </div>
+
       <div className="flex items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Usuarios</h1>
-          <p className="text-muted-foreground">{rows.length} usuarios · gestiona accesos y roles</p>
-        </div>
+        <p className="text-sm text-muted-foreground">{rows.length} usuarios · gestiona accesos y roles</p>
         <Button onClick={() => openForm(null)}>
           <Plus className="mr-2 h-4 w-4" /> Nuevo usuario
         </Button>

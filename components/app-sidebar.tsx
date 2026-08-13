@@ -17,6 +17,7 @@ import {
   Wallet,
   ShieldCheck,
   ShieldOff,
+  Clock,
 } from "lucide-react"
 import { useState } from "react"
 import { cn } from "@/lib/utils"
@@ -34,6 +35,7 @@ const ALL_NAV = [
   { icon: DoorOpen,     label: "Cabinas",       href: "/cabins",        roles: ["ADMIN"],           group: "main" },
   { icon: ClipboardList, label: "Historial citas", href: "/appointments", roles: ["ADMIN"],          group: "history" },
   { icon: UserCog,      label: "Usuarios",      href: "/workers",       roles: ["ADMIN"],           group: "admin" },
+  { icon: Clock,        label: "Horarios",      href: "/horarios",      roles: ["ADMIN"],           group: "admin" },
   { icon: Settings,     label: "Configuración", href: "/settings",      roles: ["ADMIN"],           group: "admin" },
 ]
 

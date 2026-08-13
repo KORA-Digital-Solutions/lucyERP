@@ -1,11 +1,13 @@
 import { prisma } from "@/lib/db"
+import { getEffectiveWorkingHours, isWithinRanges } from "@/lib/schedule"
+import { toDateInputValue } from "@/lib/format"
 
 // Servicio de disponibilidad (Fase 1): control de solapamientos de cabina y
 // trabajador. Las citas CANCELLED no bloquean hueco (RF-CABIN-04, RN 19.3).
 
 const BLOCKING_STATUSES = ["PENDING", "CONFIRMED", "DONE", "NO_SHOW"]
 
-type Conflict = { type: "CABIN" | "WORKER" | "CUSTOMER"; message: string }
+type Conflict = { type: "CABIN" | "WORKER" | "CUSTOMER" | "SCHEDULE"; message: string }
 
 async function findOverlap(
   field: "cabinId" | "workerId" | "customerId",
@@ -46,6 +48,7 @@ export async function checkWorkerAvailability(
 }
 
 export interface SlotInput {
+  clinicId: string
   cabinId: string
   workerId: string
   customerId: string
@@ -84,6 +87,18 @@ export async function validateAppointmentSlot(input: SlotInput): Promise<Conflic
     conflicts.push({
       type: "CUSTOMER",
       message: "El cliente ya tiene una cita en ese horario.",
+    })
+  }
+
+  const date = toDateInputValue(input.startAt)
+  const workingHours = await getEffectiveWorkingHours(input.clinicId, input.workerId, date)
+  if (!isWithinRanges(workingHours, input.startAt, input.endAt)) {
+    conflicts.push({
+      type: "SCHEDULE",
+      message:
+        workingHours.length === 0
+          ? "Ese día la trabajadora no está disponible (cerrado, vacaciones o festivo)."
+          : "La hora elegida está fuera del horario de trabajo de ese día.",
     })
   }
 

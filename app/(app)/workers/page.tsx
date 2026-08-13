@@ -6,10 +6,8 @@ export const dynamic = "force-dynamic"
 
 export default async function WorkersPage() {
   const clinic = await getActiveClinic()
-  const workers = await prisma.user.findMany({
-    where: { clinicId: clinic.id },
-    orderBy: { name: "asc" },
-  })
+
+  const workers = await prisma.user.findMany({ where: { clinicId: clinic.id }, orderBy: { name: "asc" } })
 
   const rows: WorkerRow[] = workers.map((w) => ({
     id: w.id,

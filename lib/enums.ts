@@ -24,6 +24,37 @@ export type ReminderStatus = keyof typeof REMINDER_STATUS
 export const USER_ROLE = { ADMIN: "ADMIN", WORKER: "WORKER" } as const
 export type UserRole = keyof typeof USER_ROLE
 
+export const LEAVE_TYPE = {
+  VACATION: "VACATION",
+  PERSONAL: "PERSONAL",
+  SICK: "SICK",
+  OTHER: "OTHER",
+} as const
+export type LeaveType = keyof typeof LEAVE_TYPE
+
+// `quota` indica de qué saldo anual descuenta cada tipo de ausencia. Las bajas
+// y las ausencias justificadas no consumen cupo: no se limitan por saldo ni
+// aparecen en el contador de días gastados.
+export const LEAVE_TYPE_META: Record<LeaveType, { label: string; quota: "vacation" | "personal" | null; color: string }> = {
+  VACATION: { label: "Vacaciones", quota: "vacation", color: "#3FBF8F" },
+  PERSONAL: { label: "Asuntos propios", quota: "personal", color: "#F5A524" },
+  SICK: { label: "Baja por enfermedad", quota: null, color: "#E08A7B" },
+  OTHER: { label: "Otra ausencia", quota: null, color: "#A78BC9" },
+}
+
+export const HOLIDAY_SCOPE = { NATIONAL: "NATIONAL", REGIONAL: "REGIONAL", LOCAL: "LOCAL" } as const
+export type HolidayScope = keyof typeof HOLIDAY_SCOPE
+
+export const HOLIDAY_SCOPE_META: Record<HolidayScope, { label: string }> = {
+  NATIONAL: { label: "Nacional" },
+  REGIONAL: { label: "Autonómico" },
+  LOCAL: { label: "Local" },
+}
+
+// 0=domingo .. 6=sábado (coincide con Date.getDay())
+export const WEEKDAY_LABELS = ["Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"] as const
+export const WEEKDAY_LABELS_SHORT = ["Dom", "Lun", "Mar", "Mié", "Jue", "Vie", "Sáb"] as const
+
 export const WA_DIRECTION = { OUTBOUND: "OUTBOUND", INBOUND: "INBOUND" } as const
 export const WA_MESSAGE_STATUS = {
   PENDING: "PENDING",

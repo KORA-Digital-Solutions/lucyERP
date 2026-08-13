@@ -59,7 +59,7 @@ export function SettingsClient({
     <div className="p-6 space-y-6">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Configuración</h1>
-        <p className="text-muted-foreground">Datos de la clínica y recordatorios por WhatsApp</p>
+        <p className="text-muted-foreground">Datos de la clínica y WhatsApp.</p>
       </div>
 
       <form onSubmit={onSubmit} className="space-y-6">
@@ -93,14 +93,17 @@ export function SettingsClient({
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label htmlFor="openingTime">Apertura</Label>
+                <Label htmlFor="openingTime">Apertura (fallback)</Label>
                 <Input id="openingTime" name="openingTime" type="time" defaultValue={clinic.openingTime} />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="closingTime">Cierre</Label>
+                <Label htmlFor="closingTime">Cierre (fallback)</Label>
                 <Input id="closingTime" name="closingTime" type="time" defaultValue={clinic.closingTime} />
               </div>
             </div>
+            <p className="text-xs text-muted-foreground sm:col-span-2">
+              Solo se usa si un día no tiene horario semanal configurado en Horarios → Horario semanal.
+            </p>
           </CardContent>
         </Card>
 
@@ -177,6 +180,7 @@ export function SettingsClient({
           <div className="flex gap-4 text-sm">
             <Link href="/cabins" className="text-primary hover:underline">Gestionar cabinas →</Link>
             <Link href="/workers" className="text-primary hover:underline">Gestionar trabajadores →</Link>
+            <Link href="/horarios" className="text-primary hover:underline">Gestionar horarios →</Link>
           </div>
           <Button type="submit" disabled={loading}>
             {loading ? "Guardando…" : "Guardar configuración"}

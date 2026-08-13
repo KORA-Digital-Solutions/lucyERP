@@ -24,6 +24,20 @@ function todayAt(hour: number, minute = 0): Date {
   return d
 }
 
+function toDateStr(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
+}
+
+// Los datos de horarios se anclan al lunes de la semana en curso para que la
+// vista "Esta semana" siempre tenga algo que enseñar, se siembre el día que se
+// siembre. day(0) = lunes de esta semana, day(7) = lunes de la que viene.
+function day(offsetDays: number): string {
+  const d = new Date()
+  d.setHours(0, 0, 0, 0)
+  d.setDate(d.getDate() + (d.getDay() === 0 ? -6 : 1 - d.getDay()) + offsetDays)
+  return toDateStr(d)
+}
+
 async function main() {
   console.log("🌱 Sembrando datos demo…")
 
@@ -34,8 +48,17 @@ async function main() {
   await prisma.product.deleteMany()
   await prisma.supplier.deleteMany()
   await prisma.service.deleteMany()
+  await prisma.serviceFamily.deleteMany()
   await prisma.customer.deleteMany()
   await prisma.cabin.deleteMany()
+  // Horarios/vacaciones: dependen de User/Clinic, deben borrarse antes.
+  await prisma.workerLeave.deleteMany()
+  await prisma.workerLeaveBalance.deleteMany()
+  await prisma.workerScheduleOverride.deleteMany() // cascade -> slots
+  await prisma.workerWeeklySlot.deleteMany()
+  await prisma.clinicScheduleOverride.deleteMany() // cascade -> slots
+  await prisma.clinicWeeklySlot.deleteMany()
+  await prisma.holiday.deleteMany()
   await prisma.user.deleteMany()
   await prisma.clinic.deleteMany()
 
@@ -81,11 +104,129 @@ async function main() {
     }),
   ])
 
-  // Cabinas
+  // Horario semanal del centro: lunes a viernes 9:00-20:00 (sábado y domingo cerrado).
+  await prisma.clinicWeeklySlot.createMany({
+    data: [1, 2, 3, 4, 5].map((dayOfWeek) => ({
+      clinicId: clinic.id,
+      dayOfWeek,
+      startTime: "09:00",
+      endTime: "20:00",
+    })),
+  })
+
+  // Horario semanal por empleada (ejemplo del contrato de cada una).
+  await prisma.workerWeeklySlot.createMany({
+    data: [
+      // Lola: 40h/semana, lunes a viernes 9:00-17:00.
+      ...[1, 2, 3, 4, 5].map((dayOfWeek) => ({
+        clinicId: clinic.id, workerId: lola.id, dayOfWeek, startTime: "09:00", endTime: "17:00",
+      })),
+      // Marta: jornada parcial partida, martes tarde y jueves mañana.
+      { clinicId: clinic.id, workerId: marta.id, dayOfWeek: 2, startTime: "16:00", endTime: "20:00" },
+      { clinicId: clinic.id, workerId: marta.id, dayOfWeek: 4, startTime: "09:00", endTime: "13:00" },
+      // Lucía (admin): jornada completa igual que el centro.
+      ...[1, 2, 3, 4, 5].map((dayOfWeek) => ({
+        clinicId: clinic.id, workerId: admin.id, dayOfWeek, startTime: "09:00", endTime: "20:00",
+      })),
+    ],
+  })
+
+  // Saldo anual de vacaciones/asuntos propios: 21 días de vacaciones y 1 de
+  // libre disposición por empleada.
+  const currentYear = new Date().getFullYear()
+  await prisma.workerLeaveBalance.createMany({
+    data: [admin, marta, lola].map((w) => ({
+      clinicId: clinic.id,
+      workerId: w.id,
+      year: currentYear,
+      vacationDaysTotal: 21,
+      personalDaysTotal: 1,
+    })),
+  })
+
+  // Festivos: uno fijo nacional (para probar "Copiar fijos al año que viene")
+  // y uno local en la semana que viene, que sí se ve en la cuadrícula.
+  // Se deduplica por fecha porque Holiday es único por (clínica, fecha) y el
+  // festivo local podría caer justo en el fijo.
+  const holidaySeed = [
+    { date: `${currentYear}-12-25`, name: "Navidad", scope: "NATIONAL" },
+    { date: day(11), name: "Fiesta local", scope: "LOCAL" },
+  ]
+  await prisma.holiday.createMany({
+    data: holidaySeed
+      .filter((h, i) => holidaySeed.findIndex((o) => o.date === h.date) === i)
+      .map((h) => ({ clinicId: clinic.id, ...h })),
+  })
+
+  // Excepción del centro: el viernes de esta semana se cierra antes.
+  await prisma.clinicScheduleOverride.create({
+    data: {
+      clinicId: clinic.id,
+      date: day(4),
+      closed: false,
+      reason: "Cierre anticipado por formación",
+      slots: { create: [{ startTime: "09:00", endTime: "14:00" }] },
+    },
+  })
+
+  // Excepciones de empleada, una de cada tipo: Marta entra un día que no le
+  // toca, y Lola libra un día que sí le tocaba (cambio de turno, sin gastar
+  // vacaciones).
+  await prisma.workerScheduleOverride.create({
+    data: {
+      clinicId: clinic.id,
+      workerId: marta.id,
+      date: day(2),
+      closed: false,
+      reason: "Cubre a Lola",
+      slots: { create: [{ startTime: "10:00", endTime: "14:00" }] },
+    },
+  })
+  await prisma.workerScheduleOverride.create({
+    data: {
+      clinicId: clinic.id,
+      workerId: lola.id,
+      date: day(3),
+      closed: true,
+      reason: "Cambia su día libre esta semana",
+    },
+  })
+
+  // Ausencias: un rango (vacaciones de Lola la semana que viene) y dos días
+  // sueltos, para ver los tres colores en la cuadrícula.
+  await prisma.workerLeave.createMany({
+    data: [
+      ...[7, 8, 9].map((offset) => ({
+        clinicId: clinic.id,
+        workerId: lola.id,
+        date: day(offset),
+        type: "VACATION",
+        notes: "Puente",
+        createdByUserId: admin.id,
+      })),
+      {
+        clinicId: clinic.id,
+        workerId: admin.id,
+        date: day(1),
+        type: "PERSONAL",
+        notes: "Gestión personal",
+        createdByUserId: admin.id,
+      },
+      {
+        clinicId: clinic.id,
+        workerId: marta.id,
+        date: day(3),
+        type: "SICK",
+        notes: null,
+        createdByUserId: admin.id,
+      },
+    ],
+  })
+
+  // Cabinas: recurso compartido, cualquier empleada puede usar cualquiera.
   const cabins = await Promise.all([
-    prisma.cabin.create({ data: { clinicId: clinic.id, name: "Cabina 1", sortOrder: 1, active: true, defaultWorkerId: marta.id } }),
-    prisma.cabin.create({ data: { clinicId: clinic.id, name: "Cabina 2", sortOrder: 2, active: true, defaultWorkerId: lola.id } }),
-    prisma.cabin.create({ data: { clinicId: clinic.id, name: "Cabina 3", sortOrder: 3, active: true, defaultWorkerId: admin.id } }),
+    prisma.cabin.create({ data: { clinicId: clinic.id, name: "Cabina 1", sortOrder: 1, active: true } }),
+    prisma.cabin.create({ data: { clinicId: clinic.id, name: "Cabina 2", sortOrder: 2, active: true } }),
   ])
 
   // Familias de servicio
@@ -167,7 +308,7 @@ async function main() {
   await Promise.all([
     appt({ customerId: maria.id, serviceId: laser.id, workerId: marta.id, cabinId: cabins[0].id, startHour: 9, startMinute: 45, duration: 60, status: "CONFIRMED", reminderStatus: "SENT" }),
     appt({ customerId: pepita.id, serviceId: facial.id, workerId: lola.id, cabinId: cabins[1].id, startHour: 11, startMinute: 30, duration: 60, status: "PENDING", reminderStatus: "PENDING" }),
-    appt({ customerId: fernando.id, serviceId: electrica.id, workerId: lola.id, cabinId: cabins[2].id, startHour: 11, startMinute: 30, duration: 45, status: "CONFIRMED", reminderStatus: "DELIVERED" }),
+    appt({ customerId: fernando.id, serviceId: electrica.id, workerId: admin.id, cabinId: cabins[0].id, startHour: 11, startMinute: 30, duration: 45, status: "CONFIRMED", reminderStatus: "DELIVERED" }),
     appt({ customerId: carlos.id, serviceId: masaje.id, workerId: marta.id, cabinId: cabins[0].id, startHour: 13, startMinute: 0, duration: 90, status: "PENDING", reminderStatus: "PENDING" }),
     appt({ customerId: ana.id, serviceId: manicura.id, workerId: lola.id, cabinId: cabins[1].id, startHour: 16, startMinute: 0, duration: 30, status: "DONE", reminderStatus: "NOT_SCHEDULED" }),
   ])
@@ -252,6 +393,7 @@ async function main() {
   console.log(`   Clínica: ${clinic.name}`)
   console.log(`   ${cabins.length} cabinas · 3 trabajadores · 5 servicios · 5 clientes · 5 citas`)
   console.log(`   2 proveedores (Dermoder, Lamdors) · 5 productos`)
+  console.log(`   Horarios: 2 festivos · 3 excepciones · 5 días de ausencia (semana del ${day(0)})`)
   console.log(`   Login demo: ${admin.email} / admin`)
 }
 

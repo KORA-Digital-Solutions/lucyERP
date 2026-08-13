@@ -14,9 +14,6 @@ import { Badge } from "@/components/ui/badge"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { saveCabin, toggleCabinActive } from "@/lib/actions"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-
-export interface WorkerOption { id: string; name: string }
 
 export interface CabinRow {
   id: string
@@ -24,15 +21,13 @@ export interface CabinRow {
   description: string | null
   sortOrder: number
   active: boolean
-  defaultWorkerId: string | null
 }
 
-export function CabinsClient({ rows, workers }: { rows: CabinRow[]; workers: WorkerOption[] }) {
+export function CabinsClient({ rows }: { rows: CabinRow[] }) {
   const router = useRouter()
   const [open, setOpen] = useState(false)
   const [editing, setEditing] = useState<CabinRow | null>(null)
   const [loading, setLoading] = useState(false)
-  const [defaultWorkerId, setDefaultWorkerId] = useState<string>("")
 
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
@@ -60,7 +55,7 @@ export function CabinsClient({ rows, workers }: { rows: CabinRow[]; workers: Wor
           <h1 className="text-2xl font-semibold tracking-tight">Cabinas</h1>
           <p className="text-muted-foreground">{rows.length} cabinas · las inactivas no admiten nuevas citas</p>
         </div>
-        <Button onClick={() => { setEditing(null); setDefaultWorkerId(""); setOpen(true) }}>
+        <Button onClick={() => { setEditing(null); setOpen(true) }}>
           <Plus className="mr-2 h-4 w-4" /> Nueva cabina
         </Button>
       </div>
@@ -98,7 +93,7 @@ export function CabinsClient({ rows, workers }: { rows: CabinRow[]; workers: Wor
                       <Switch checked={r.active} onCheckedChange={() => onToggle(r)} />
                     </span>
                     <span className="flex w-20 justify-center">
-                      <Button variant="ghost" size="icon" onClick={() => { setEditing(r); setDefaultWorkerId(r.defaultWorkerId ?? ""); setOpen(true) }}>
+                      <Button variant="ghost" size="icon" onClick={() => { setEditing(r); setOpen(true) }}>
                         <Pencil className="h-4 w-4" />
                       </Button>
                     </span>
@@ -132,21 +127,6 @@ export function CabinsClient({ rows, workers }: { rows: CabinRow[]; workers: Wor
             <div className="space-y-2">
               <Label htmlFor="sortOrder">Orden visual</Label>
               <Input id="sortOrder" name="sortOrder" type="number" min={0} defaultValue={editing?.sortOrder ?? rows.length + 1} />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="defaultWorkerId">Trabajador por defecto</Label>
-              <Select value={defaultWorkerId} onValueChange={setDefaultWorkerId}>
-                <SelectTrigger id="defaultWorkerId">
-                  <SelectValue placeholder="Sin asignar" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">Sin asignar</SelectItem>
-                  {workers.map((w) => (
-                    <SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <input type="hidden" name="defaultWorkerId" value={defaultWorkerId === "none" ? "" : defaultWorkerId} />
             </div>
             <div className="flex items-center justify-between rounded-lg border p-3">
               <Label htmlFor="active">Cabina activa</Label>

@@ -7,6 +7,7 @@ export const dynamic = "force-dynamic"
 
 export default async function SettingsPage() {
   const clinic = await getActiveClinic()
+
   const [cabinCount, workerCount] = await Promise.all([
     prisma.cabin.count({ where: { clinicId: clinic.id, active: true } }),
     prisma.user.count({ where: { clinicId: clinic.id, active: true } }),

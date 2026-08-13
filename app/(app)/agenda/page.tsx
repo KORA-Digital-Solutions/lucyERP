@@ -1,6 +1,8 @@
 import { prisma } from "@/lib/db"
 import { getActiveClinic } from "@/lib/clinic"
+import { getSession } from "@/lib/session"
 import { dayRange, toDateInputValue, toTimeString, toTimeInputValue, formatLongDate } from "@/lib/format"
+import { getEffectiveClinicHours, getEffectiveWorkingHours } from "@/lib/schedule"
 import { AgendaBoard, type AgendaAppointment } from "@/components/agenda-board"
 
 export const dynamic = "force-dynamic"
@@ -18,12 +20,13 @@ export default async function AgendaPage({
   const { date: dateParam } = await searchParams
   const date = dateParam || toDateInputValue(new Date())
   const clinic = await getActiveClinic()
+  const session = await getSession()
   const { start, end } = dayRange(date)
 
   const today = new Date()
   today.setHours(0, 0, 0, 0)
 
-  const [allCabins, workers, services, customers, appointments] = await Promise.all([
+  const [allCabins, workers, services, customers, appointments, clinicRanges, clinicOverride, holiday] = await Promise.all([
     prisma.cabin.findMany({ where: { clinicId: clinic.id }, orderBy: { sortOrder: "asc" } }),
     prisma.user.findMany({ where: { clinicId: clinic.id, active: true }, orderBy: { name: "asc" } }),
     prisma.service.findMany({ where: { clinicId: clinic.id, active: true }, orderBy: { name: "asc" } }),
@@ -33,7 +36,22 @@ export default async function AgendaPage({
       include: { customer: true, service: true, worker: true },
       orderBy: { startAt: "asc" },
     }),
+    getEffectiveClinicHours(clinic.id, date),
+    prisma.clinicScheduleOverride.findUnique({ where: { clinicId_date: { clinicId: clinic.id, date } } }),
+    prisma.holiday.findUnique({ where: { clinicId_date: { clinicId: clinic.id, date } } }),
   ])
+
+  const clinicClosed = clinicRanges.length === 0
+  const closedReason = !clinicClosed
+    ? undefined
+    : (clinicOverride?.reason ?? (clinicOverride ? "Cierre puntual" : holiday ? holiday.name : undefined))
+
+  const [workerHoursEntries, leaveRows] = await Promise.all([
+    Promise.all(workers.map(async (w) => [w.id, await getEffectiveWorkingHours(clinic.id, w.id, date)] as const)),
+    prisma.workerLeave.findMany({ where: { clinicId: clinic.id, date, workerId: { in: workers.map((w) => w.id) } } }),
+  ])
+  const workerHours: Record<string, { startTime: string; endTime: string }[]> = Object.fromEntries(workerHoursEntries)
+  const workerLeaveType: Record<string, string> = Object.fromEntries(leaveRows.map((l) => [l.workerId, l.type]))
 
   // Include inactive cabins only if they have at least one appointment on the
   // selected date OR any appointment in the future (startAt >= today).
@@ -71,14 +89,27 @@ export default async function AgendaPage({
     time: toTimeInputValue(a.startAt),
   }))
 
+  const openingMinutes = clinicClosed
+    ? timeToMinutes(clinic.openingTime)
+    : Math.min(...clinicRanges.map((r) => timeToMinutes(r.startTime)))
+  const closingMinutes = clinicClosed
+    ? timeToMinutes(clinic.closingTime)
+    : Math.max(...clinicRanges.map((r) => timeToMinutes(r.endTime)))
+
   return (
     <AgendaBoard
       date={date}
       longDate={formatLongDate(date)}
-      openingMinutes={timeToMinutes(clinic.openingTime)}
-      closingMinutes={timeToMinutes(clinic.closingTime)}
-      cabins={cabins.map((c) => ({ id: c.id, name: c.name, defaultWorkerId: c.defaultWorkerId, active: c.active }))}
-      workers={workers.map((w) => ({ id: w.id, name: w.name }))}
+      openingMinutes={openingMinutes}
+      closingMinutes={closingMinutes}
+      clinicClosed={clinicClosed}
+      closedReason={closedReason}
+      clinicRanges={clinicRanges}
+      workerHours={workerHours}
+      workerLeaveType={workerLeaveType}
+      isAdmin={session?.role === "ADMIN"}
+      cabins={cabins.map((c) => ({ id: c.id, name: c.name, active: c.active }))}
+      workers={workers.map((w) => ({ id: w.id, name: w.name, color: w.color ?? "#3C54A4" }))}
       services={services.map((s) => ({
         id: s.id,
         name: s.name,

@@ -56,137 +56,141 @@ export function SettingsClient({
   }
 
   return (
-    <div className="p-6 space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Configuración</h1>
-        <p className="text-muted-foreground">Datos de la clínica y WhatsApp.</p>
+    <div>
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-card p-6">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">Configuración</h1>
+          <p className="text-muted-foreground">Datos de la clínica y WhatsApp.</p>
+        </div>
       </div>
 
-      <form onSubmit={onSubmit} className="space-y-6">
-        <Card>
-          <CardHeader>
-            <CardTitle>Datos de la clínica</CardTitle>
-            <CardDescription>
-              {cabinCount} cabinas activas · {workerCount} trabajadores activos
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="grid gap-4 sm:grid-cols-2">
-            <div className="space-y-2 sm:col-span-2">
-              <Label htmlFor="name">Nombre comercial</Label>
-              <Input id="name" name="name" defaultValue={clinic.name} required />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="taxId">NIF / CIF</Label>
-              <Input id="taxId" name="taxId" defaultValue={clinic.taxId ?? ""} />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="phone">Teléfono</Label>
-              <Input id="phone" name="phone" defaultValue={clinic.phone ?? ""} />
-            </div>
-            <div className="space-y-2 sm:col-span-2">
-              <Label htmlFor="address">Dirección</Label>
-              <Input id="address" name="address" defaultValue={clinic.address ?? ""} />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="email">Email</Label>
-              <Input id="email" name="email" type="email" defaultValue={clinic.email ?? ""} />
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="openingTime">Apertura (fallback)</Label>
-                <Input id="openingTime" name="openingTime" type="time" defaultValue={clinic.openingTime} />
+      <div className="p-6 space-y-6">
+        <form onSubmit={onSubmit} className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>Datos de la clínica</CardTitle>
+              <CardDescription>
+                {cabinCount} cabinas activas · {workerCount} trabajadores activos
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-2 sm:col-span-2">
+                <Label htmlFor="name">Nombre comercial</Label>
+                <Input id="name" name="name" defaultValue={clinic.name} required />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="closingTime">Cierre (fallback)</Label>
-                <Input id="closingTime" name="closingTime" type="time" defaultValue={clinic.closingTime} />
+                <Label htmlFor="taxId">NIF / CIF</Label>
+                <Input id="taxId" name="taxId" defaultValue={clinic.taxId ?? ""} />
               </div>
-            </div>
-            <p className="text-xs text-muted-foreground sm:col-span-2">
-              Solo se usa si un día no tiene horario semanal configurado en Horarios → Horario semanal.
-            </p>
-          </CardContent>
-        </Card>
+              <div className="space-y-2">
+                <Label htmlFor="phone">Teléfono</Label>
+                <Input id="phone" name="phone" defaultValue={clinic.phone ?? ""} />
+              </div>
+              <div className="space-y-2 sm:col-span-2">
+                <Label htmlFor="address">Dirección</Label>
+                <Input id="address" name="address" defaultValue={clinic.address ?? ""} />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="email">Email</Label>
+                <Input id="email" name="email" type="email" defaultValue={clinic.email ?? ""} />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="openingTime">Apertura (fallback)</Label>
+                  <Input id="openingTime" name="openingTime" type="time" defaultValue={clinic.openingTime} />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="closingTime">Cierre (fallback)</Label>
+                  <Input id="closingTime" name="closingTime" type="time" defaultValue={clinic.closingTime} />
+                </div>
+              </div>
+              <p className="text-xs text-muted-foreground sm:col-span-2">
+                Solo se usa si un día no tiene horario semanal configurado en Horarios → Horario semanal.
+              </p>
+            </CardContent>
+          </Card>
 
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <MessageCircle className="h-5 w-5 text-primary" /> WhatsApp Business
-            </CardTitle>
-            <CardDescription>Recordatorios automáticos de citas</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {whatsappConfigured ? (
-              <div className="flex items-center gap-2 rounded-lg border border-[#34A853]/40 bg-[#E6F4EA] p-3 text-sm text-[#1E6B34]">
-                <CheckCircle2 className="h-4 w-4" /> Credenciales de la API detectadas en el entorno.
-              </div>
-            ) : (
-              <div className="flex items-center gap-2 rounded-lg border border-[#F59E0B]/40 bg-[#FEF3E2] p-3 text-sm text-[#92400E]">
-                <AlertTriangle className="h-4 w-4" />
-                Sin credenciales: los envíos funcionan en <strong>modo simulado</strong>. Configura las
-                variables <code>WHATSAPP_*</code> en <code>.env</code> para enviar de verdad.
-              </div>
-            )}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <MessageCircle className="h-5 w-5 text-primary" /> WhatsApp Business
+              </CardTitle>
+              <CardDescription>Recordatorios automáticos de citas</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {whatsappConfigured ? (
+                <div className="flex items-center gap-2 rounded-lg border border-[#34A853]/40 bg-[#E6F4EA] p-3 text-sm text-[#1E6B34]">
+                  <CheckCircle2 className="h-4 w-4" /> Credenciales de la API detectadas en el entorno.
+                </div>
+              ) : (
+                <div className="flex items-center gap-2 rounded-lg border border-[#F59E0B]/40 bg-[#FEF3E2] p-3 text-sm text-[#92400E]">
+                  <AlertTriangle className="h-4 w-4" />
+                  Sin credenciales: los envíos funcionan en <strong>modo simulado</strong>. Configura las
+                  variables <code>WHATSAPP_*</code> en <code>.env</code> para enviar de verdad.
+                </div>
+              )}
 
-            <div className="flex items-center justify-between rounded-lg border p-3">
-              <div>
-                <Label>Activar recordatorios automáticos</Label>
-                <p className="text-xs text-muted-foreground">El worker enviará recordatorios según la antelación.</p>
+              <div className="flex items-center justify-between rounded-lg border p-3">
+                <div>
+                  <Label>Activar recordatorios automáticos</Label>
+                  <p className="text-xs text-muted-foreground">El worker enviará recordatorios según la antelación.</p>
+                </div>
+                <Switch checked={whatsappEnabled} onCheckedChange={setWhatsappEnabled} />
               </div>
-              <Switch checked={whatsappEnabled} onCheckedChange={setWhatsappEnabled} />
+
+              <div className="grid gap-4 sm:grid-cols-3">
+                <div className="space-y-2">
+                  <Label htmlFor="whatsappTemplateName">Plantilla</Label>
+                  <Input id="whatsappTemplateName" name="whatsappTemplateName" defaultValue={clinic.whatsappTemplateName ?? "appointment_reminder_es"} />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="whatsappTemplateLang">Idioma</Label>
+                  <Input id="whatsappTemplateLang" name="whatsappTemplateLang" defaultValue={clinic.whatsappTemplateLang ?? "es"} />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="reminderHoursBefore">Antelación (horas)</Label>
+                  <Input id="reminderHoursBefore" name="reminderHoursBefore" type="number" min={1} defaultValue={clinic.reminderHoursBefore} />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Clientes</CardTitle>
+              <CardDescription>Configuración del módulo de gestión de clientes</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="grid gap-4 sm:grid-cols-3">
+                <div className="space-y-2">
+                  <Label htmlFor="inactivityWarningDays">Días sin visita para mostrar aviso</Label>
+                  <Input
+                    id="inactivityWarningDays"
+                    name="inactivityWarningDays"
+                    type="number"
+                    min={1}
+                    defaultValue={clinic.inactivityWarningDays}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Muestra un icono de alerta en los clientes que llevan más días sin visita.
+                  </p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <div className="flex items-center justify-between">
+            <div className="flex gap-4 text-sm">
+              <Link href="/cabins" className="text-primary hover:underline">Gestionar cabinas →</Link>
+              <Link href="/workers" className="text-primary hover:underline">Gestionar trabajadores →</Link>
+              <Link href="/horarios" className="text-primary hover:underline">Gestionar horarios →</Link>
             </div>
-
-            <div className="grid gap-4 sm:grid-cols-3">
-              <div className="space-y-2">
-                <Label htmlFor="whatsappTemplateName">Plantilla</Label>
-                <Input id="whatsappTemplateName" name="whatsappTemplateName" defaultValue={clinic.whatsappTemplateName ?? "appointment_reminder_es"} />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="whatsappTemplateLang">Idioma</Label>
-                <Input id="whatsappTemplateLang" name="whatsappTemplateLang" defaultValue={clinic.whatsappTemplateLang ?? "es"} />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="reminderHoursBefore">Antelación (horas)</Label>
-                <Input id="reminderHoursBefore" name="reminderHoursBefore" type="number" min={1} defaultValue={clinic.reminderHoursBefore} />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Clientes</CardTitle>
-            <CardDescription>Configuración del módulo de gestión de clientes</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="grid gap-4 sm:grid-cols-3">
-              <div className="space-y-2">
-                <Label htmlFor="inactivityWarningDays">Días sin visita para mostrar aviso</Label>
-                <Input
-                  id="inactivityWarningDays"
-                  name="inactivityWarningDays"
-                  type="number"
-                  min={1}
-                  defaultValue={clinic.inactivityWarningDays}
-                />
-                <p className="text-xs text-muted-foreground">
-                  Muestra un icono de alerta en los clientes que llevan más días sin visita.
-                </p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        <div className="flex items-center justify-between">
-          <div className="flex gap-4 text-sm">
-            <Link href="/cabins" className="text-primary hover:underline">Gestionar cabinas →</Link>
-            <Link href="/workers" className="text-primary hover:underline">Gestionar trabajadores →</Link>
-            <Link href="/horarios" className="text-primary hover:underline">Gestionar horarios →</Link>
+            <Button type="submit" disabled={loading}>
+              {loading ? "Guardando…" : "Guardar configuración"}
+            </Button>
           </div>
-          <Button type="submit" disabled={loading}>
-            {loading ? "Guardando…" : "Guardar configuración"}
-          </Button>
-        </div>
-      </form>
+        </form>
+      </div>
     </div>
   )
 }

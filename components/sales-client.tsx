@@ -156,8 +156,8 @@ export function SalesClient({ sales, customers, services, products, workers, cur
   }
 
   return (
-    <div className="p-8 space-y-6">
-      <div className="flex items-center justify-between">
+    <div>
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-card p-6">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Ventas</h1>
           <p className="text-muted-foreground">{sales.length} registros</p>
@@ -167,208 +167,209 @@ export function SalesClient({ sales, customers, services, products, workers, cur
         </Button>
       </div>
 
-      {/* Filtros */}
-      <div className="space-y-2">
-        <div className="flex flex-wrap gap-3 items-center">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input className="pl-9 w-52" placeholder="Buscar cliente…" value={clientSearch} onChange={(e) => setClientSearch(e.target.value)} />
-          </div>
-          <div className="flex items-center gap-1">
-            <Button
-              variant={dateMode === "today" ? "default" : "outline"}
-              size="sm"
-              onClick={() => setDateMode("today")}
-            >
-              Hoy
-            </Button>
-            <Button
-              variant={dateMode === "week" ? "default" : "outline"}
-              size="sm"
-              onClick={() => setDateMode("week")}
-            >
-              Esta semana
-            </Button>
-            <Button
-              variant={dateMode === "custom" ? "default" : "outline"}
-              size="sm"
-              onClick={() => setDateMode("custom")}
-            >
-              <CalendarDays className="h-3.5 w-3.5 mr-1" /> Rango
-            </Button>
-          </div>
-          {dateMode === "custom" && (
-            <div className="flex items-center gap-2">
-              <input
-                type="date"
-                value={customFrom}
-                onChange={(e) => setCustomFrom(e.target.value)}
-                className="h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground"
-              />
-              <span className="text-muted-foreground text-sm">—</span>
-              <input
-                type="date"
-                value={customTo}
-                onChange={(e) => setCustomTo(e.target.value)}
-                className="h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground"
-              />
+      <div className="p-8 space-y-6">
+        {/* Filtros */}
+        <div className="space-y-2">
+          <div className="flex flex-wrap gap-3 items-center">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input className="pl-9 w-52" placeholder="Buscar cliente…" value={clientSearch} onChange={(e) => setClientSearch(e.target.value)} />
             </div>
-          )}
-          <span className="text-sm text-muted-foreground ml-auto">{filtered.length} resultado{filtered.length !== 1 ? "s" : ""}</span>
-        </div>
-        <div className="flex flex-wrap gap-3 items-center">
-          <select
-            value={workerFilter}
-            onChange={(e) => setWorkerFilter(e.target.value)}
-            className="h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground"
-          >
-            <option value="ALL">Todos los trabajadores</option>
-            {saleWorkers.map((w) => <option key={w} value={w}>{w}</option>)}
-          </select>
-          <select
-            value={paymentFilter}
-            onChange={(e) => setPaymentFilter(e.target.value)}
-            className="h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground"
-          >
-            <option value="ALL">Todos los pagos</option>
-            <option value="CASH">Efectivo</option>
-            <option value="CARD">Tarjeta</option>
-            <option value="DEBT">Deuda</option>
-          </select>
-          {(clientSearch || workerFilter !== "ALL" || paymentFilter !== "ALL" || dateMode !== "today") && (
-            <Button variant="ghost" size="sm" className="text-muted-foreground" onClick={() => {
-              setClientSearch(""); setWorkerFilter("ALL"); setPaymentFilter("ALL"); setDateMode("today"); setCustomFrom(todayStr()); setCustomTo(todayStr())
-            }}>
-              Limpiar filtros
-            </Button>
-          )}
-        </div>
-      </div>
-
-      <Card>
-        <CardContent className="p-0">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b text-muted-foreground">
-                <th className="px-4 py-3 text-left font-medium">Fecha</th>
-                <th className="px-4 py-3 text-left font-medium">Cliente</th>
-                <th className="px-4 py-3 text-left font-medium">Pago</th>
-                <th className="px-4 py-3 text-right font-medium">Total</th>
-                <th className="px-4 py-3 text-left font-medium">Estado</th>
-                <th className="px-4 py-3 text-left font-medium">Trabajador</th>
-                <th className="px-4 py-3 text-right font-medium">
-                  <div className="flex justify-end text-xs font-normal text-muted-foreground">
-                    <span className="flex w-20 items-center justify-center gap-1"><Eye className="h-3.5 w-3.5" /> Detalle</span>
-                  </div>
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.length === 0 && (
-                <tr><td colSpan={7} className="py-12 text-center text-muted-foreground">No hay ventas para los filtros aplicados.</td></tr>
-              )}
-              {filtered.map((s) => {
-                const st = STATUS_META[s.status] ?? STATUS_META.PAID
-                const customerName = s.customer ? customerLabel(s.customer) : "—"
-                const workerName = `${s.user.name} ${s.user.lastName ?? ""}`.trim()
-                return (
-                  <tr key={s.id} className="border-b last:border-0 hover:bg-muted/40 transition-colors">
-                    <td className="px-4 py-3 text-muted-foreground">
-                      {new Date(s.createdAt).toLocaleDateString("es-ES", { day: "2-digit", month: "short", year: "numeric" })}
-                    </td>
-                    <td className="px-4 py-3 font-medium">{customerName}</td>
-                    <td className="px-4 py-3 text-muted-foreground">{PAYMENT_LABELS[s.paymentMethod] ?? s.paymentMethod}</td>
-                    <td className="px-4 py-3 text-right font-medium tabular-nums">{fmtEur(s.totalCents)}</td>
-                    <td className="px-4 py-3">
-                      <span className={`rounded-full border px-2 py-0.5 text-xs ${st.cls}`}>{st.label}</span>
-                    </td>
-                    <td className="px-4 py-3 text-muted-foreground">{workerName}</td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center justify-end">
-                        <span className="flex w-20 justify-center">
-                          <Button variant="ghost" size="icon" onClick={() => setDetailSale(s)}>
-                            <Eye className="h-4 w-4" />
-                          </Button>
-                        </span>
-                      </div>
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-        </CardContent>
-      </Card>
-
-      {/* Detail */}
-      {detailSale && (
-        <Dialog open onOpenChange={() => setDetailSale(null)}>
-          <DialogContent style={{ maxWidth: "42rem" }}>
-            <DialogHeader><DialogTitle>Detalle de venta</DialogTitle></DialogHeader>
-            <div className="space-y-4 text-sm">
-              <div className="grid grid-cols-2 gap-2 text-muted-foreground">
-                <div>Cliente: <span className="text-foreground font-medium">{detailSale.customer ? customerLabel(detailSale.customer) : "Sin cliente"}</span></div>
-                <div>Pago: <span className="text-foreground font-medium">{PAYMENT_LABELS[detailSale.paymentMethod]}</span></div>
+            <div className="flex items-center gap-1">
+              <Button
+                variant={dateMode === "today" ? "default" : "outline"}
+                size="sm"
+                onClick={() => setDateMode("today")}
+              >
+                Hoy
+              </Button>
+              <Button
+                variant={dateMode === "week" ? "default" : "outline"}
+                size="sm"
+                onClick={() => setDateMode("week")}
+              >
+                Esta semana
+              </Button>
+              <Button
+                variant={dateMode === "custom" ? "default" : "outline"}
+                size="sm"
+                onClick={() => setDateMode("custom")}
+              >
+                <CalendarDays className="h-3.5 w-3.5 mr-1" /> Rango
+              </Button>
+            </div>
+            {dateMode === "custom" && (
+              <div className="flex items-center gap-2">
+                <input
+                  type="date"
+                  value={customFrom}
+                  onChange={(e) => setCustomFrom(e.target.value)}
+                  className="h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground"
+                />
+                <span className="text-muted-foreground text-sm">—</span>
+                <input
+                  type="date"
+                  value={customTo}
+                  onChange={(e) => setCustomTo(e.target.value)}
+                  className="h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground"
+                />
               </div>
-              <table className="w-full">
-                <thead><tr className="border-b text-muted-foreground text-xs">
-                  <th className="text-left py-1">Descripción</th>
-                  <th className="text-right py-1">Cant.</th>
-                  <th className="text-right py-1">P.U.</th>
-                  <th className="text-right py-1">Dto.</th>
-                  <th className="text-right py-1">Total</th>
-                </tr></thead>
-                <tbody>
-                  {detailSale.lines.map((l) => (
-                    <tr key={l.id} className="border-b last:border-0">
-                      <td className="py-1.5">{l.description}{l.durationMinutes ? ` · ${l.durationMinutes} min` : ""}</td>
-                      <td className="text-right tabular-nums py-1.5">{l.quantity}</td>
-                      <td className="text-right tabular-nums py-1.5">{fmtEur(l.unitPriceCents)}</td>
-                      <td className="text-right py-1.5">{l.discountPercent > 0 ? `-${l.discountPercent}%` : "—"}</td>
-                      <td className="text-right tabular-nums py-1.5 font-medium">{fmtEur(l.totalCents)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              {(() => {
-                const balanceUsed = detailSale.balanceMovements.reduce((s, m) => s + Math.abs(m.amountCents), 0)
-                return balanceUsed > 0 ? (
-                  <div className="rounded-lg border border-blue-200 bg-blue-50/60 px-3 py-2 flex items-center justify-between text-sm">
-                    <span className="text-blue-700 font-medium flex items-center gap-1.5">
-                      <Wallet className="h-3.5 w-3.5" /> Saldo del cliente aplicado
-                    </span>
-                    <span className="tabular-nums font-semibold text-blue-700">−{fmtEur(balanceUsed)}</span>
-                  </div>
-                ) : null
-              })()}
-              <div className="text-right">
-                <span className="text-muted-foreground mr-2">Total:</span>
-                <span className="font-semibold text-base tabular-nums">{fmtEur(detailSale.totalCents)}</span>
-                {detailSale.paidCents < detailSale.totalCents && (
-                  <div className="text-red-600 mt-1">Pendiente: {fmtEur(detailSale.totalCents - detailSale.paidCents)}</div>
+            )}
+            <span className="text-sm text-muted-foreground ml-auto">{filtered.length} resultado{filtered.length !== 1 ? "s" : ""}</span>
+          </div>
+          <div className="flex flex-wrap gap-3 items-center">
+            <select
+              value={workerFilter}
+              onChange={(e) => setWorkerFilter(e.target.value)}
+              className="h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground"
+            >
+              <option value="ALL">Todos los trabajadores</option>
+              {saleWorkers.map((w) => <option key={w} value={w}>{w}</option>)}
+            </select>
+            <select
+              value={paymentFilter}
+              onChange={(e) => setPaymentFilter(e.target.value)}
+              className="h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground"
+            >
+              <option value="ALL">Todos los pagos</option>
+              <option value="CASH">Efectivo</option>
+              <option value="CARD">Tarjeta</option>
+              <option value="DEBT">Deuda</option>
+            </select>
+            {(clientSearch || workerFilter !== "ALL" || paymentFilter !== "ALL" || dateMode !== "today") && (
+              <Button variant="ghost" size="sm" className="text-muted-foreground" onClick={() => {
+                setClientSearch(""); setWorkerFilter("ALL"); setPaymentFilter("ALL"); setDateMode("today"); setCustomFrom(todayStr()); setCustomTo(todayStr())
+              }}>
+                Limpiar filtros
+              </Button>
+            )}
+          </div>
+        </div>
+
+        <Card>
+          <CardContent className="p-0">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b text-muted-foreground">
+                  <th className="px-4 py-3 text-left font-medium">Fecha</th>
+                  <th className="px-4 py-3 text-left font-medium">Cliente</th>
+                  <th className="px-4 py-3 text-left font-medium">Pago</th>
+                  <th className="px-4 py-3 text-right font-medium">Total</th>
+                  <th className="px-4 py-3 text-left font-medium">Estado</th>
+                  <th className="px-4 py-3 text-left font-medium">Trabajador</th>
+                  <th className="px-4 py-3 text-right font-medium">
+                    <div className="flex justify-end text-xs font-normal text-muted-foreground">
+                      <span className="flex w-20 items-center justify-center gap-1"><Eye className="h-3.5 w-3.5" /> Detalle</span>
+                    </div>
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.length === 0 && (
+                  <tr><td colSpan={7} className="py-12 text-center text-muted-foreground">No hay ventas para los filtros aplicados.</td></tr>
                 )}
+                {filtered.map((s) => {
+                  const st = STATUS_META[s.status] ?? STATUS_META.PAID
+                  const customerName = s.customer ? customerLabel(s.customer) : "—"
+                  const workerName = `${s.user.name} ${s.user.lastName ?? ""}`.trim()
+                  return (
+                    <tr key={s.id} className="border-b last:border-0 hover:bg-muted/40 transition-colors">
+                      <td className="px-4 py-3 text-muted-foreground">
+                        {new Date(s.createdAt).toLocaleDateString("es-ES", { day: "2-digit", month: "short", year: "numeric" })}
+                      </td>
+                      <td className="px-4 py-3 font-medium">{customerName}</td>
+                      <td className="px-4 py-3 text-muted-foreground">{PAYMENT_LABELS[s.paymentMethod] ?? s.paymentMethod}</td>
+                      <td className="px-4 py-3 text-right font-medium tabular-nums">{fmtEur(s.totalCents)}</td>
+                      <td className="px-4 py-3">
+                        <span className={`rounded-full border px-2 py-0.5 text-xs ${st.cls}`}>{st.label}</span>
+                      </td>
+                      <td className="px-4 py-3 text-muted-foreground">{workerName}</td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center justify-end">
+                          <span className="flex w-20 justify-center">
+                            <Button variant="ghost" size="icon" onClick={() => setDetailSale(s)}>
+                              <Eye className="h-4 w-4" />
+                            </Button>
+                          </span>
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </CardContent>
+        </Card>
+
+        {/* Detail */}
+        {detailSale && (
+          <Dialog open onOpenChange={() => setDetailSale(null)}>
+            <DialogContent style={{ maxWidth: "42rem" }}>
+              <DialogHeader><DialogTitle>Detalle de venta</DialogTitle></DialogHeader>
+              <div className="space-y-4 text-sm">
+                <div className="grid grid-cols-2 gap-2 text-muted-foreground">
+                  <div>Cliente: <span className="text-foreground font-medium">{detailSale.customer ? customerLabel(detailSale.customer) : "Sin cliente"}</span></div>
+                  <div>Pago: <span className="text-foreground font-medium">{PAYMENT_LABELS[detailSale.paymentMethod]}</span></div>
+                </div>
+                <table className="w-full">
+                  <thead><tr className="border-b text-muted-foreground text-xs">
+                    <th className="text-left py-1">Descripción</th>
+                    <th className="text-right py-1">Cant.</th>
+                    <th className="text-right py-1">P.U.</th>
+                    <th className="text-right py-1">Dto.</th>
+                    <th className="text-right py-1">Total</th>
+                  </tr></thead>
+                  <tbody>
+                    {detailSale.lines.map((l) => (
+                      <tr key={l.id} className="border-b last:border-0">
+                        <td className="py-1.5">{l.description}{l.durationMinutes ? ` · ${l.durationMinutes} min` : ""}</td>
+                        <td className="text-right tabular-nums py-1.5">{l.quantity}</td>
+                        <td className="text-right tabular-nums py-1.5">{fmtEur(l.unitPriceCents)}</td>
+                        <td className="text-right py-1.5">{l.discountPercent > 0 ? `-${l.discountPercent}%` : "—"}</td>
+                        <td className="text-right tabular-nums py-1.5 font-medium">{fmtEur(l.totalCents)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {(() => {
+                  const balanceUsed = detailSale.balanceMovements.reduce((s, m) => s + Math.abs(m.amountCents), 0)
+                  return balanceUsed > 0 ? (
+                    <div className="rounded-lg border border-blue-200 bg-blue-50/60 px-3 py-2 flex items-center justify-between text-sm">
+                      <span className="text-blue-700 font-medium flex items-center gap-1.5">
+                        <Wallet className="h-3.5 w-3.5" /> Saldo del cliente aplicado
+                      </span>
+                      <span className="tabular-nums font-semibold text-blue-700">−{fmtEur(balanceUsed)}</span>
+                    </div>
+                  ) : null
+                })()}
+                <div className="text-right">
+                  <span className="text-muted-foreground mr-2">Total:</span>
+                  <span className="font-semibold text-base tabular-nums">{fmtEur(detailSale.totalCents)}</span>
+                  {detailSale.paidCents < detailSale.totalCents && (
+                    <div className="text-red-600 mt-1">Pendiente: {fmtEur(detailSale.totalCents - detailSale.paidCents)}</div>
+                  )}
+                </div>
               </div>
-            </div>
-          </DialogContent>
-        </Dialog>
-      )}
+            </DialogContent>
+          </Dialog>
+        )}
 
-      {/* No cash register dialog */}
-      {showNoCashDialog && (
-        <Dialog open onOpenChange={() => setShowNoCashDialog(false)}>
-          <DialogContent style={{ maxWidth: "26rem" }}>
-            <DialogHeader><DialogTitle>Caja no abierta</DialogTitle></DialogHeader>
-            <p className="text-sm text-muted-foreground">
-              Para registrar una nueva venta primero debes abrir la caja del día.
-            </p>
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setShowNoCashDialog(false)}>Cancelar</Button>
-              <Button onClick={() => { window.location.href = "/cash-register" }}>Abrir caja</Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-      )}
-
+        {/* No cash register dialog */}
+        {showNoCashDialog && (
+          <Dialog open onOpenChange={() => setShowNoCashDialog(false)}>
+            <DialogContent style={{ maxWidth: "26rem" }}>
+              <DialogHeader><DialogTitle>Caja no abierta</DialogTitle></DialogHeader>
+              <p className="text-sm text-muted-foreground">
+                Para registrar una nueva venta primero debes abrir la caja del día.
+              </p>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setShowNoCashDialog(false)}>Cancelar</Button>
+                <Button onClick={() => { window.location.href = "/cash-register" }}>Abrir caja</Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        )}
+      </div>
     </div>
   )
 }
@@ -814,7 +815,9 @@ function POSView({ sales, customers, services, products, workers, currentUserId,
                     { id: "CASH", Icon: Banknote,    label: "Efectivo" },
                     { id: "CARD", Icon: CreditCard,  label: "Tarjeta" },
                     // Una tarjeta regalo no se vende a crédito: sin método "Deuda".
-                    ...(hasGiftCard ? [] : [{ id: "DEBT", Icon: AlertCircle, label: "Deuda" }]),
+                    // El `as const` de fuera no atraviesa el spread, así que el
+                    // array del ternario lleva el suyo o `id` se ensancha a string.
+                    ...(hasGiftCard ? [] : [{ id: "DEBT", Icon: AlertCircle, label: "Deuda" }] as const),
                   ] as const).map(({ id, Icon, label }) => {
                     const debtDisabled = id === "DEBT" && (
                       (lines.length === 0 && selectedDebtIds.size > 0) || debtBlockedByBalance

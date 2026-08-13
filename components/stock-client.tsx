@@ -300,8 +300,8 @@ export function StockClient({ products, suppliers }: { products: ProductRow[]; s
   })
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex items-center justify-between gap-3">
+    <div>
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-card p-6">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Stock</h1>
           <p className="text-muted-foreground">{products.length} productos · {suppliers.length} proveedores</p>
@@ -311,319 +311,321 @@ export function StockClient({ products, suppliers }: { products: ProductRow[]; s
         </Button>
       </div>
 
-      {lowStock.length > 0 && (
-        <Card className="border-destructive/50 bg-destructive/5 p-4">
-          <p className="text-sm font-medium text-destructive mb-2">⚠ Productos bajo mínimo</p>
-          <div className="flex flex-wrap gap-2">
-            {lowStock.map((p) => (
-              <span key={p.id} className="text-xs rounded-md border border-destructive/30 bg-white px-2 py-1">
-                {p.name} — <strong>{p.stock} ud</strong>
-              </span>
-            ))}
-          </div>
-        </Card>
-      )}
+      <div className="p-6 space-y-6">
+        {lowStock.length > 0 && (
+          <Card className="border-destructive/50 bg-destructive/5 p-4">
+            <p className="text-sm font-medium text-destructive mb-2">⚠ Productos bajo mínimo</p>
+            <div className="flex flex-wrap gap-2">
+              {lowStock.map((p) => (
+                <span key={p.id} className="text-xs rounded-md border border-destructive/30 bg-white px-2 py-1">
+                  {p.name} — <strong>{p.stock} ud</strong>
+                </span>
+              ))}
+            </div>
+          </Card>
+        )}
 
-      <Tabs value={tab} onValueChange={setTab}>
-        <div className="flex items-center justify-between">
-          <TabsList>
-            <TabsTrigger value="products">Productos</TabsTrigger>
-            <TabsTrigger value="suppliers">
-              <Building2 className="mr-1.5 h-4 w-4" />
-              Proveedores
-            </TabsTrigger>
-          </TabsList>
-          {tab === "products" && (
-            <div className="flex items-center gap-2">
-              <div className="relative">
-                <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-                <Input
-                  placeholder="Buscar producto…"
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  className="pl-8 w-56"
-                />
+        <Tabs value={tab} onValueChange={setTab}>
+          <div className="flex items-center justify-between">
+            <TabsList>
+              <TabsTrigger value="products">Productos</TabsTrigger>
+              <TabsTrigger value="suppliers">
+                <Building2 className="mr-1.5 h-4 w-4" />
+                Proveedores
+              </TabsTrigger>
+            </TabsList>
+            {tab === "products" && (
+              <div className="flex items-center gap-2">
+                <div className="relative">
+                  <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    placeholder="Buscar producto…"
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    className="pl-8 w-56"
+                  />
+                </div>
+                <select
+                  value={supplierFilter}
+                  onChange={(e) => setSupplierFilter(e.target.value)}
+                  className="h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground"
+                >
+                  <option value="ALL">Todos los proveedores</option>
+                  {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                </select>
+                <Button variant="outline" onClick={() => openProductForm(null)}>
+                  <Plus className="mr-2 h-4 w-4" /> Nuevo producto
+                </Button>
               </div>
-              <select
-                value={supplierFilter}
-                onChange={(e) => setSupplierFilter(e.target.value)}
-                className="h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground"
-              >
-                <option value="ALL">Todos los proveedores</option>
-                {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-              </select>
-              <Button variant="outline" onClick={() => openProductForm(null)}>
-                <Plus className="mr-2 h-4 w-4" /> Nuevo producto
+            )}
+            {tab === "suppliers" && (
+              <Button variant="outline" onClick={() => { setEditingSupplier(null); setSupplierOpen(true) }}>
+                <Plus className="mr-2 h-4 w-4" /> Nuevo proveedor
               </Button>
-            </div>
-          )}
-          {tab === "suppliers" && (
-            <Button variant="outline" onClick={() => { setEditingSupplier(null); setSupplierOpen(true) }}>
-              <Plus className="mr-2 h-4 w-4" /> Nuevo proveedor
-            </Button>
-          )}
-        </div>
+            )}
+          </div>
 
-        <TabsContent value="products" className="mt-4">
-          <Card className="overflow-hidden p-0">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Producto</TableHead>
-                  <TableHead>Proveedor</TableHead>
-                  <TableHead>Stock</TableHead>
-                  <TableHead>Precio venta</TableHead>
-                  <TableHead>Coste</TableHead>
-                  <TableHead>Activo</TableHead>
-                  <TableHead className="text-right">
-                    <div className="flex justify-end text-xs font-normal text-muted-foreground">
-                      <span className="flex w-20 items-center justify-center gap-1"><ArrowDownCircle className="h-3.5 w-3.5 text-green-600" /> Entrada</span>
-                      <span className="flex w-20 items-center justify-center gap-1"><ArrowUpCircle className="h-3.5 w-3.5 text-orange-500" /> Consumo</span>
-                      <span className="flex w-20 items-center justify-center gap-1"><Pencil className="h-3.5 w-3.5" /> Editar</span>
-                    </div>
-                  </TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {filteredProducts.map((p) => (
-                  <TableRow key={p.id} className={!p.active ? "opacity-50" : undefined}>
-                    <TableCell>
-                      <p className="font-medium">{p.name}</p>
-                      {p.description && <p className="text-xs text-muted-foreground">{p.description}</p>}
-                    </TableCell>
-                    <TableCell className="text-muted-foreground text-sm">{p.supplierName ?? "—"}</TableCell>
-                    <TableCell>{stockBadge(p.stock, p.stockMin)}</TableCell>
-                    <TableCell className="text-sm">{p.priceCents > 0 ? `${(p.priceCents / 100).toFixed(2)} €` : "—"}</TableCell>
-                    <TableCell className="text-sm">{p.costCents > 0 ? `${(p.costCents / 100).toFixed(2)} €` : "—"}</TableCell>
-                    <TableCell>
-                      <Badge variant={p.active ? "secondary" : "outline"}>{p.active ? "Sí" : "No"}</Badge>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex items-center justify-end">
-                        <span className="flex w-20 justify-center">
-                          <Button variant="ghost" size="icon" onClick={() => setEntryTarget(p)}>
-                            <ArrowDownCircle className="h-4 w-4 text-green-600" />
-                          </Button>
-                        </span>
-                        <span className="flex w-20 justify-center">
-                          <Button variant="ghost" size="icon"
-                            onClick={() => setConsumeTarget(p)} disabled={p.stock === 0}>
-                            <ArrowUpCircle className="h-4 w-4 text-orange-500" />
-                          </Button>
-                        </span>
-                        <span className="flex w-20 justify-center">
-                          <Button variant="ghost" size="icon" onClick={() => openProductForm(p)}>
-                            <Pencil className="h-4 w-4" />
-                          </Button>
-                        </span>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-                {filteredProducts.length === 0 && (
+          <TabsContent value="products" className="mt-4">
+            <Card className="overflow-hidden p-0">
+              <Table>
+                <TableHeader>
                   <TableRow>
-                    <TableCell colSpan={7} className="py-8 text-center text-muted-foreground">
-                      {search ? "Sin resultados para esa búsqueda." : "Sin productos. Crea el primero."}
-                    </TableCell>
-                  </TableRow>
-                )}
-              </TableBody>
-            </Table>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="suppliers" className="mt-4">
-          <Card className="overflow-hidden p-0">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Proveedor</TableHead>
-                  <TableHead>Teléfono</TableHead>
-                  <TableHead>Email</TableHead>
-                  <TableHead>Notas</TableHead>
-                  <TableHead className="text-right">
-                    <div className="flex justify-end text-xs font-normal text-muted-foreground">
-                      <span className="flex w-20 items-center justify-center gap-1"><Pencil className="h-3.5 w-3.5" /> Editar</span>
-                      <span className="flex w-20 items-center justify-center gap-1"><Trash2 className="h-3.5 w-3.5 text-destructive" /> Eliminar</span>
-                    </div>
-                  </TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {suppliers.map((s) => (
-                  <TableRow key={s.id}>
-                    <TableCell className="font-medium">{s.name}</TableCell>
-                    <TableCell className="text-muted-foreground text-sm">{s.phone ?? "—"}</TableCell>
-                    <TableCell className="text-muted-foreground text-sm">{s.email ?? "—"}</TableCell>
-                    <TableCell className="text-muted-foreground text-sm max-w-xs truncate">{s.notes ?? "—"}</TableCell>
-                    <TableCell>
-                      <div className="flex items-center justify-end">
-                        <span className="flex w-20 justify-center">
-                          <Button variant="ghost" size="icon" onClick={() => { setEditingSupplier(s); setSupplierOpen(true) }}>
-                            <Pencil className="h-4 w-4" />
-                          </Button>
-                        </span>
-                        <span className="flex w-20 justify-center">
-                          <Button variant="ghost" size="icon" onClick={() => setDeleteSupplierTarget(s)}>
-                            <Trash2 className="h-4 w-4 text-destructive" />
-                          </Button>
-                        </span>
+                    <TableHead>Producto</TableHead>
+                    <TableHead>Proveedor</TableHead>
+                    <TableHead>Stock</TableHead>
+                    <TableHead>Precio venta</TableHead>
+                    <TableHead>Coste</TableHead>
+                    <TableHead>Activo</TableHead>
+                    <TableHead className="text-right">
+                      <div className="flex justify-end text-xs font-normal text-muted-foreground">
+                        <span className="flex w-20 items-center justify-center gap-1"><ArrowDownCircle className="h-3.5 w-3.5 text-green-600" /> Entrada</span>
+                        <span className="flex w-20 items-center justify-center gap-1"><ArrowUpCircle className="h-3.5 w-3.5 text-orange-500" /> Consumo</span>
+                        <span className="flex w-20 items-center justify-center gap-1"><Pencil className="h-3.5 w-3.5" /> Editar</span>
                       </div>
-                    </TableCell>
+                    </TableHead>
                   </TableRow>
-                ))}
-                {suppliers.length === 0 && (
-                  <TableRow>
-                    <TableCell colSpan={5} className="py-8 text-center text-muted-foreground">
-                      Sin proveedores. Crea el primero.
-                    </TableCell>
-                  </TableRow>
-                )}
-              </TableBody>
-            </Table>
-          </Card>
-        </TabsContent>
-      </Tabs>
-
-      {/* Panel pedido */}
-      {orderOpen && (
-        <OrderPanel
-          products={products}
-          onClose={() => setOrderOpen(false)}
-          onDone={() => { setOrderOpen(false); router.refresh() }}
-        />
-      )}
-
-      {/* Diálogo entrada manual */}
-      {entryTarget && (
-        <ConsumeDialog
-          product={entryTarget}
-          type="ENTRY"
-          onClose={() => setEntryTarget(null)}
-          onDone={() => { setEntryTarget(null); router.refresh() }}
-        />
-      )}
-
-      {/* Diálogo consumo */}
-      {consumeTarget && (
-        <ConsumeDialog
-          product={consumeTarget}
-          type="CONSUME"
-          onClose={() => setConsumeTarget(null)}
-          onDone={() => { setConsumeTarget(null); router.refresh() }}
-        />
-      )}
-
-      {/* Diálogo producto */}
-      <Dialog open={productOpen} onOpenChange={setProductOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{editingProduct ? "Editar producto" : "Nuevo producto"}</DialogTitle>
-          </DialogHeader>
-          <form onSubmit={onProductSubmit} className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="name">Nombre</Label>
-              <Input id="name" name="name" defaultValue={editingProduct?.name} required />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="description">Descripción</Label>
-              <Input id="description" name="description" defaultValue={editingProduct?.description ?? ""} />
-            </div>
-            <div className="space-y-2">
-              <Label>Proveedor</Label>
-              <Select value={productSupplier} onValueChange={setProductSupplier}>
-                <SelectTrigger><SelectValue placeholder="Sin proveedor" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">Sin proveedor</SelectItem>
-                  {suppliers.map((s) => (
-                    <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
+                </TableHeader>
+                <TableBody>
+                  {filteredProducts.map((p) => (
+                    <TableRow key={p.id} className={!p.active ? "opacity-50" : undefined}>
+                      <TableCell>
+                        <p className="font-medium">{p.name}</p>
+                        {p.description && <p className="text-xs text-muted-foreground">{p.description}</p>}
+                      </TableCell>
+                      <TableCell className="text-muted-foreground text-sm">{p.supplierName ?? "—"}</TableCell>
+                      <TableCell>{stockBadge(p.stock, p.stockMin)}</TableCell>
+                      <TableCell className="text-sm">{p.priceCents > 0 ? `${(p.priceCents / 100).toFixed(2)} €` : "—"}</TableCell>
+                      <TableCell className="text-sm">{p.costCents > 0 ? `${(p.costCents / 100).toFixed(2)} €` : "—"}</TableCell>
+                      <TableCell>
+                        <Badge variant={p.active ? "secondary" : "outline"}>{p.active ? "Sí" : "No"}</Badge>
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex items-center justify-end">
+                          <span className="flex w-20 justify-center">
+                            <Button variant="ghost" size="icon" onClick={() => setEntryTarget(p)}>
+                              <ArrowDownCircle className="h-4 w-4 text-green-600" />
+                            </Button>
+                          </span>
+                          <span className="flex w-20 justify-center">
+                            <Button variant="ghost" size="icon"
+                              onClick={() => setConsumeTarget(p)} disabled={p.stock === 0}>
+                              <ArrowUpCircle className="h-4 w-4 text-orange-500" />
+                            </Button>
+                          </span>
+                          <span className="flex w-20 justify-center">
+                            <Button variant="ghost" size="icon" onClick={() => openProductForm(p)}>
+                              <Pencil className="h-4 w-4" />
+                            </Button>
+                          </span>
+                        </div>
+                      </TableCell>
+                    </TableRow>
                   ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="price">Precio venta (€)</Label>
-                <Input id="price" name="price" type="number" step="0.01" min="0"
-                  defaultValue={editingProduct ? (editingProduct.priceCents / 100).toFixed(2) : "0"} />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="cost">Coste (€)</Label>
-                <Input id="cost" name="cost" type="number" step="0.01" min="0"
-                  defaultValue={editingProduct ? (editingProduct.costCents / 100).toFixed(2) : "0"} />
-              </div>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="stockMin">Stock mínimo (alerta)</Label>
-              <Input id="stockMin" name="stockMin" type="number" min="0"
-                defaultValue={editingProduct?.stockMin ?? 0} />
-            </div>
-            <div className="flex items-center justify-between rounded-lg border p-3">
-              <Label htmlFor="active">Activo</Label>
-              <Switch id="active" name="active" defaultChecked={editingProduct?.active ?? true} />
-            </div>
-            <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setProductOpen(false)}>Cancelar</Button>
-              <Button type="submit" disabled={productLoading}>{productLoading ? "Guardando…" : "Guardar"}</Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
+                  {filteredProducts.length === 0 && (
+                    <TableRow>
+                      <TableCell colSpan={7} className="py-8 text-center text-muted-foreground">
+                        {search ? "Sin resultados para esa búsqueda." : "Sin productos. Crea el primero."}
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            </Card>
+          </TabsContent>
 
-      {/* Diálogo proveedor */}
-      <Dialog open={supplierOpen} onOpenChange={setSupplierOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{editingSupplier ? "Editar proveedor" : "Nuevo proveedor"}</DialogTitle>
-          </DialogHeader>
-          <form onSubmit={onSupplierSubmit} className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="sname">Nombre</Label>
-              <Input id="sname" name="name" defaultValue={editingSupplier?.name} required />
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="sphone">Teléfono</Label>
-                <Input id="sphone" name="phone" defaultValue={editingSupplier?.phone ?? ""} />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="semail">Email</Label>
-                <Input id="semail" name="email" type="email" defaultValue={editingSupplier?.email ?? ""} />
-              </div>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="snotes">Notas</Label>
-              <Input id="snotes" name="notes" defaultValue={editingSupplier?.notes ?? ""}
-                placeholder="Condiciones, contacto habitual…" />
-            </div>
-            <div className="flex items-center justify-between rounded-lg border p-3">
-              <Label htmlFor="sactive">Activo</Label>
-              <Switch id="sactive" name="active" defaultChecked={editingSupplier?.active ?? true} />
-            </div>
-            <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setSupplierOpen(false)}>Cancelar</Button>
-              <Button type="submit" disabled={supplierLoading}>{supplierLoading ? "Guardando…" : "Guardar"}</Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
+          <TabsContent value="suppliers" className="mt-4">
+            <Card className="overflow-hidden p-0">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Proveedor</TableHead>
+                    <TableHead>Teléfono</TableHead>
+                    <TableHead>Email</TableHead>
+                    <TableHead>Notas</TableHead>
+                    <TableHead className="text-right">
+                      <div className="flex justify-end text-xs font-normal text-muted-foreground">
+                        <span className="flex w-20 items-center justify-center gap-1"><Pencil className="h-3.5 w-3.5" /> Editar</span>
+                        <span className="flex w-20 items-center justify-center gap-1"><Trash2 className="h-3.5 w-3.5 text-destructive" /> Eliminar</span>
+                      </div>
+                    </TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {suppliers.map((s) => (
+                    <TableRow key={s.id}>
+                      <TableCell className="font-medium">{s.name}</TableCell>
+                      <TableCell className="text-muted-foreground text-sm">{s.phone ?? "—"}</TableCell>
+                      <TableCell className="text-muted-foreground text-sm">{s.email ?? "—"}</TableCell>
+                      <TableCell className="text-muted-foreground text-sm max-w-xs truncate">{s.notes ?? "—"}</TableCell>
+                      <TableCell>
+                        <div className="flex items-center justify-end">
+                          <span className="flex w-20 justify-center">
+                            <Button variant="ghost" size="icon" onClick={() => { setEditingSupplier(s); setSupplierOpen(true) }}>
+                              <Pencil className="h-4 w-4" />
+                            </Button>
+                          </span>
+                          <span className="flex w-20 justify-center">
+                            <Button variant="ghost" size="icon" onClick={() => setDeleteSupplierTarget(s)}>
+                              <Trash2 className="h-4 w-4 text-destructive" />
+                            </Button>
+                          </span>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                  {suppliers.length === 0 && (
+                    <TableRow>
+                      <TableCell colSpan={5} className="py-8 text-center text-muted-foreground">
+                        Sin proveedores. Crea el primero.
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            </Card>
+          </TabsContent>
+        </Tabs>
 
-      {/* Confirm borrar proveedor */}
-      <AlertDialog open={!!deleteSupplierTarget} onOpenChange={() => setDeleteSupplierTarget(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>¿Eliminar proveedor?</AlertDialogTitle>
-            <AlertDialogDescription>Esta acción no se puede deshacer.</AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancelar</AlertDialogCancel>
-            <AlertDialogAction onClick={onDeleteSupplier}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
-              Eliminar
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+        {/* Panel pedido */}
+        {orderOpen && (
+          <OrderPanel
+            products={products}
+            onClose={() => setOrderOpen(false)}
+            onDone={() => { setOrderOpen(false); router.refresh() }}
+          />
+        )}
+
+        {/* Diálogo entrada manual */}
+        {entryTarget && (
+          <ConsumeDialog
+            product={entryTarget}
+            type="ENTRY"
+            onClose={() => setEntryTarget(null)}
+            onDone={() => { setEntryTarget(null); router.refresh() }}
+          />
+        )}
+
+        {/* Diálogo consumo */}
+        {consumeTarget && (
+          <ConsumeDialog
+            product={consumeTarget}
+            type="CONSUME"
+            onClose={() => setConsumeTarget(null)}
+            onDone={() => { setConsumeTarget(null); router.refresh() }}
+          />
+        )}
+
+        {/* Diálogo producto */}
+        <Dialog open={productOpen} onOpenChange={setProductOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>{editingProduct ? "Editar producto" : "Nuevo producto"}</DialogTitle>
+            </DialogHeader>
+            <form onSubmit={onProductSubmit} className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="name">Nombre</Label>
+                <Input id="name" name="name" defaultValue={editingProduct?.name} required />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="description">Descripción</Label>
+                <Input id="description" name="description" defaultValue={editingProduct?.description ?? ""} />
+              </div>
+              <div className="space-y-2">
+                <Label>Proveedor</Label>
+                <Select value={productSupplier} onValueChange={setProductSupplier}>
+                  <SelectTrigger><SelectValue placeholder="Sin proveedor" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Sin proveedor</SelectItem>
+                    {suppliers.map((s) => (
+                      <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="price">Precio venta (€)</Label>
+                  <Input id="price" name="price" type="number" step="0.01" min="0"
+                    defaultValue={editingProduct ? (editingProduct.priceCents / 100).toFixed(2) : "0"} />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="cost">Coste (€)</Label>
+                  <Input id="cost" name="cost" type="number" step="0.01" min="0"
+                    defaultValue={editingProduct ? (editingProduct.costCents / 100).toFixed(2) : "0"} />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="stockMin">Stock mínimo (alerta)</Label>
+                <Input id="stockMin" name="stockMin" type="number" min="0"
+                  defaultValue={editingProduct?.stockMin ?? 0} />
+              </div>
+              <div className="flex items-center justify-between rounded-lg border p-3">
+                <Label htmlFor="active">Activo</Label>
+                <Switch id="active" name="active" defaultChecked={editingProduct?.active ?? true} />
+              </div>
+              <DialogFooter>
+                <Button type="button" variant="outline" onClick={() => setProductOpen(false)}>Cancelar</Button>
+                <Button type="submit" disabled={productLoading}>{productLoading ? "Guardando…" : "Guardar"}</Button>
+              </DialogFooter>
+            </form>
+          </DialogContent>
+        </Dialog>
+
+        {/* Diálogo proveedor */}
+        <Dialog open={supplierOpen} onOpenChange={setSupplierOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>{editingSupplier ? "Editar proveedor" : "Nuevo proveedor"}</DialogTitle>
+            </DialogHeader>
+            <form onSubmit={onSupplierSubmit} className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="sname">Nombre</Label>
+                <Input id="sname" name="name" defaultValue={editingSupplier?.name} required />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="sphone">Teléfono</Label>
+                  <Input id="sphone" name="phone" defaultValue={editingSupplier?.phone ?? ""} />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="semail">Email</Label>
+                  <Input id="semail" name="email" type="email" defaultValue={editingSupplier?.email ?? ""} />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="snotes">Notas</Label>
+                <Input id="snotes" name="notes" defaultValue={editingSupplier?.notes ?? ""}
+                  placeholder="Condiciones, contacto habitual…" />
+              </div>
+              <div className="flex items-center justify-between rounded-lg border p-3">
+                <Label htmlFor="sactive">Activo</Label>
+                <Switch id="sactive" name="active" defaultChecked={editingSupplier?.active ?? true} />
+              </div>
+              <DialogFooter>
+                <Button type="button" variant="outline" onClick={() => setSupplierOpen(false)}>Cancelar</Button>
+                <Button type="submit" disabled={supplierLoading}>{supplierLoading ? "Guardando…" : "Guardar"}</Button>
+              </DialogFooter>
+            </form>
+          </DialogContent>
+        </Dialog>
+
+        {/* Confirm borrar proveedor */}
+        <AlertDialog open={!!deleteSupplierTarget} onOpenChange={() => setDeleteSupplierTarget(null)}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>¿Eliminar proveedor?</AlertDialogTitle>
+              <AlertDialogDescription>Esta acción no se puede deshacer.</AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancelar</AlertDialogCancel>
+              <AlertDialogAction onClick={onDeleteSupplier}
+                className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+                Eliminar
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      </div>
     </div>
   )
 }

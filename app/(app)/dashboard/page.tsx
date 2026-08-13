@@ -64,8 +64,8 @@ export default async function DashboardPage() {
   const fmtEur = (c: number) => (c / 100).toLocaleString("es-ES", { style: "currency", currency: "EUR" })
 
   return (
-    <div className="p-8 space-y-8">
-      <div className="flex items-center justify-between">
+    <div>
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-card p-6">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Dashboard</h1>
           <p className="text-muted-foreground">Resumen operativo de {clinic.name}</p>
@@ -77,144 +77,149 @@ export default async function DashboardPage() {
         </Button>
       </div>
 
-      <div className="grid gap-6 md:grid-cols-2">
-        <Card className="overflow-hidden">
-          <CardContent className="p-6">
-            <div className="flex items-start gap-4">
-              <div className="rounded-lg bg-accent p-2">
-                <Calendar className="h-4 w-4 text-accent-foreground" />
-              </div>
-              <div className="space-y-2">
-                <p className="text-sm font-medium text-muted-foreground">Citas hoy</p>
-                <p className="text-3xl font-bold tracking-tight">{todays.length}</p>
-                <p className="text-sm text-muted-foreground">
-                  Confirmadas {confirmed}/{todays.length}
-                </p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-        <KPICard title="Recordatorios fallidos" value={String(failed)} trend="Revisar WhatsApp" trendUp={false} icon={AlertTriangle} />
-      </div>
-
-      <Card>
-        <CardHeader className="flex flex-row items-center justify-between pb-2">
-          <div className="flex items-center gap-2">
-            <div className="rounded-lg bg-accent p-2">
-              <Calendar className="h-4 w-4 text-accent-foreground" />
-            </div>
-            <CardTitle className="text-base font-medium">Próximas citas</CardTitle>
-          </div>
-          <Button variant="ghost" size="sm" asChild>
-            <Link href="/agenda">
-              Ver agenda <ArrowRight className="ml-1 h-4 w-4" />
-            </Link>
-          </Button>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-1">
-            {upcoming.length === 0 && <p className="py-6 text-center text-sm text-muted-foreground">Sin próximas citas.</p>}
-            {upcoming.map((a) => {
-              const meta = STATUS_META[a.status as AppointmentStatus] ?? STATUS_META.PENDING
-              return (
-                <div key={a.id} className="flex items-center gap-4 rounded-lg p-3 transition-colors hover:bg-muted/50">
-                  <div className="w-20 shrink-0 text-xs text-muted-foreground">
-                    <span className="font-medium text-foreground">
-                      {a.startAt.toLocaleDateString("es-ES", { day: "2-digit", month: "short" })}
-                    </span>
-                    <br />
-                    {toTimeString(a.startAt)}
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium">
-                      {a.customer.firstName} {a.customer.lastName ?? ""}
-                    </p>
-                    <p className="truncate text-xs text-muted-foreground">
-                      {a.service.name} · {a.worker.name}
-                    </p>
-                  </div>
-                  <span className={`shrink-0 rounded-full border px-2 py-0.5 text-xs ${meta.className}`}>{meta.label}</span>
+      <div className="p-8 space-y-8">
+        <div className="grid gap-6 md:grid-cols-2">
+          <Card className="overflow-hidden">
+            <CardContent className="p-6">
+              <div className="flex items-start gap-4">
+                <div className="rounded-lg bg-accent p-2">
+                  <Calendar className="h-4 w-4 text-accent-foreground" />
                 </div>
-              )
-            })}
-          </div>
-        </CardContent>
-      </Card>
+                <div className="space-y-2">
+                  <p className="text-sm font-medium text-muted-foreground">Citas hoy</p>
+                  <p className="text-3xl font-bold tracking-tight">{todays.length}</p>
+                  <p className="text-sm text-muted-foreground">
+                    Confirmadas {confirmed}/{todays.length}
+                  </p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+          <KPICard title="Recordatorios fallidos" value={String(failed)} trend="Revisar WhatsApp" trendUp={false} icon={AlertTriangle} />
+        </div>
 
-      {todaySales.length > 0 && (
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <div className="flex items-center gap-2">
-              <div className="rounded-lg bg-accent p-2">
-                <ShoppingCart className="h-4 w-4 text-accent-foreground" />
+        <div className="grid gap-6 lg:grid-cols-2">
+          <Card className="flex min-h-[260px] flex-col">
+            <CardHeader className="flex flex-row items-center justify-between pb-2 shrink-0">
+              <div className="flex items-center gap-2">
+                <div className="rounded-lg bg-accent p-2">
+                  <Calendar className="h-4 w-4 text-accent-foreground" />
+                </div>
+                <CardTitle className="text-base font-medium">Próximas citas</CardTitle>
               </div>
-              <CardTitle className="text-base font-medium">Ventas de hoy</CardTitle>
-            </div>
-            <Button variant="ghost" size="sm" asChild>
-              <Link href="/sales">Ver ventas <ArrowRight className="ml-1 h-4 w-4" /></Link>
-            </Button>
-          </CardHeader>
-          <CardContent>
-            <div className="flex gap-8 text-sm">
-              <div>
-                <p className="text-muted-foreground">Total</p>
-                <p className="text-2xl font-semibold">{fmtEur(todaySalesTotal)}</p>
-              </div>
-              <div>
-                <p className="text-muted-foreground">Efectivo</p>
-                <p className="text-xl font-medium">{fmtEur(todayCash)}</p>
-              </div>
-              <div>
-                <p className="text-muted-foreground">Tarjeta</p>
-                <p className="text-xl font-medium">{fmtEur(todayCard)}</p>
-              </div>
-              <div>
-                <p className="text-muted-foreground">Nº ventas</p>
-                <p className="text-xl font-medium">{todaySales.length}</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      <div className="grid gap-6 lg:grid-cols-2">
-        <DashboardRemindersCard reminders={reminderRows} />
-
-        <Card className="flex min-h-[260px] flex-col">
-          <CardHeader className="flex flex-row items-center justify-between pb-2 shrink-0">
-            <div className="flex items-center gap-2">
-              <div className="rounded-lg bg-accent p-2">
-                <Package className="h-4 w-4 text-accent-foreground" />
-              </div>
-              <CardTitle className="text-base font-medium">Stock bajo mínimo</CardTitle>
-            </div>
-            {lowStockProducts.length > 0 && (
               <Button variant="ghost" size="sm" asChild>
-                <Link href="/stock">
-                  Ver stock <ArrowRight className="ml-1 h-4 w-4" />
+                <Link href="/agenda">
+                  Ver agenda <ArrowRight className="ml-1 h-4 w-4" />
                 </Link>
               </Button>
-            )}
-          </CardHeader>
-          <CardContent className="flex-1 overflow-y-auto">
-            {lowStockProducts.length === 0 ? (
-              <div className="flex h-full flex-col items-center justify-center gap-2 text-center text-sm text-muted-foreground">
-                <CheckCircle2 className="h-6 w-6 opacity-40" />
-                <p className="font-medium text-foreground">Stock OK</p>
-                <p>Todos los productos tienen stock suficiente.</p>
-              </div>
-            ) : (
+            </CardHeader>
+            <CardContent className="flex-1 overflow-y-auto">
               <div className="space-y-1">
-                {lowStockProducts.map((p) => (
-                  <div key={p.id} className="flex items-center justify-between rounded-lg px-3 py-2 hover:bg-muted/50 transition-colors">
-                    <span className="text-sm font-medium">{p.name}</span>
-                    <span className="text-sm font-medium text-amber-700">{p.stock} ud · mín. {p.stockMin}</span>
-                  </div>
-                ))}
+                {upcoming.length === 0 && <p className="py-6 text-center text-sm text-muted-foreground">Sin próximas citas.</p>}
+                {upcoming.map((a) => {
+                  const meta = STATUS_META[a.status as AppointmentStatus] ?? STATUS_META.PENDING
+                  return (
+                    <div key={a.id} className="flex items-center gap-4 rounded-lg p-3 transition-colors hover:bg-muted/50">
+                      <div className="w-20 shrink-0 text-xs text-muted-foreground">
+                        <span className="font-medium text-foreground">
+                          {a.startAt.toLocaleDateString("es-ES", { day: "2-digit", month: "short" })}
+                        </span>
+                        <br />
+                        {toTimeString(a.startAt)}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-medium">
+                          {a.customer.firstName} {a.customer.lastName ?? ""}
+                        </p>
+                        <p className="truncate text-xs text-muted-foreground">
+                          {a.service.name} · {a.worker.name}
+                        </p>
+                      </div>
+                      <span className={`shrink-0 rounded-full border px-2 py-0.5 text-xs ${meta.className}`}>{meta.label}</span>
+                    </div>
+                  )
+                })}
               </div>
-            )}
-          </CardContent>
-        </Card>
+            </CardContent>
+          </Card>
+
+          <DashboardRemindersCard reminders={reminderRows} />
+        </div>
+
+        <div className="grid gap-6 lg:grid-cols-2">
+          {todaySales.length > 0 && (
+            <Card className="flex min-h-[260px] flex-col">
+              <CardHeader className="flex flex-row items-center justify-between pb-2 shrink-0">
+                <div className="flex items-center gap-2">
+                  <div className="rounded-lg bg-accent p-2">
+                    <ShoppingCart className="h-4 w-4 text-accent-foreground" />
+                  </div>
+                  <CardTitle className="text-base font-medium">Ventas de hoy</CardTitle>
+                </div>
+                <Button variant="ghost" size="sm" asChild>
+                  <Link href="/sales">Ver ventas <ArrowRight className="ml-1 h-4 w-4" /></Link>
+                </Button>
+              </CardHeader>
+              <CardContent className="flex-1">
+                <div className="flex flex-wrap gap-x-8 gap-y-4 text-sm">
+                  <div>
+                    <p className="text-muted-foreground">Total</p>
+                    <p className="text-2xl font-semibold">{fmtEur(todaySalesTotal)}</p>
+                  </div>
+                  <div>
+                    <p className="text-muted-foreground">Efectivo</p>
+                    <p className="text-xl font-medium">{fmtEur(todayCash)}</p>
+                  </div>
+                  <div>
+                    <p className="text-muted-foreground">Tarjeta</p>
+                    <p className="text-xl font-medium">{fmtEur(todayCard)}</p>
+                  </div>
+                  <div>
+                    <p className="text-muted-foreground">Nº ventas</p>
+                    <p className="text-xl font-medium">{todaySales.length}</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Sin ventas hoy la tarjeta de stock ocupa la fila entera en vez de dejar un hueco. */}
+          <Card className={`flex min-h-[260px] flex-col${todaySales.length === 0 ? " lg:col-span-2" : ""}`}>
+            <CardHeader className="flex flex-row items-center justify-between pb-2 shrink-0">
+              <div className="flex items-center gap-2">
+                <div className="rounded-lg bg-accent p-2">
+                  <Package className="h-4 w-4 text-accent-foreground" />
+                </div>
+                <CardTitle className="text-base font-medium">Stock bajo mínimo</CardTitle>
+              </div>
+              {lowStockProducts.length > 0 && (
+                <Button variant="ghost" size="sm" asChild>
+                  <Link href="/stock">
+                    Ver stock <ArrowRight className="ml-1 h-4 w-4" />
+                  </Link>
+                </Button>
+              )}
+            </CardHeader>
+            <CardContent className="flex-1 overflow-y-auto">
+              {lowStockProducts.length === 0 ? (
+                <div className="flex h-full flex-col items-center justify-center gap-2 text-center text-sm text-muted-foreground">
+                  <CheckCircle2 className="h-6 w-6 opacity-40" />
+                  <p className="font-medium text-foreground">Stock OK</p>
+                  <p>Todos los productos tienen stock suficiente.</p>
+                </div>
+              ) : (
+                <div className="space-y-1">
+                  {lowStockProducts.map((p) => (
+                    <div key={p.id} className="flex items-center justify-between rounded-lg px-3 py-2 hover:bg-muted/50 transition-colors">
+                      <span className="text-sm font-medium">{p.name}</span>
+                      <span className="text-sm font-medium text-amber-700">{p.stock} ud · mín. {p.stockMin}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
       </div>
     </div>
   )

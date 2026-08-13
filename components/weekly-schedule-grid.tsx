@@ -1,14 +1,9 @@
 "use client"
 
-import { cn } from "@/lib/utils"
+import { LEAVE_TYPE_META, type LeaveType } from "@/lib/enums"
 import type { Scope, WorkerOption } from "@/components/schedules-client"
 import type { ClinicDayCell, WorkerDayCell, TimeRange } from "@/lib/schedule"
 
-// Mismos colores que ya usa la cuadrícula semanal de Vacaciones
-// (components/vacations-client.tsx LEAVE_STYLE) — para que "vacaciones" y
-// "asuntos propios" se vean igual en toda la app.
-const VACATION_COLOR = "#3FBF8F"
-const PERSONAL_COLOR = "#F5A524"
 // Gris neutro a propósito: toda la paleta de la app es azul, así que
 // "cerrado/festivo" necesita un color que no se confunda con ningún azul de
 // empleada ni con el azul del centro abierto.
@@ -142,11 +137,9 @@ export function WeeklyScheduleGrid({
         {workers.map((w) => {
           const cells = workerCellsByWorker[w.id] ?? []
           const bars: RowBar[][] = cells.map((cell) => {
-            if (cell.closedReason === "VACATION") {
-              return [{ left: 1, width: 98, label: "Vacaciones", color: VACATION_COLOR, title: "Vacaciones" }]
-            }
-            if (cell.closedReason === "PERSONAL") {
-              return [{ left: 1, width: 98, label: "Asuntos propios", color: PERSONAL_COLOR, title: "Asuntos propios" }]
+            const leaveMeta = cell.closedReason ? LEAVE_TYPE_META[cell.closedReason as LeaveType] : undefined
+            if (leaveMeta) {
+              return [{ left: 1, width: 98, label: leaveMeta.label, color: leaveMeta.color, title: leaveMeta.label }]
             }
             return rangesToBars(cell.ranges, displayStartMinutes, displayEndMinutes, w.color ?? "#3C54A4")
           })
@@ -164,12 +157,12 @@ export function WeeklyScheduleGrid({
       </div>
 
       <div className="flex flex-wrap items-center gap-4 border-t px-3 py-2 text-xs text-muted-foreground">
-        <span className={cn("flex items-center gap-1.5")}>
-          <span className="h-2.5 w-2.5 rounded-full" style={{ background: VACATION_COLOR }} /> Vacaciones
-        </span>
-        <span className="flex items-center gap-1.5">
-          <span className="h-2.5 w-2.5 rounded-full" style={{ background: PERSONAL_COLOR }} /> Asuntos propios
-        </span>
+        {(Object.keys(LEAVE_TYPE_META) as LeaveType[]).map((k) => (
+          <span key={k} className="flex items-center gap-1.5">
+            <span className="h-2.5 w-2.5 rounded-full" style={{ background: LEAVE_TYPE_META[k].color }} />
+            {LEAVE_TYPE_META[k].label}
+          </span>
+        ))}
         <span className="flex items-center gap-1.5">
           <span className="h-2.5 w-2.5 rounded-full" style={{ background: CLOSED_COLOR }} /> Cerrado / festivo
         </span>

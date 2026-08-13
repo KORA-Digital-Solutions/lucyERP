@@ -8,7 +8,7 @@ import { validateAppointmentSlot } from "@/lib/availability"
 import { sendReminderForAppointmentId } from "@/lib/whatsapp"
 import { combineDateTime } from "@/lib/format"
 import { getSession, createSession, setSessionCookie } from "@/lib/session"
-import { WEEKDAY_LABELS } from "@/lib/enums"
+import { WEEKDAY_LABELS, LEAVE_TYPE_META, type LeaveType } from "@/lib/enums"
 import { dayOfWeekFromDateStr } from "@/lib/schedule"
 
 export type ActionResult = { ok: boolean; error?: string; id?: string }
@@ -1207,16 +1207,20 @@ function addDaysToDateStr(date: string, days: number): string {
   return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}-${String(dt.getDate()).padStart(2, "0")}`
 }
 
-// Asigna un día libre o un rango [startDate, endDate] (ambos inclusive; para
-// un solo día basta con pasar el mismo valor en los dos). Los fines de semana
-// y los festivos dentro del rango se saltan automáticamente: no se crean
-// como día libre ni descuentan saldo, porque la empleada no iba a trabajar
-// esos días de todos modos.
+// Asigna una ausencia de un día o un rango [startDate, endDate] (ambos
+// inclusive; para un solo día basta con pasar el mismo valor en los dos). Los
+// fines de semana y los festivos dentro del rango se saltan automáticamente:
+// no se crean ni descuentan saldo, porque la empleada no iba a trabajar esos
+// días de todos modos.
+//
+// Solo los tipos con cupo (vacaciones y asuntos propios, ver LEAVE_TYPE_META)
+// se validan contra el saldo anual; una baja por enfermedad u otra ausencia
+// justificada bloquea la agenda pero no consume días.
 export async function addWorkerLeaveRange(
   workerId: string,
   startDate: string,
   endDate: string,
-  type: "VACATION" | "PERSONAL",
+  type: LeaveType,
   notes: string | null,
 ): Promise<AddLeaveRangeResult> {
   try {
@@ -1267,24 +1271,27 @@ export async function addWorkerLeaveRange(
       }
     }
 
-    const chargeableByYear = new Map<number, string[]>()
-    for (const date of chargeable) {
-      const year = Number(date.slice(0, 4))
-      if (!chargeableByYear.has(year)) chargeableByYear.set(year, [])
-      chargeableByYear.get(year)!.push(date)
-    }
-    for (const [year, yearDates] of chargeableByYear) {
-      const balance = await prisma.workerLeaveBalance.findUnique({
-        where: { clinicId_workerId_year: { clinicId, workerId, year } },
-      })
-      const total = type === "VACATION" ? (balance?.vacationDaysTotal ?? 0) : (balance?.personalDaysTotal ?? 0)
-      const used = await prisma.workerLeave.count({
-        where: { clinicId, workerId, type, date: { startsWith: `${year}-` } },
-      })
-      if (used + yearDates.length > total) {
-        return {
-          ok: false,
-          error: `Saldo insuficiente de ${type === "VACATION" ? "vacaciones" : "asuntos propios"} en ${year} (disponibles ${total - used}, necesarios ${yearDates.length}).`,
+    const quota = LEAVE_TYPE_META[type]?.quota ?? null
+    if (quota) {
+      const chargeableByYear = new Map<number, string[]>()
+      for (const date of chargeable) {
+        const year = Number(date.slice(0, 4))
+        if (!chargeableByYear.has(year)) chargeableByYear.set(year, [])
+        chargeableByYear.get(year)!.push(date)
+      }
+      for (const [year, yearDates] of chargeableByYear) {
+        const balance = await prisma.workerLeaveBalance.findUnique({
+          where: { clinicId_workerId_year: { clinicId, workerId, year } },
+        })
+        const total = quota === "vacation" ? (balance?.vacationDaysTotal ?? 0) : (balance?.personalDaysTotal ?? 0)
+        const used = await prisma.workerLeave.count({
+          where: { clinicId, workerId, type, date: { startsWith: `${year}-` } },
+        })
+        if (used + yearDates.length > total) {
+          return {
+            ok: false,
+            error: `Saldo insuficiente de ${LEAVE_TYPE_META[type].label.toLowerCase()} en ${year} (disponibles ${total - used}, necesarios ${yearDates.length}).`,
+          }
         }
       }
     }

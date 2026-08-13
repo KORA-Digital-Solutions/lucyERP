@@ -40,9 +40,9 @@ function mondayOf(s: string): string {
 export default async function HorariosPage({
   searchParams,
 }: {
-  searchParams: Promise<{ year?: string; week?: string }>
+  searchParams: Promise<{ year?: string; week?: string; tab?: string }>
 }) {
-  const { year: yearParam, week: weekParam } = await searchParams
+  const { year: yearParam, week: weekParam, tab } = await searchParams
   const year = Number(yearParam) || new Date().getFullYear()
   const clinic = await getActiveClinic()
   const todayStr = toDateInputValue(new Date())
@@ -54,13 +54,17 @@ export default async function HorariosPage({
       prisma.user.findMany({ where: { clinicId: clinic.id, active: true }, orderBy: { name: "asc" } }),
       prisma.clinicWeeklySlot.findMany({ where: { clinicId: clinic.id } }),
       prisma.workerWeeklySlot.findMany({ where: { clinicId: clinic.id } }),
+      // Sin filtrar por fecha: la cuadrícula semanal permite navegar a
+      // semanas pasadas, y el panel lateral necesita encontrar la excepción
+      // ya guardada (para el check y el historial) sin importar si su fecha
+      // ya pasó respecto a hoy.
       prisma.clinicScheduleOverride.findMany({
-        where: { clinicId: clinic.id, date: { gte: todayStr } },
+        where: { clinicId: clinic.id },
         include: { slots: true },
         orderBy: { date: "asc" },
       }),
       prisma.workerScheduleOverride.findMany({
-        where: { clinicId: clinic.id, date: { gte: todayStr } },
+        where: { clinicId: clinic.id },
         include: { slots: true, worker: true },
         orderBy: { date: "asc" },
       }),
@@ -123,6 +127,14 @@ export default async function HorariosPage({
       personalUsed: workerLeaves.filter((l) => l.type === "PERSONAL").length,
     }
   })
+  const yearLeaveRows: LeaveRow[] = leaves.map((l) => ({
+    id: l.id,
+    workerId: l.workerId,
+    workerName: l.worker.name,
+    date: l.date,
+    type: l.type,
+    notes: l.notes,
+  }))
   const weekLeaveRows: LeaveRow[] = weekLeaves.map((l) => ({
     id: l.id,
     workerId: l.workerId,
@@ -139,6 +151,7 @@ export default async function HorariosPage({
     scope: h.scope,
   }))
 
+  const validTabs = ["schedule", "overrides", "absences", "base", "holidays"] as const
   return (
     <HorariosClient
       workers={workers.map((w) => ({ id: w.id, name: w.name, color: w.color ?? "#3C54A4" }))}
@@ -146,14 +159,17 @@ export default async function HorariosPage({
       workerWeeklyByWorker={workerWeeklyByWorker}
       weekDates={weekDates}
       weekStart={weekStart}
+      today={todayStr}
       clinicWeekCells={clinicWeekCells}
       workerWeekCellsByWorker={workerWeekCellsByWorker}
       clinicOverrides={clinicOverrideRows}
       workerOverrides={workerOverrideRows}
       weekLeaves={weekLeaveRows}
+      yearLeaves={yearLeaveRows}
       vacationYear={year}
       vacationBalances={balanceRows}
       holidays={holidayRows}
+      initialTab={validTabs.includes(tab as typeof validTabs[number]) ? (tab as typeof validTabs[number]) : "schedule"}
     />
   )
 }

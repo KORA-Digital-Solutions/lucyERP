@@ -172,6 +172,24 @@ describe("lib/actions — server actions de horario/excepciones/vacaciones", () 
       expect(res.error).toMatch(/Saldo insuficiente/i)
     })
 
+    it("una baja por enfermedad no consume cupo aunque el saldo esté agotado", async () => {
+      // Agota los 5 días de vacaciones del saldo (ver beforeEach).
+      await addWorkerLeaveRange(workerId, "2026-08-17", "2026-08-21", "VACATION", null)
+      const vac = await addWorkerLeaveRange(workerId, "2026-08-24", "2026-08-24", "VACATION", null)
+      expect(vac.ok).toBe(false)
+
+      // Misma fecha, pero como baja: no mira saldo, así que entra igual.
+      const sick = await addWorkerLeaveRange(workerId, "2026-08-24", "2026-08-24", "SICK", null)
+      expect(sick.ok).toBe(true)
+      expect(await getEffectiveWorkerHours(workerId, "2026-08-24")).toEqual([])
+    })
+
+    it("las bajas no cuentan como días de vacaciones usados", async () => {
+      await addWorkerLeaveRange(workerId, WEDNESDAY, WEDNESDAY, "SICK", null)
+      const usedVacation = await prisma.workerLeave.count({ where: { workerId, type: "VACATION" } })
+      expect(usedVacation).toBe(0)
+    })
+
     it("no permite duplicar un día que ya tiene vacaciones asignadas", async () => {
       await addWorkerLeaveRange(workerId, WEDNESDAY, WEDNESDAY, "VACATION", null)
       const res = await addWorkerLeaveRange(workerId, WEDNESDAY, WEDNESDAY, "PERSONAL", null)

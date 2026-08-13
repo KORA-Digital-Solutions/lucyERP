@@ -2,11 +2,12 @@
 
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
-import { ChevronLeft, ChevronRight, ChevronDown } from "lucide-react"
+import { ChevronLeft, ChevronRight, Plus } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardTitle, CardDescription } from "@/components/ui/card"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { cn } from "@/lib/utils"
 import { saveClinicWeeklySchedule, saveWorkerWeeklySchedule } from "@/lib/actions"
 import type { ClinicDayCell, WorkerDayCell } from "@/lib/schedule"
@@ -24,7 +25,25 @@ import {
   type WorkerOption,
 } from "@/components/schedules-client"
 import { WeeklyScheduleGrid } from "@/components/weekly-schedule-grid"
-import { VacationsSection, type BalanceRow, type LeaveRow } from "@/components/vacations-client"
+import {
+  BalanceCards,
+  LeaveRangeForm,
+  AbsencesTable,
+  groupLeaves,
+  type BalanceRow,
+  type LeaveRow,
+  type LeaveGroup,
+} from "@/components/vacations-client"
+
+type HorariosTab = "schedule" | "overrides" | "absences" | "base" | "holidays"
+
+// El panel lateral derecho sirve para tres cosas: el detalle de un día (clic
+// en una celda de la cuadrícula), el alta de una ausencia, o la edición de
+// una ausencia ya existente.
+type PanelState =
+  | { kind: "day"; scope: Scope; date: string }
+  | { kind: "leave"; editing?: LeaveGroup }
+  | null
 
 interface Props {
   workers: (WorkerOption & { color?: string })[]
@@ -32,48 +51,17 @@ interface Props {
   workerWeeklyByWorker: Record<string, WeeklyDay[]>
   weekDates: string[]
   weekStart: string
+  today: string
   clinicWeekCells: ClinicDayCell[]
   workerWeekCellsByWorker: Record<string, WorkerDayCell[]>
   clinicOverrides: OverrideRow[]
   workerOverrides: OverrideRow[]
   weekLeaves: LeaveRow[]
+  yearLeaves: LeaveRow[]
   vacationYear: number
   vacationBalances: BalanceRow[]
   holidays: HolidayRow[]
-}
-
-// Sección plegable reutilizada para "Horario base" / "Festivos" / "Vacaciones":
-// todo vive en esta misma pantalla ahora, sin pestañas — solo se pliega lo
-// que no hace falta ver a diario.
-function CollapsibleSection({
-  title,
-  description,
-  open,
-  onToggle,
-  children,
-}: {
-  title: string
-  description: string
-  open: boolean
-  onToggle: () => void
-  children: React.ReactNode
-}) {
-  return (
-    <div className="rounded-xl border bg-card">
-      <button
-        type="button"
-        onClick={onToggle}
-        className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left"
-      >
-        <div>
-          <p className="text-sm font-medium">{title}</p>
-          <p className="text-xs text-muted-foreground">{description}</p>
-        </div>
-        <ChevronDown className={cn("h-4 w-4 shrink-0 text-muted-foreground transition-transform", open && "rotate-180")} />
-      </button>
-      {open && <div className="border-t p-4">{children}</div>}
-    </div>
-  )
+  initialTab: HorariosTab
 }
 
 export function HorariosClient({
@@ -82,20 +70,23 @@ export function HorariosClient({
   workerWeeklyByWorker,
   weekDates,
   weekStart,
+  today,
   clinicWeekCells,
   workerWeekCellsByWorker,
   clinicOverrides,
   workerOverrides,
   weekLeaves,
+  yearLeaves,
   vacationYear,
   vacationBalances,
   holidays,
+  initialTab,
 }: Props) {
   const router = useRouter()
+  const [activeTab, setActiveTab] = useState<HorariosTab>(initialTab)
   // Ámbito seleccionado (Centro o una empleada), compartido por el editor de
   // horario base para no tener que reelegirlo.
   const [scope, setScope] = useState<Scope>({ type: "CLINIC" })
-  const [openSection, setOpenSection] = useState<"base" | "holidays" | "vacations" | null>(null)
   const [hideWeekends, setHideWeekends] = useState(true)
   useEffect(() => {
     const stored = localStorage.getItem("agenda:hideWeekends")
@@ -105,25 +96,25 @@ export function HorariosClient({
     setHideWeekends(v)
     localStorage.setItem("agenda:hideWeekends", String(v))
   }
-  function toggleSection(section: "base" | "holidays" | "vacations") {
-    setOpenSection((prev) => (prev === section ? null : section))
-  }
 
-  // Clic en una celda de la vista semanal → panel lateral, igual que en
-  // Agenda, ya cargado con esa empleada (o centro) y esa fecha. Desde ahí se
-  // gestiona todo: franjas, festivos y vacaciones — ya no hacen falta
-  // pestañas aparte.
-  const [editingCell, setEditingCell] = useState<{ scope: Scope; date: string } | null>(null)
+  // Clic en una celda de la vista semanal (o en una fila del historial de
+  // excepciones) → panel lateral, igual que en Agenda, ya cargado con esa
+  // empleada (o centro) y esa fecha. El botón "Asignar ausencias" reutiliza
+  // esa misma ranura con el formulario de rango.
+  const [panel, setPanel] = useState<PanelState>(null)
+  const openDay = (scope: Scope, date: string) => setPanel({ kind: "day", scope, date })
 
   function goToWeek(offset: number) {
     const [y, m, d] = weekStart.split("-").map(Number)
     const nd = new Date(y, m - 1, d + offset * 7)
     const iso = `${nd.getFullYear()}-${String(nd.getMonth() + 1).padStart(2, "0")}-${String(nd.getDate()).padStart(2, "0")}`
-    router.push(`/horarios?week=${iso}`)
+    router.push(`/horarios?tab=schedule&week=${iso}`)
   }
   function goToday() {
-    router.push(`/horarios`)
+    router.push(`/horarios?tab=schedule`)
   }
+
+  const holidayDates = holidays.map((h) => h.date)
 
   const visibleIndices = weekDates
     .map((d, i) => i)
@@ -140,56 +131,91 @@ export function HorariosClient({
     <div className="p-6 space-y-6">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Horarios</h1>
-        <p className="text-muted-foreground">
-          Horario semanal, excepciones, vacaciones y festivos — todo desde aquí.
-        </p>
+        <p className="text-muted-foreground">Horario semanal, excepciones, vacaciones y festivos.</p>
       </div>
 
       <div className="flex gap-6">
-        <div className="min-w-0 flex-1 space-y-6">
-          <div className="space-y-4">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="flex items-center rounded-lg border bg-card">
-                <Button variant="ghost" size="sm" onClick={() => goToWeek(-1)}>
-                  <ChevronLeft className="h-4 w-4" />
-                </Button>
-                <Button variant="ghost" size="sm" onClick={goToday}>
-                  Esta semana
-                </Button>
-                <Button variant="ghost" size="sm" onClick={() => goToWeek(1)}>
-                  <ChevronRight className="h-4 w-4" />
-                </Button>
+        <div className="min-w-0 flex-1">
+          <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as HorariosTab)}>
+            <TabsList>
+              <TabsTrigger value="schedule">Esta semana</TabsTrigger>
+              <TabsTrigger value="overrides">Excepciones puntuales</TabsTrigger>
+              <TabsTrigger value="absences">Ausencias</TabsTrigger>
+              <TabsTrigger value="base">Gestión de horario base</TabsTrigger>
+              <TabsTrigger value="holidays">Festivos</TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="schedule" className="space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center rounded-lg border bg-card">
+                  <Button variant="ghost" size="sm" onClick={() => goToWeek(-1)}>
+                    <ChevronLeft className="h-4 w-4" />
+                  </Button>
+                  <Button variant="ghost" size="sm" onClick={goToday}>
+                    Esta semana
+                  </Button>
+                  <Button variant="ghost" size="sm" onClick={() => goToWeek(1)}>
+                    <ChevronRight className="h-4 w-4" />
+                  </Button>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button size="sm" onClick={() => setPanel({ kind: "leave" })}>
+                    <Plus className="mr-1.5 h-4 w-4" /> Asignar ausencias
+                  </Button>
+                  <div className="flex items-center gap-2 rounded-lg border px-3 py-1.5">
+                    <Label htmlFor="hide-weekends-horarios" className="text-xs font-normal text-muted-foreground">
+                      Ocultar fines de semana
+                    </Label>
+                    <Switch id="hide-weekends-horarios" checked={hideWeekends} onCheckedChange={toggleHideWeekends} />
+                  </div>
+                </div>
               </div>
-              <div className="flex items-center gap-2 rounded-lg border px-3 py-1.5">
-                <Label htmlFor="hide-weekends-horarios" className="text-xs font-normal text-muted-foreground">
-                  Ocultar fines de semana
-                </Label>
-                <Switch id="hide-weekends-horarios" checked={hideWeekends} onCheckedChange={toggleHideWeekends} />
-              </div>
-            </div>
 
-            <WeeklyScheduleGrid
-              dates={visibleDates}
-              clinicCells={visibleClinicCells}
-              workers={workers}
-              workerCellsByWorker={visibleWorkerCells}
-              onCellClick={(clickedScope, date) => setEditingCell({ scope: clickedScope, date })}
-            />
+              <p className="text-xs text-muted-foreground">
+                Para cambiar el turno de un día, haz clic en la casilla de esa fecha (del centro o de la empleada).
+                Para vacaciones, bajas y demás ausencias, usa{" "}
+                <button
+                  type="button"
+                  onClick={() => setPanel({ kind: "leave" })}
+                  className="text-primary hover:underline"
+                >
+                  Asignar ausencias
+                </button>
+                .
+              </p>
 
-            <OverridesHistoryTable
-              clinicOverrides={clinicOverrides}
-              workerOverrides={workerOverrides}
-              onEdit={(clickedScope, date) => setEditingCell({ scope: clickedScope, date })}
-            />
-          </div>
+              <WeeklyScheduleGrid
+                dates={visibleDates}
+                clinicCells={visibleClinicCells}
+                workers={workers}
+                workerCellsByWorker={visibleWorkerCells}
+                onCellClick={openDay}
+              />
 
-          <div className="space-y-3">
-            <CollapsibleSection
-              title="Horario base (semana tipo)"
-              description="El horario que se repite cada semana automáticamente. Los cambios puntuales se hacen arriba, en la cuadrícula."
-              open={openSection === "base"}
-              onToggle={() => toggleSection("base")}
-            >
+              <BalanceCards year={vacationYear} balances={vacationBalances} workers={workers} />
+            </TabsContent>
+
+            <TabsContent value="overrides">
+              <OverridesHistoryTable
+                workers={workers}
+                clinicOverrides={clinicOverrides}
+                workerOverrides={workerOverrides}
+                today={today}
+                onEdit={openDay}
+              />
+            </TabsContent>
+
+            <TabsContent value="absences">
+              <AbsencesTable
+                workers={workers}
+                leaves={yearLeaves}
+                holidayDates={holidayDates}
+                today={today}
+                onEdit={(group) => setPanel({ kind: "leave", editing: group })}
+              />
+            </TabsContent>
+
+            <TabsContent value="base">
               <div className="flex gap-6">
                 <ScopeList workers={workers} selectedKey={scopeKey(scope)} onSelect={setScope} />
                 <div className="min-w-0 flex-1">
@@ -212,59 +238,57 @@ export function HorariosClient({
                           key={scope.workerId}
                           initialDays={workerWeeklyByWorker[scope.workerId] ?? []}
                           onSave={(days) => saveWorkerWeeklySchedule(scope.workerId, days)}
+                          emptyLabel="No trabaja"
                         />
                       )}
                     </CardContent>
                   </Card>
                 </div>
               </div>
-            </CollapsibleSection>
+            </TabsContent>
 
-            <CollapsibleSection
-              title="Festivos"
-              description="Calendario de festivos por año, importación masiva y copia de festivos fijos."
-              open={openSection === "holidays"}
-              onToggle={() => toggleSection("holidays")}
-            >
+            <TabsContent value="holidays">
               <HolidaysTab holidays={holidays} />
-            </CollapsibleSection>
-
-            <CollapsibleSection
-              title="Vacaciones"
-              description="Saldos anuales por empleada y asignación de días libres en rango."
-              open={openSection === "vacations"}
-              onToggle={() => toggleSection("vacations")}
-            >
-              <VacationsSection
-                year={vacationYear}
-                workers={workers}
-                balances={vacationBalances}
-              />
-            </CollapsibleSection>
-          </div>
+            </TabsContent>
+          </Tabs>
         </div>
 
-        {editingCell && (
+        {panel && (
           <div
             className="fixed inset-0 z-40 bg-black/30 lg:hidden"
-            onClick={() => setEditingCell(null)}
+            onClick={() => setPanel(null)}
             aria-hidden="true"
           />
         )}
-        {editingCell && (
+        {panel && (
           <aside className="fixed inset-y-0 right-0 z-50 flex w-full max-w-md flex-col overflow-y-auto border-l bg-card shadow-xl lg:static lg:z-auto lg:w-[400px] lg:max-w-none lg:shadow-none">
-            <OverridesPanel
-              key={scopeKey(editingCell.scope) + ":" + editingCell.date}
-              scope={editingCell.scope}
-              clinicWeekly={clinicWeekly}
-              workerWeekly={editingCell.scope.type === "WORKER" ? (workerWeeklyByWorker[editingCell.scope.workerId] ?? []) : []}
-              clinicOverrides={clinicOverrides}
-              workerOverrides={workerOverrides}
-              holidays={holidays}
-              leaves={weekLeaves}
-              initialDate={editingCell.date}
-              onClose={() => setEditingCell(null)}
-            />
+            {panel.kind === "day" ? (
+              <OverridesPanel
+                key={scopeKey(panel.scope) + ":" + panel.date}
+                scope={panel.scope}
+                clinicWeekly={clinicWeekly}
+                workerWeekly={panel.scope.type === "WORKER" ? (workerWeeklyByWorker[panel.scope.workerId] ?? []) : []}
+                clinicOverrides={clinicOverrides}
+                workerOverrides={workerOverrides}
+                holidays={holidays}
+                // Del año, no solo de la semana visible: dentro del panel se
+                // puede cambiar la fecha y hay que seguir detectando ausencias.
+                leaves={yearLeaves}
+                initialDate={panel.date}
+                onClose={() => setPanel(null)}
+                onManageLeave={(leave) => {
+                  const group = groupLeaves(yearLeaves, holidayDates).find((g) => g.ids.includes(leave.id))
+                  if (group) setPanel({ kind: "leave", editing: group })
+                }}
+              />
+            ) : (
+              <LeaveRangeForm
+                key={panel.editing?.ids[0] ?? "new"}
+                workers={workers}
+                editing={panel.editing}
+                onClose={() => setPanel(null)}
+              />
+            )}
           </aside>
         )}
       </div>

@@ -136,7 +136,8 @@ export interface ClinicDayCell {
 export interface WorkerDayCell {
   date: string
   ranges: TimeRange[]
-  closedReason: "VACATION" | "PERSONAL" | null
+  /** Tipo de ausencia (LeaveType) si el día está cerrado por una, o null. */
+  closedReason: string | null
 }
 
 export async function getClinicWeekCells(clinicId: string, dates: string[]): Promise<ClinicDayCell[]> {
@@ -170,7 +171,7 @@ export async function getWorkerWeekCells(clinicId: string, workerId: string, dat
       return {
         date,
         ranges,
-        closedReason: ranges.length === 0 && (leaveType === "VACATION" || leaveType === "PERSONAL") ? leaveType : null,
+        closedReason: ranges.length === 0 && leaveType ? leaveType : null,
       }
     }),
   )

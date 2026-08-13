@@ -196,29 +196,64 @@ export async function sendReminder(appointmentId: string): Promise<ActionResult>
 
 /* ------------------------------ CLIENTES -------------------------------- */
 
+function customerDataFromForm(fd: FormData) {
+  const birthDateRaw = optStr(fd, "birthDate")
+  return {
+    firstName: str(fd, "firstName"),
+    lastName: optStr(fd, "lastName"),
+    lastName2: optStr(fd, "lastName2"),
+    phone: normalizePhone(str(fd, "phone")),
+    phone2: normalizePhone(optStr(fd, "phone2") ?? "") || null,
+    email: optStr(fd, "email"),
+    birthDate: birthDateRaw ? new Date(birthDateRaw) : null,
+    notes: optStr(fd, "notes"),
+    whatsappOptIn: bool(fd, "whatsappOptIn"),
+    active: bool(fd, "active"),
+  }
+}
+
 export async function saveCustomer(id: string | null, fd: FormData): Promise<ActionResult> {
   try {
     const clinicId = await getActiveClinicId()
-    const birthDateRaw = optStr(fd, "birthDate")
-    const data = {
-      firstName: str(fd, "firstName"),
-      lastName: optStr(fd, "lastName"),
-      lastName2: optStr(fd, "lastName2"),
-      phone: normalizePhone(str(fd, "phone")),
-      phone2: normalizePhone(optStr(fd, "phone2") ?? "") || null,
-      email: optStr(fd, "email"),
-      birthDate: birthDateRaw ? new Date(birthDateRaw) : null,
-      notes: optStr(fd, "notes"),
-      whatsappOptIn: bool(fd, "whatsappOptIn"),
-      active: bool(fd, "active"),
-    }
+    const data = customerDataFromForm(fd)
     if (id) {
       await prisma.customer.update({ where: { id }, data })
-    } else {
-      await prisma.customer.create({ data: { ...data, clinicId } })
+      revalidateAll()
+      return { ok: true, id }
     }
+    const created = await prisma.customer.create({ data: { ...data, clinicId } })
     revalidateAll()
-    return { ok: true }
+    return { ok: true, id: created.id }
+  } catch (e) {
+    return { ok: false, error: errMsg(e) }
+  }
+}
+
+// Alta rápida de cliente desde otra pantalla (p. ej. el TPV de ventas):
+// devuelve el cliente creado para poder seleccionarlo sin recargar la página.
+export type QuickCustomer = {
+  id: string
+  firstName: string
+  lastName: string | null
+  phone: string
+  balanceCents: number
+}
+
+export async function createCustomerQuick(
+  fd: FormData,
+): Promise<ActionResult & { customer?: QuickCustomer }> {
+  try {
+    const clinicId = await getActiveClinicId()
+    const data = customerDataFromForm(fd)
+    if (!data.firstName) return { ok: false, error: "El nombre es obligatorio." }
+    if (!data.phone) return { ok: false, error: "El teléfono es obligatorio." }
+    const created = await prisma.customer.create({
+      data: { ...data, clinicId },
+      select: { id: true, firstName: true, lastName: true, phone: true, balanceCents: true },
+    })
+    revalidateAll()
+    revalidatePath("/sales")
+    return { ok: true, id: created.id, customer: created }
   } catch (e) {
     return { ok: false, error: errMsg(e) }
   }
@@ -633,6 +668,11 @@ export async function createSale(
   try {
     const session = await getSession()
     if (!session) return { ok: false, error: "No autenticado." }
+    // El usuario de la sesión puede haber desaparecido (BD resembrada, usuario
+    // desactivado…). Sin esta comprobación la venta revienta con un error de
+    // clave foránea de Prisma que no dice nada al usuario.
+    const sessionUser = await prisma.user.findFirst({ where: { id: session.userId, active: true }, select: { id: true } })
+    if (!sessionUser) return { ok: false, error: "Tu sesión ya no es válida. Cierra sesión y vuelve a entrar." }
     const clinicId = await getActiveClinicId()
 
     if (lines.length === 0) return { ok: false, error: "La venta debe tener al menos una línea." }

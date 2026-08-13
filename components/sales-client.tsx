@@ -3,7 +3,7 @@
 import { useState, useMemo, useRef, useEffect } from "react"
 import {
   ArrowLeft, Plus, Search, CreditCard, Banknote, AlertCircle,
-  Trash2, Gift, ShoppingCart, X, Clock, Wallet, Scissors, Package, Eye, CalendarDays, Receipt,
+  Trash2, Gift, ShoppingCart, X, Clock, Wallet, Scissors, Package, Eye, CalendarDays, Receipt, UserPlus,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -12,6 +12,7 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { createSale, payDebt, type SaleLineInput } from "@/lib/actions"
+import { QuickCustomerDialog } from "@/components/quick-customer-dialog"
 import { cn } from "@/lib/utils"
 
 /* ─── Types ─────────────────────────────────────────────────────────────── */
@@ -382,6 +383,14 @@ function POSView({ sales, customers, services, products, workers, currentUserId,
   sales: Sale[]; customers: Customer[]; services: Service[]; products: Product[]
   workers: Worker[]; currentUserId: string | null; onBack: () => void
 }) {
+  // Clientes dados de alta sin salir del TPV: se añaden a la lista en memoria
+  // para poder seleccionarlos al momento (el servidor ya los tiene guardados).
+  const [createdCustomers, setCreatedCustomers] = useState<Customer[]>([])
+  const allCustomers = useMemo(() => {
+    const known = new Set(customers.map((c) => c.id))
+    return [...createdCustomers.filter((c) => !known.has(c.id)), ...customers]
+  }, [customers, createdCustomers])
+
   const [customer, setCustomer] = useState<Customer | null>(null)
   const [giftRecipient, setGiftRecipient] = useState<Customer | null>(null)
   const [lines, setLines] = useState<DraftLine[]>([])
@@ -563,10 +572,11 @@ function POSView({ sales, customers, services, products, workers, currentUserId,
           {/* Cliente comprador */}
           <CustomerSelector
             label="Cliente"
-            customers={customers}
+            customers={allCustomers}
             selected={customer}
             onSelect={(c) => { setCustomer(c); setErrors([]) }}
             onClear={() => setCustomer(null)}
+            onCreated={(c) => setCreatedCustomers((prev) => [c, ...prev])}
             debtByCustomerId={debtByCustomer}
           />
           {!customer && (
@@ -646,9 +656,10 @@ function POSView({ sales, customers, services, products, workers, currentUserId,
             products={products}
             workers={workers}
             currentUserId={currentUserId}
-            customers={customers}
+            customers={allCustomers}
             giftRecipient={giftRecipient}
             onGiftRecipientChange={setGiftRecipient}
+            onCustomerCreated={(c) => setCreatedCustomers((prev) => [c, ...prev])}
             onAdd={addLine}
             hasGiftCard={hasGiftCard}
             hasRegularLines={lines.some((l) => l.type !== "GIFT_CARD")}
@@ -923,13 +934,16 @@ function POSView({ sales, customers, services, products, workers, currentUserId,
 
 /* ─── Customer selector (shared) ─────────────────────────────────────────── */
 
-function CustomerSelector({ label, customers, selected, onSelect, onClear, placeholder, debtByCustomerId }: {
+function CustomerSelector({ label, customers, selected, onSelect, onClear, onCreated, placeholder, debtByCustomerId }: {
   label: string; customers: Customer[]; selected: Customer | null
   onSelect: (c: Customer) => void; onClear: () => void; placeholder?: string
+  // Si se pasa, se ofrece dar de alta un cliente nuevo sin salir de la venta.
+  onCreated?: (c: Customer) => void
   debtByCustomerId?: Map<string, number>
 }) {
   const [query, setQuery] = useState("")
   const [open, setOpen] = useState(false)
+  const [creating, setCreating] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -941,6 +955,30 @@ function CustomerSelector({ label, customers, selected, onSelect, onClear, place
   }, [])
 
   const results = useMemo(() => searchCustomers(customers, query), [customers, query])
+  const canCreate = Boolean(onCreated)
+
+  function openCreate() {
+    setOpen(false)
+    setCreating(true)
+  }
+
+  function handleCreated(c: Customer) {
+    onCreated?.(c)
+    onSelect(c)
+    setQuery("")
+    setOpen(false)
+  }
+
+  const dialog = canCreate ? (
+    <QuickCustomerDialog
+      open={creating}
+      query={query}
+      customers={customers}
+      onOpenChange={setCreating}
+      onCreated={handleCreated}
+      onSelectExisting={(c) => { onSelect(c); setQuery(""); setOpen(false) }}
+    />
+  ) : null
 
   if (selected) {
     return (
@@ -962,6 +1000,7 @@ function CustomerSelector({ label, customers, selected, onSelect, onClear, place
             <X className="h-4 w-4" />
           </Button>
         </div>
+        {dialog}
       </div>
     )
   }
@@ -977,12 +1016,21 @@ function CustomerSelector({ label, customers, selected, onSelect, onClear, place
           value={query}
           onChange={(e) => { setQuery(e.target.value); setOpen(true) }}
           onFocus={() => setOpen(true)}
+          onKeyDown={(e) => {
+            // Enter sobre una búsqueda sin resultados: dar de alta directamente.
+            if (e.key === "Enter" && canCreate && query.trim() && results.length === 0) {
+              e.preventDefault()
+              openCreate()
+            }
+          }}
         />
       </div>
       {open && (
         <div className="absolute z-50 w-full mt-1 bg-background border rounded-xl shadow-lg overflow-hidden">
           {results.length === 0 ? (
-            <div className="px-4 py-3 text-sm text-muted-foreground">Sin resultados para "{query}"</div>
+            <div className="px-4 py-3 text-sm text-muted-foreground">
+              {query.trim() ? `Sin resultados para "${query}"` : "No hay clientes."}
+            </div>
           ) : (
             results.map((c) => (
               <button key={c.id} type="button"
@@ -998,8 +1046,22 @@ function CustomerSelector({ label, customers, selected, onSelect, onClear, place
               </button>
             ))
           )}
+          {canCreate && (
+            <button
+              type="button"
+              onClick={openCreate}
+              className={cn(
+                "w-full flex items-center gap-2 px-4 py-2.5 text-left text-sm font-medium text-primary transition-colors hover:bg-primary/5",
+                results.length > 0 && "border-t"
+              )}
+            >
+              <UserPlus className="h-4 w-4 shrink-0" />
+              {query.trim() ? <>Crear cliente «<span className="truncate">{query.trim()}</span>»</> : "Crear cliente nuevo"}
+            </button>
+          )}
         </div>
       )}
+      {dialog}
     </div>
   )
 }
@@ -1008,12 +1070,13 @@ function CustomerSelector({ label, customers, selected, onSelect, onClear, place
 
 type AddLineTab = "SERVICE" | "PRODUCT" | "GIFT_CARD"
 
-function AddLinePanel({ services, products, workers, currentUserId, customers, giftRecipient, onGiftRecipientChange, onAdd, hasGiftCard, hasRegularLines }: {
+function AddLinePanel({ services, products, workers, currentUserId, customers, giftRecipient, onGiftRecipientChange, onCustomerCreated, onAdd, hasGiftCard, hasRegularLines }: {
   services: Service[]; products: Product[]; workers: Worker[]
   currentUserId: string | null
   customers: Customer[]
   giftRecipient: Customer | null
   onGiftRecipientChange: (c: Customer | null) => void
+  onCustomerCreated: (c: Customer) => void
   onAdd: (line: DraftLine) => void
   hasGiftCard: boolean
   hasRegularLines: boolean
@@ -1100,6 +1163,7 @@ function AddLinePanel({ services, products, workers, currentUserId, customers, g
               selected={giftRecipient}
               onSelect={onGiftRecipientChange}
               onClear={() => onGiftRecipientChange(null)}
+              onCreated={onCustomerCreated}
               placeholder="Buscar cliente destinatario…"
             />
             {/* Importe */}

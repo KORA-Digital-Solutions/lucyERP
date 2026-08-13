@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
-import { ChevronLeft, ChevronRight, Plus } from "lucide-react"
+import { ChevronLeft, ChevronRight } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardTitle, CardDescription } from "@/components/ui/card"
 import { Label } from "@/components/ui/label"
@@ -37,13 +37,20 @@ import {
 
 type HorariosTab = "schedule" | "overrides" | "absences" | "base" | "holidays"
 
-// El panel lateral derecho sirve para tres cosas: el detalle de un día (clic
-// en una celda de la cuadrícula), el alta de una ausencia, o la edición de
-// una ausencia ya existente.
-type PanelState =
-  | { kind: "day"; scope: Scope; date: string }
-  | { kind: "leave"; editing?: LeaveGroup }
-  | null
+// Todo se gestiona desde una celda empleada/día de "Esta semana": el panel
+// lateral abre sobre ese ámbito y esa fecha, y dentro se elige si lo que se
+// va a tocar es el horario de ese día o una ausencia. `editingLeave` está
+// puesto cuando el día ya tiene una ausencia guardada (se edita el bloque
+// entero, no solo ese día).
+type PanelMode = "override" | "leave"
+type PanelState = { scope: Scope; date: string; mode: PanelMode; editingLeave?: LeaveGroup } | null
+
+function mondayOf(date: string): string {
+  const [y, m, d] = date.split("-").map(Number)
+  const dt = new Date(y, m - 1, d)
+  dt.setDate(dt.getDate() + (dt.getDay() === 0 ? -6 : 1 - dt.getDay()))
+  return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}-${String(dt.getDate()).padStart(2, "0")}`
+}
 
 interface Props {
   workers: (WorkerOption & { color?: string })[]
@@ -97,12 +104,45 @@ export function HorariosClient({
     localStorage.setItem("agenda:hideWeekends", String(v))
   }
 
-  // Clic en una celda de la vista semanal (o en una fila del historial de
-  // excepciones) → panel lateral, igual que en Agenda, ya cargado con esa
-  // empleada (o centro) y esa fecha. El botón "Asignar ausencias" reutiliza
-  // esa misma ranura con el formulario de rango.
+  // Clic en una celda de la vista semanal → panel lateral, igual que en
+  // Agenda, ya cargado con esa empleada (o centro) y esa fecha.
   const [panel, setPanel] = useState<PanelState>(null)
-  const openDay = (scope: Scope, date: string) => setPanel({ kind: "day", scope, date })
+
+  const holidayDates = holidays.map((h) => h.date)
+
+  // La ausencia de un día concreto, resuelta al bloque continuo al que
+  // pertenece: se edita el rango entero, que es como se creó.
+  function leaveGroupFor(workerId: string, date: string): LeaveGroup | undefined {
+    const leave = yearLeaves.find((l) => l.workerId === workerId && l.date === date)
+    if (!leave) return undefined
+    return groupLeaves(yearLeaves, holidayDates).find((g) => g.ids.includes(leave.id))
+  }
+
+  // Si el día ya es vacaciones/baja, el panel abre directamente en Ausencia:
+  // es lo que el usuario está viendo en la celda y casi seguro lo que viene a
+  // tocar. En cualquier otro caso, en horario.
+  function openDay(scope: Scope, date: string) {
+    const group = scope.type === "WORKER" ? leaveGroupFor(scope.workerId, date) : undefined
+    setPanel({ scope, date, mode: group ? "leave" : "override", editingLeave: group })
+  }
+
+  // Cambio de pestaña dentro del panel, sin perder ámbito ni fecha.
+  function setPanelMode(mode: PanelMode) {
+    setPanel((p) => {
+      if (!p) return p
+      const group = mode === "leave" && p.scope.type === "WORKER" ? leaveGroupFor(p.scope.workerId, p.date) : undefined
+      return { ...p, mode, editingLeave: group }
+    })
+  }
+
+  // El ojo de las pestañas de consulta: salta a "Esta semana" en la semana de
+  // esa fecha y deja el panel abierto sobre la fila correspondiente.
+  function viewInWeek(scope: Scope, date: string, mode: PanelMode, editingLeave?: LeaveGroup) {
+    setActiveTab("schedule")
+    setPanel({ scope, date, mode, editingLeave })
+    const monday = mondayOf(date)
+    router.push(`/horarios?tab=schedule&week=${monday}`)
+  }
 
   function goToWeek(offset: number) {
     const [y, m, d] = weekStart.split("-").map(Number)
@@ -113,8 +153,6 @@ export function HorariosClient({
   function goToday() {
     router.push(`/horarios?tab=schedule`)
   }
-
-  const holidayDates = holidays.map((h) => h.date)
 
   const visibleIndices = weekDates
     .map((d, i) => i)
@@ -159,9 +197,6 @@ export function HorariosClient({
                   </Button>
                 </div>
                 <div className="flex items-center gap-2">
-                  <Button size="sm" onClick={() => setPanel({ kind: "leave" })}>
-                    <Plus className="mr-1.5 h-4 w-4" /> Asignar ausencias
-                  </Button>
                   <div className="flex items-center gap-2 rounded-lg border px-3 py-1.5">
                     <Label htmlFor="hide-weekends-horarios" className="text-xs font-normal text-muted-foreground">
                       Ocultar fines de semana
@@ -172,16 +207,8 @@ export function HorariosClient({
               </div>
 
               <p className="text-xs text-muted-foreground">
-                Para cambiar el turno de un día, haz clic en la casilla de esa fecha (del centro o de la empleada).
-                Para vacaciones, bajas y demás ausencias, usa{" "}
-                <button
-                  type="button"
-                  onClick={() => setPanel({ kind: "leave" })}
-                  className="text-primary hover:underline"
-                >
-                  Asignar ausencias
-                </button>
-                .
+                Haz clic en la casilla de una fecha (del centro o de una empleada). Desde el panel eliges si cambias el
+                horario de ese día o le asignas una ausencia (vacaciones, baja…), que puede ser de un día o de un rango.
               </p>
 
               <WeeklyScheduleGrid
@@ -201,7 +228,7 @@ export function HorariosClient({
                 clinicOverrides={clinicOverrides}
                 workerOverrides={workerOverrides}
                 today={today}
-                onEdit={openDay}
+                onView={(scope, date) => viewInWeek(scope, date, "override")}
               />
             </TabsContent>
 
@@ -211,7 +238,14 @@ export function HorariosClient({
                 leaves={yearLeaves}
                 holidayDates={holidayDates}
                 today={today}
-                onEdit={(group) => setPanel({ kind: "leave", editing: group })}
+                onView={(group) =>
+                  viewInWeek(
+                    { type: "WORKER", workerId: group.workerId, workerName: group.workerName },
+                    group.startDate,
+                    "leave",
+                    group,
+                  )
+                }
               />
             </TabsContent>
 
@@ -262,7 +296,33 @@ export function HorariosClient({
         )}
         {panel && (
           <aside className="fixed inset-y-0 right-0 z-50 flex w-full max-w-md flex-col overflow-y-auto border-l bg-card shadow-xl lg:static lg:z-auto lg:w-[400px] lg:max-w-none lg:shadow-none">
-            {panel.kind === "day" ? (
+            {/* Qué se va a gestionar de ese día. Solo para empleadas: el centro
+                no tiene vacaciones ni bajas, sus días especiales son festivos
+                y se resuelven dentro del formulario de horario. */}
+            {panel.scope.type === "WORKER" && (
+              <div className="grid grid-cols-2 gap-1.5 border-b px-4 py-3">
+                {([
+                  { value: "override", label: "Cambio de horario" },
+                  { value: "leave", label: "Ausencia" },
+                ] as const).map((m) => (
+                  <button
+                    key={m.value}
+                    type="button"
+                    onClick={() => setPanelMode(m.value)}
+                    className={cn(
+                      "rounded-lg border px-3 py-2 text-xs font-medium transition-colors",
+                      panel.mode === m.value
+                        ? "border-primary bg-primary text-primary-foreground"
+                        : "text-muted-foreground hover:bg-accent/50",
+                    )}
+                  >
+                    {m.label}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {panel.mode === "override" ? (
               <OverridesPanel
                 key={scopeKey(panel.scope) + ":" + panel.date}
                 scope={panel.scope}
@@ -276,16 +336,15 @@ export function HorariosClient({
                 leaves={yearLeaves}
                 initialDate={panel.date}
                 onClose={() => setPanel(null)}
-                onManageLeave={(leave) => {
-                  const group = groupLeaves(yearLeaves, holidayDates).find((g) => g.ids.includes(leave.id))
-                  if (group) setPanel({ kind: "leave", editing: group })
-                }}
+                onManageLeave={() => setPanelMode("leave")}
               />
             ) : (
               <LeaveRangeForm
-                key={panel.editing?.ids[0] ?? "new"}
+                key={(panel.editingLeave?.ids[0] ?? "new") + ":" + panel.date}
                 workers={workers}
-                editing={panel.editing}
+                defaultWorkerId={panel.scope.type === "WORKER" ? panel.scope.workerId : undefined}
+                defaultDate={panel.date}
+                editing={panel.editingLeave}
                 onClose={() => setPanel(null)}
               />
             )}

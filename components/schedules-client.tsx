@@ -3,7 +3,7 @@
 import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
-import { Plus, Trash2, Pencil, CalendarOff, Upload, ChevronLeft, ChevronRight, X } from "lucide-react"
+import { Plus, Trash2, Pencil, Eye, CalendarOff, Upload, ChevronLeft, ChevronRight, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardTitle, CardDescription } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -275,8 +275,8 @@ const CLINIC_MODES: { value: DayMode; label: string }[] = [
   { value: "CLOSED", label: "Cerrado" },
   { value: "HOLIDAY", label: "Festivo" },
 ]
-// Las ausencias (vacaciones, bajas…) NO se gestionan aquí: tienen su propio
-// flujo en "Asignar ausencias", que cubre día suelto y rango. Este panel es
+// Las ausencias (vacaciones, bajas…) NO se gestionan aquí: van en la pestaña
+// "Ausencia" del propio panel, que cubre día suelto y rango. Este panel es
 // solo para excepciones de horario.
 const WORKER_MODES: { value: DayMode; label: string }[] = [
   { value: "WORK", label: "Trabaja" },
@@ -330,8 +330,8 @@ function resolveDateState(
 
 // Panel de excepciones de horario de un día concreto. Un solo selector
 // "¿Qué pasa este día?" y un único guardar. Las ausencias (vacaciones, bajas)
-// NO se tocan aquí: si el día ya tiene una, el panel lo indica y remite a
-// "Asignar ausencias", que es donde se crean y editan (día suelto o rango).
+// NO se tocan aquí: si el día ya tiene una, el panel lo indica y remite a la
+// pestaña "Ausencia", que es donde se crean y editan (día suelto o rango).
 export function OverridesPanel({
   scope,
   clinicWeekly,
@@ -505,9 +505,11 @@ export function OverridesPanel({
           <div className="space-y-2">
             <Label>Fecha</Label>
             <Input type="date" value={date} onChange={(e) => handleDateChange(e.target.value)} />
-            {date && prefilled && (
+            {/* Con una ausencia ese día el aviso sobra: el bloque de abajo ya
+                explica qué pasa y que aquí no se toca. */}
+            {date && prefilled && !existingLeave && (
               <p className="text-xs text-muted-foreground">
-                {existingLeave || existingOverride || existingHoliday
+                {existingOverride || existingHoliday
                   ? "Ya había algo guardado para este día — lo estás editando."
                   : `Según el horario base de los ${WEEKDAY_LABELS[dayOfWeekFromDateStr(date)].toLowerCase()}.`}
               </p>
@@ -528,7 +530,7 @@ export function OverridesPanel({
               </p>
               {onManageLeave && (
                 <Button type="button" variant="outline" size="sm" onClick={() => onManageLeave(existingLeave)}>
-                  Gestionar ausencia
+                  Ver la ausencia
                 </Button>
               )}
             </div>
@@ -680,18 +682,20 @@ export function DateRangeFilter({
 // Listado de excepciones (centro + todas las empleadas juntas), con filtros
 // por ámbito, periodo y rango de fechas. Va en su propia pestaña en vez de
 // dentro del panel lateral, que queda demasiado estrecho para una tabla.
+// Es solo consulta: editar y borrar viven en "Esta semana", que es el único
+// sitio donde se gestionan horarios y ausencias. El ojo lleva allí.
 export function OverridesHistoryTable({
   workers,
   clinicOverrides,
   workerOverrides,
   today,
-  onEdit,
+  onView,
 }: {
   workers: (WorkerOption & { color?: string })[]
   clinicOverrides: OverrideRow[]
   workerOverrides: OverrideRow[]
   today: string
-  onEdit: (scope: Scope, date: string) => void
+  onView: (scope: Scope, date: string) => void
 }) {
   const router = useRouter()
   // "all" = todos los ámbitos · "CLINIC" = centro · <workerId> = esa empleada.
@@ -721,7 +725,9 @@ export function OverridesHistoryTable({
       <div className="flex flex-wrap items-end justify-between gap-3 border-b px-4 py-3">
         <div>
           <p className="text-sm font-medium">Excepciones puntuales</p>
-          <p className="text-xs text-muted-foreground">{rows.length} de {all.length}</p>
+          <p className="text-xs text-muted-foreground">
+            {rows.length} de {all.length} · consulta; para cambiarlas, ve a la semana
+          </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Select value={scopeFilter} onValueChange={setScopeFilter}>
@@ -758,7 +764,7 @@ export function OverridesHistoryTable({
             <TableHead>Motivo</TableHead>
             <TableHead className="text-right">
               <span className="flex justify-end text-xs font-normal text-muted-foreground">
-                <span className="flex w-16 items-center justify-center gap-1"><Pencil className="h-3.5 w-3.5" /> Editar</span>
+                <span className="flex w-16 items-center justify-center gap-1"><Eye className="h-3.5 w-3.5" /> Ver</span>
               </span>
             </TableHead>
           </TableRow>
@@ -784,15 +790,15 @@ export function OverridesHistoryTable({
                     <Button
                       variant="ghost"
                       size="icon"
-                      title="Editar excepción"
+                      title="Ver en Esta semana"
                       onClick={() =>
-                        onEdit(
+                        onView(
                           r.workerId ? { type: "WORKER", workerId: r.workerId, workerName: r.workerName! } : { type: "CLINIC" },
                           r.date,
                         )
                       }
                     >
-                      <Pencil className="h-4 w-4" />
+                      <Eye className="h-4 w-4" />
                     </Button>
                   </span>
                 </span>

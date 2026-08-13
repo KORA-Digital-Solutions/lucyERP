@@ -3,7 +3,7 @@
 import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
-import { Pencil, X, Trash2 } from "lucide-react"
+import { Pencil, Eye, X, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardTitle, CardDescription } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -396,20 +396,22 @@ export function LeaveRangeForm({
   )
 }
 
-// Listado de ausencias agrupadas por rango, con filtros. Clic en una fila la
-// abre en el panel lateral para editarla o eliminarla.
+// Listado de ausencias agrupadas por rango, con filtros. Es solo consulta:
+// crear, editar y eliminar viven en "Esta semana", que es el único sitio
+// donde se gestiona el día a día. El ojo lleva allí, a la semana en la que
+// empieza la ausencia y con el panel ya abierto sobre ella.
 export function AbsencesTable({
   workers,
   leaves,
   holidayDates,
   today,
-  onEdit,
+  onView,
 }: {
   workers: WorkerOption[]
   leaves: LeaveRow[]
   holidayDates: string[]
   today: string
-  onEdit: (group: LeaveGroup) => void
+  onView: (group: LeaveGroup) => void
 }) {
   const [workerFilter, setWorkerFilter] = useState("all")
   const [typeFilter, setTypeFilter] = useState("all")
@@ -436,7 +438,9 @@ export function AbsencesTable({
       <div className="flex flex-wrap items-end justify-between gap-3 border-b px-4 py-3">
         <div>
           <p className="text-sm font-medium">Ausencias</p>
-          <p className="text-xs text-muted-foreground">{rows.length} de {all.length}</p>
+          <p className="text-xs text-muted-foreground">
+            {rows.length} de {all.length} · consulta; para cambiarlas, ve a la semana
+          </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Select value={workerFilter} onValueChange={setWorkerFilter}>
@@ -485,7 +489,7 @@ export function AbsencesTable({
             <TableHead>Notas</TableHead>
             <TableHead className="text-right">
               <span className="flex justify-end text-xs font-normal text-muted-foreground">
-                <span className="flex w-16 items-center justify-center gap-1"><Pencil className="h-3.5 w-3.5" /> Editar</span>
+                <span className="flex w-16 items-center justify-center gap-1"><Eye className="h-3.5 w-3.5" /> Ver</span>
               </span>
             </TableHead>
           </TableRow>
@@ -509,8 +513,8 @@ export function AbsencesTable({
                 <TableCell className="text-right">
                   <span className="flex justify-end">
                     <span className="flex w-16 justify-center">
-                      <Button variant="ghost" size="icon" title="Editar ausencia" onClick={() => onEdit(g)}>
-                        <Pencil className="h-4 w-4" />
+                      <Button variant="ghost" size="icon" title="Ver en Esta semana" onClick={() => onView(g)}>
+                        <Eye className="h-4 w-4" />
                       </Button>
                     </span>
                   </span>

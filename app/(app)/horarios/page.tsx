@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/db"
 import { getActiveClinic } from "@/lib/clinic"
 import { toDateInputValue } from "@/lib/format"
+import { getClinicWeekCells, getWorkerWeekCells } from "@/lib/schedule"
 import { HorariosClient } from "@/components/horarios-client"
 import type { WeeklyDay, OverrideRow, HolidayRow } from "@/components/schedules-client"
 import type { BalanceRow, LeaveRow } from "@/components/vacations-client"
@@ -16,17 +17,39 @@ function groupByDay(rows: { dayOfWeek: number; startTime: string; endTime: strin
   return days
 }
 
+function toDateStr(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
+}
+function parseDateStr(s: string): Date {
+  const [y, m, d] = s.split("-").map(Number)
+  return new Date(y, m - 1, d)
+}
+function addDays(s: string, days: number): string {
+  const d = parseDateStr(s)
+  d.setDate(d.getDate() + days)
+  return toDateStr(d)
+}
+// Lunes de la semana que contiene `s` (dow: 0 domingo .. 6 sábado).
+function mondayOf(s: string): string {
+  const d = parseDateStr(s)
+  const dow = d.getDay()
+  d.setDate(d.getDate() + (dow === 0 ? -6 : 1 - dow))
+  return toDateStr(d)
+}
+
 export default async function HorariosPage({
   searchParams,
 }: {
-  searchParams: Promise<{ year?: string; tab?: string }>
+  searchParams: Promise<{ year?: string; week?: string }>
 }) {
-  const { year: yearParam, tab } = await searchParams
+  const { year: yearParam, week: weekParam } = await searchParams
   const year = Number(yearParam) || new Date().getFullYear()
   const clinic = await getActiveClinic()
   const todayStr = toDateInputValue(new Date())
+  const weekStart = weekParam && /^\d{4}-\d{2}-\d{2}$/.test(weekParam) ? mondayOf(weekParam) : mondayOf(todayStr)
+  const weekDates = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i))
 
-  const [workers, clinicSlots, workerSlots, clinicOverrides, workerOverrides, balances, leaves, holidays] =
+  const [workers, clinicSlots, workerSlots, clinicOverrides, workerOverrides, balances, leaves, weekLeaves, holidays, clinicWeekCells] =
     await Promise.all([
       prisma.user.findMany({ where: { clinicId: clinic.id, active: true }, orderBy: { name: "asc" } }),
       prisma.clinicWeeklySlot.findMany({ where: { clinicId: clinic.id } }),
@@ -47,8 +70,21 @@ export default async function HorariosPage({
         include: { worker: true },
         orderBy: { date: "asc" },
       }),
+      // Independiente del año del disclosure de saldos: el panel de la
+      // cuadrícula necesita saber si HAY vacaciones/asuntos propios en la
+      // semana visible aunque caiga a caballo de dos años.
+      prisma.workerLeave.findMany({
+        where: { clinicId: clinic.id, date: { in: weekDates } },
+        include: { worker: true },
+      }),
       prisma.holiday.findMany({ where: { clinicId: clinic.id }, orderBy: { date: "asc" } }),
+      getClinicWeekCells(clinic.id, weekDates),
     ])
+
+  const workerWeekCellsEntries = await Promise.all(
+    workers.map(async (w) => [w.id, await getWorkerWeekCells(clinic.id, w.id, weekDates)] as const),
+  )
+  const workerWeekCellsByWorker = Object.fromEntries(workerWeekCellsEntries)
 
   const clinicWeekly = groupByDay(clinicSlots)
   const workerWeeklyByWorker: Record<string, WeeklyDay[]> = {}
@@ -87,7 +123,7 @@ export default async function HorariosPage({
       personalUsed: workerLeaves.filter((l) => l.type === "PERSONAL").length,
     }
   })
-  const leaveRows: LeaveRow[] = leaves.map((l) => ({
+  const weekLeaveRows: LeaveRow[] = weekLeaves.map((l) => ({
     id: l.id,
     workerId: l.workerId,
     workerName: l.worker.name,
@@ -103,19 +139,21 @@ export default async function HorariosPage({
     scope: h.scope,
   }))
 
-  const validTabs = ["schedule", "overrides", "vacations", "holidays"] as const
   return (
     <HorariosClient
       workers={workers.map((w) => ({ id: w.id, name: w.name, color: w.color ?? "#3C54A4" }))}
       clinicWeekly={clinicWeekly}
       workerWeeklyByWorker={workerWeeklyByWorker}
+      weekDates={weekDates}
+      weekStart={weekStart}
+      clinicWeekCells={clinicWeekCells}
+      workerWeekCellsByWorker={workerWeekCellsByWorker}
       clinicOverrides={clinicOverrideRows}
       workerOverrides={workerOverrideRows}
+      weekLeaves={weekLeaveRows}
       vacationYear={year}
       vacationBalances={balanceRows}
-      vacationLeaves={leaveRows}
       holidays={holidayRows}
-      initialTab={validTabs.includes(tab as typeof validTabs[number]) ? (tab as typeof validTabs[number]) : "schedule"}
     />
   )
 }

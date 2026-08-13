@@ -3,7 +3,7 @@
 import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
-import { Plus, Trash2, CalendarOff, Upload, ChevronLeft, ChevronRight } from "lucide-react"
+import { Plus, Trash2, CalendarOff, Upload, ChevronLeft, ChevronRight, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardTitle, CardDescription } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -23,10 +23,13 @@ import {
   deleteHoliday,
   copyFixedHolidaysToYear,
   bulkImportHolidays,
+  addWorkerLeaveRange,
+  deleteWorkerLeave,
   type WeeklySlotInput,
 } from "@/lib/actions"
 import { WEEKDAY_LABELS, HOLIDAY_SCOPE_META, type HolidayScope } from "@/lib/enums"
 import { cn } from "@/lib/utils"
+import type { LeaveRow } from "@/components/vacations-client"
 
 export interface WeeklyDay {
   dayOfWeek: number
@@ -269,60 +272,88 @@ function dayOfWeekFromDateStr(date: string): number {
   return new Date(y, m - 1, d).getDay()
 }
 
-// Cerrar el día completo aquí es válido tanto para el centro como para una
-// empleada: representa que ese día su turno cambia (p.ej. intercambia el día
-// libre de la semana), no que esté ausente. Una ausencia real (vacaciones o
-// asuntos propios, con saldo) se gestiona siempre desde Vacaciones — nunca
-// desde aquí, para no descontar saldo por algo que no lo es.
+// Resuelve qué mostrar en el formulario para una fecha: la excepción ya
+// guardada si existe (para editarla en vez de pisarla a ciegas), o si no, el
+// horario semanal normal de ese día de la semana (para partir de lo real).
+// Función pura para poder usarla tanto en la carga inicial (initialDate,
+// p.ej. al abrir desde un clic en la vista semanal) como al cambiar de fecha
+// a mano.
+function resolveDateState(
+  date: string,
+  scope: Scope,
+  rows: OverrideRow[],
+  clinicWeekly: WeeklyDay[],
+  workerWeekly: WeeklyDay[],
+): { closed: boolean; slots: WeeklySlotInput[]; reason: string } {
+  const existing = rows.find((r) => r.date === date)
+  if (existing) {
+    return { closed: existing.closed, slots: existing.closed ? [] : existing.slots, reason: existing.reason ?? "" }
+  }
+  const dow = dayOfWeekFromDateStr(date)
+  const weekly = (scope.type === "CLINIC" ? clinicWeekly : workerWeekly).find((d) => d.dayOfWeek === dow)?.slots ?? []
+  return { closed: weekly.length === 0, slots: weekly, reason: "" }
+}
+
+// Cerrar el día completo aquí (switch "cambio de turno") es válido tanto
+// para el centro como para una empleada: representa que ese día su turno
+// cambia (p.ej. intercambia el día libre de la semana), no que esté
+// ausente. Una ausencia real (vacaciones o asuntos propios, con saldo) tiene
+// su propia sección en este mismo panel — nunca se mezcla con lo anterior,
+// para no descontar saldo por algo que no lo es.
 export function OverridesPanel({
   scope,
   clinicWeekly,
   workerWeekly,
   clinicOverrides,
   workerOverrides,
-  onGoToVacations,
+  holidays,
+  leaves,
+  initialDate,
+  onClose,
 }: {
   scope: Scope
   clinicWeekly: WeeklyDay[]
   workerWeekly: WeeklyDay[]
   clinicOverrides: OverrideRow[]
   workerOverrides: OverrideRow[]
-  onGoToVacations: () => void
+  holidays: HolidayRow[]
+  leaves: LeaveRow[]
+  initialDate?: string
+  onClose?: () => void
 }) {
   const router = useRouter()
-  const [date, setDate] = useState("")
-  const [closed, setClosed] = useState(scope.type === "CLINIC")
-  const [slots, setSlots] = useState<WeeklySlotInput[]>(scope.type === "CLINIC" ? [] : [emptySlot()])
-  const [reason, setReason] = useState("")
-  const [loading, setLoading] = useState(false)
-  const [prefilled, setPrefilled] = useState(false)
-  const hasOverlap = !closed && overlappingIndices(slots).size > 0
 
   const rows = (scope.type === "CLINIC" ? clinicOverrides : workerOverrides.filter((o) => o.workerId === scope.workerId))
     .slice()
     .sort((a, b) => a.date.localeCompare(b.date))
 
-  // Al elegir una fecha, carga lo que ya hay ese día: la excepción existente
-  // si ya se había guardado una (para editarla en vez de pisarla a ciegas), o
-  // si no, el horario semanal normal de ese día de la semana (para partir de
-  // lo real y solo tocar lo que cambia, no de una franja genérica).
+  const initialResolved = initialDate ? resolveDateState(initialDate, scope, rows, clinicWeekly, workerWeekly) : null
+
+  const [date, setDate] = useState(initialDate ?? "")
+  const [closed, setClosed] = useState(initialResolved ? initialResolved.closed : scope.type === "CLINIC")
+  const [slots, setSlots] = useState<WeeklySlotInput[]>(
+    initialResolved ? initialResolved.slots : scope.type === "CLINIC" ? [] : [emptySlot()],
+  )
+  const [reason, setReason] = useState(initialResolved ? initialResolved.reason : "")
+  const [loading, setLoading] = useState(false)
+  const [prefilled, setPrefilled] = useState(!!initialDate)
+  const [holidayName, setHolidayName] = useState("")
+  const [holidayLoading, setHolidayLoading] = useState(false)
+  const [leaveLoading, setLeaveLoading] = useState(false)
+  const hasOverlap = !closed && overlappingIndices(slots).size > 0
+
+  const existingLeave = scope.type === "WORKER" && date ? leaves.find((l) => l.workerId === scope.workerId && l.date === date) : undefined
+  const existingHoliday = scope.type === "CLINIC" && date ? holidays.find((h) => h.date === date) : undefined
+
   function handleDateChange(newDate: string) {
     setDate(newDate)
     setPrefilled(false)
+    setHolidayName("")
     if (!newDate) return
-    const existing = rows.find((r) => r.date === newDate)
-    if (existing) {
-      setClosed(existing.closed)
-      setSlots(existing.closed ? [] : existing.slots)
-      setReason(existing.reason ?? "")
-      setPrefilled(true)
-      return
-    }
-    const dow = dayOfWeekFromDateStr(newDate)
-    const weekly = (scope.type === "CLINIC" ? clinicWeekly : workerWeekly).find((d) => d.dayOfWeek === dow)?.slots ?? []
-    setClosed(weekly.length === 0)
-    setSlots(weekly)
-    setReason("")
+    const resolved = resolveDateState(newDate, scope, rows, clinicWeekly, workerWeekly)
+    setClosed(resolved.closed)
+    setSlots(resolved.slots)
+    setReason(resolved.reason)
     setPrefilled(true)
   }
 
@@ -347,20 +378,69 @@ export function OverridesPanel({
     setLoading(false)
     if (res.ok) {
       toast.success("Excepción guardada.")
-      setDate("")
-      setClosed(scope.type === "CLINIC")
-      setSlots(scope.type === "CLINIC" ? [] : [emptySlot()])
-      setReason("")
+      if (onClose) {
+        onClose()
+      } else {
+        setDate("")
+        setClosed(scope.type === "CLINIC")
+        setSlots(scope.type === "CLINIC" ? [] : [emptySlot()])
+        setReason("")
+      }
       router.refresh()
     } else {
       toast.error(res.error ?? "Error al guardar.")
     }
   }
 
-  async function handleDelete(row: OverrideRow) {
-    const res = row.workerId ? await deleteWorkerScheduleOverride(row.id) : await deleteClinicScheduleOverride(row.id)
+  async function handleAssignLeave(type: "VACATION" | "PERSONAL") {
+    if (scope.type !== "WORKER" || !date) return
+    setLeaveLoading(true)
+    const res = await addWorkerLeaveRange(scope.workerId, date, date, type, null)
+    setLeaveLoading(false)
     if (res.ok) {
-      toast.success("Excepción eliminada.")
+      toast.success("Día libre asignado.")
+      onClose?.()
+      router.refresh()
+    } else toast.error(res.error ?? "Error al guardar.")
+  }
+
+  async function handleRemoveLeave() {
+    if (!existingLeave) return
+    setLeaveLoading(true)
+    const res = await deleteWorkerLeave(existingLeave.id)
+    setLeaveLoading(false)
+    if (res.ok) {
+      toast.success("Día libre eliminado.")
+      router.refresh()
+    } else toast.error(res.error ?? "Error")
+  }
+
+  async function handleMarkHoliday() {
+    if (scope.type !== "CLINIC" || !date || !holidayName.trim()) {
+      toast.error("Indica el nombre del festivo.")
+      return
+    }
+    setHolidayLoading(true)
+    const fd = new FormData()
+    fd.set("date", date)
+    fd.set("name", holidayName.trim())
+    fd.set("scope", "LOCAL")
+    const res = await saveHoliday(null, fd)
+    setHolidayLoading(false)
+    if (res.ok) {
+      toast.success("Festivo guardado.")
+      setHolidayName("")
+      router.refresh()
+    } else toast.error(res.error ?? "Error al guardar.")
+  }
+
+  async function handleRemoveHoliday() {
+    if (!existingHoliday) return
+    setHolidayLoading(true)
+    const res = await deleteHoliday(existingHoliday.id)
+    setHolidayLoading(false)
+    if (res.ok) {
+      toast.success("Festivo eliminado.")
       router.refresh()
     } else toast.error(res.error ?? "Error")
   }
@@ -368,15 +448,29 @@ export function OverridesPanel({
   return (
     <div className="min-w-0 flex-1 space-y-6">
       <Card className="overflow-hidden p-0">
-        <div className={cn("px-6 py-5", scope.type === "CLINIC" ? "bg-accent" : "border-b")}>
-          <CardTitle className={cn(scope.type === "CLINIC" && "text-accent-foreground")}>
-            Nueva excepción · {scope.type === "CLINIC" ? "Centro" : scope.workerName}
-          </CardTitle>
-          <CardDescription className={cn("mt-1", scope.type === "CLINIC" && "text-accent-foreground/70")}>
-            {scope.type === "CLINIC"
-              ? "Sobrescribe el horario del centro un día concreto, sin alterar el horario semanal por defecto."
-              : "Cambia las franjas de esta empleada un día concreto, sin alterar su horario semanal por defecto."}
-          </CardDescription>
+        <div className={cn("flex items-start justify-between gap-3 px-6 py-5", scope.type === "CLINIC" ? "bg-accent" : "border-b")}>
+          <div>
+            <CardTitle className={cn(scope.type === "CLINIC" && "text-accent-foreground")}>
+              Nueva excepción · {scope.type === "CLINIC" ? "Centro" : scope.workerName}
+            </CardTitle>
+            <CardDescription className={cn("mt-1", scope.type === "CLINIC" && "text-accent-foreground/70")}>
+              {scope.type === "CLINIC"
+                ? "Sobrescribe el horario del centro un día concreto, sin alterar el horario semanal por defecto."
+                : "Cambia las franjas de esta empleada un día concreto, sin alterar su horario semanal por defecto."}
+            </CardDescription>
+          </div>
+          {onClose && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className={cn("shrink-0", scope.type === "CLINIC" && "text-accent-foreground hover:bg-accent-foreground/10")}
+              onClick={onClose}
+              aria-label="Cerrar panel"
+            >
+              <X className="h-4 w-4" />
+            </Button>
+          )}
         </div>
         <CardContent className="space-y-4 py-6">
           <div className="max-w-xs space-y-2">
@@ -391,97 +485,196 @@ export function OverridesPanel({
             )}
           </div>
 
-          <div className="flex items-center justify-between rounded-lg border p-3">
-            <div>
-              <Label>{scope.type === "CLINIC" ? "Centro cerrado ese día" : "No trabaja ese día"}</Label>
-              <p className="text-xs text-muted-foreground">
-                {scope.type === "CLINIC"
-                  ? "Cierre completo (festivo, evento, etc)."
-                  : "Cambio de turno (p.ej. cambia qué día libra esa semana), no una ausencia."}
-              </p>
-            </div>
-            <Switch checked={closed} onCheckedChange={(v) => { setClosed(v); if (v) setSlots([]) }} />
-          </div>
-
-          {scope.type === "WORKER" && (
-            <p className="text-xs text-muted-foreground">
-              ¿Es una ausencia real (vacaciones o asuntos propios)? Eso descuenta saldo, así que usa{" "}
-              <button type="button" onClick={onGoToVacations} className="font-medium text-primary hover:underline">
-                Vacaciones
-              </button>{" "}
-              en vez de esto.
-            </p>
-          )}
-
-          {!closed && (
-            <div className="space-y-2">
-              <Label>Horario ese día</Label>
-              {slots.length === 0 ? (
-                <Button type="button" variant="outline" size="sm" onClick={() => setSlots([emptySlot()])}>
-                  <Plus className="mr-1 h-3 w-3" /> Añadir franja
-                </Button>
+          {scope.type === "CLINIC" ? (
+            <div className="space-y-3 rounded-lg border p-3">
+              <div className="flex items-center justify-between gap-2">
+                <div>
+                  <Label>Festivo</Label>
+                  <p className="text-xs text-muted-foreground">Cierra el centro y a todas las empleadas ese día.</p>
+                </div>
+                {existingHoliday && (
+                  <Button type="button" variant="outline" size="sm" disabled={holidayLoading} onClick={handleRemoveHoliday}>
+                    Quitar festivo
+                  </Button>
+                )}
+              </div>
+              {existingHoliday ? (
+                <p className="text-sm font-medium">{existingHoliday.name}</p>
+              ) : date ? (
+                <div className="flex gap-2">
+                  <Input
+                    placeholder="Ej. Navidad, cierre por evento…"
+                    value={holidayName}
+                    onChange={(e) => setHolidayName(e.target.value)}
+                  />
+                  <Button type="button" variant="outline" size="sm" disabled={holidayLoading || !holidayName.trim()} onClick={handleMarkHoliday}>
+                    Marcar
+                  </Button>
+                </div>
               ) : (
-                <SlotRows slots={slots} onChange={setSlots} />
+                <p className="text-xs text-muted-foreground">Elige una fecha para poder marcarla como festivo.</p>
+              )}
+            </div>
+          ) : (
+            <div className="space-y-3 rounded-lg border p-3">
+              <div>
+                <Label>Ausencia (vacaciones / asuntos propios)</Label>
+                <p className="text-xs text-muted-foreground">
+                  Descuenta del saldo anual de la empleada — usa esto para un día libre real, no el cambio de turno de abajo.
+                </p>
+              </div>
+              {existingLeave ? (
+                <div className="flex items-center justify-between gap-2">
+                  <Badge variant="secondary">{existingLeave.type === "VACATION" ? "Vacaciones" : "Asuntos propios"}</Badge>
+                  <Button type="button" variant="outline" size="sm" disabled={leaveLoading} onClick={handleRemoveLeave}>
+                    Quitar
+                  </Button>
+                </div>
+              ) : date ? (
+                <div className="flex gap-2">
+                  <Button type="button" variant="outline" size="sm" className="flex-1" disabled={leaveLoading} onClick={() => handleAssignLeave("VACATION")}>
+                    Vacaciones
+                  </Button>
+                  <Button type="button" variant="outline" size="sm" className="flex-1" disabled={leaveLoading} onClick={() => handleAssignLeave("PERSONAL")}>
+                    Asuntos propios
+                  </Button>
+                </div>
+              ) : (
+                <p className="text-xs text-muted-foreground">Elige una fecha para asignar un día libre.</p>
               )}
             </div>
           )}
 
-          <div className="space-y-2">
-            <Label>Motivo (opcional)</Label>
-            <Input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Ej. cierre anticipado, cita médica…" />
-          </div>
+          {scope.type === "WORKER" && existingLeave ? (
+            <p className="text-xs text-muted-foreground">
+              Este día ya está marcado como {existingLeave.type === "VACATION" ? "vacaciones" : "asuntos propios"}. Quítalo
+              arriba para poder cambiar sus franjas.
+            </p>
+          ) : (
+            <>
+              <div className="flex items-center justify-between rounded-lg border p-3">
+                <div>
+                  <Label>{scope.type === "CLINIC" ? "Centro cerrado ese día" : "No trabaja ese día"}</Label>
+                  <p className="text-xs text-muted-foreground">
+                    {scope.type === "CLINIC"
+                      ? "Cierre completo (festivo, evento, etc)."
+                      : "Cambio de turno (p.ej. cambia qué día libra esa semana), no una ausencia."}
+                  </p>
+                </div>
+                <Switch checked={closed} onCheckedChange={(v) => { setClosed(v); if (v) setSlots([]) }} />
+              </div>
 
-          <div className="flex items-center justify-end gap-3">
-            {hasOverlap && (
-              <p className="text-xs text-destructive">Corrige las franjas solapadas antes de guardar.</p>
-            )}
-            <Button onClick={handleSave} disabled={loading || hasOverlap}>
-              {loading ? "Guardando…" : "Guardar excepción"}
-            </Button>
-          </div>
+              {!closed && (
+                <div className="space-y-2">
+                  <Label>Horario ese día</Label>
+                  {slots.length === 0 ? (
+                    <Button type="button" variant="outline" size="sm" onClick={() => setSlots([emptySlot()])}>
+                      <Plus className="mr-1 h-3 w-3" /> Añadir franja
+                    </Button>
+                  ) : (
+                    <SlotRows slots={slots} onChange={setSlots} />
+                  )}
+                </div>
+              )}
+
+              <div className="space-y-2">
+                <Label>Motivo (opcional)</Label>
+                <Input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Ej. cierre anticipado, cita médica…" />
+              </div>
+
+              <div className="flex items-center justify-end gap-3">
+                {hasOverlap && (
+                  <p className="text-xs text-destructive">Corrige las franjas solapadas antes de guardar.</p>
+                )}
+                <Button onClick={handleSave} disabled={loading || hasOverlap}>
+                  {loading ? "Guardando…" : "Guardar excepción"}
+                </Button>
+              </div>
+            </>
+          )}
         </CardContent>
       </Card>
-
-      <Card className="overflow-hidden p-0">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Fecha</TableHead>
-              <TableHead>Horario</TableHead>
-              <TableHead>Motivo</TableHead>
-              <TableHead className="text-right">Eliminar</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {rows.map((r) => (
-              <TableRow key={r.id}>
-                <TableCell>{r.date}</TableCell>
-                <TableCell>
-                  {r.closed ? (
-                    <Badge variant="outline" className="text-muted-foreground">Cerrado</Badge>
-                  ) : (
-                    r.slots.map((s) => `${s.startTime}–${s.endTime}`).join(", ")
-                  )}
-                </TableCell>
-                <TableCell className="text-muted-foreground">{r.reason ?? "—"}</TableCell>
-                <TableCell className="text-right">
-                  <Button variant="ghost" size="icon" onClick={() => handleDelete(r)}>
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
-                </TableCell>
-              </TableRow>
-            ))}
-            {rows.length === 0 && (
-              <TableRow>
-                <TableCell colSpan={4} className="py-8 text-center text-muted-foreground">
-                  Sin excepciones próximas.
-                </TableCell>
-              </TableRow>
-            )}
-          </TableBody>
-        </Table>
-      </Card>
     </div>
+  )
+}
+
+// Historial de próximas excepciones (centro + todas las empleadas juntas),
+// para ver debajo de la cuadrícula semanal en vez de metido en el panel
+// lateral, que queda demasiado estrecho para una tabla. Clic en una fila
+// abre esa fecha/ámbito en el panel para editarla.
+export function OverridesHistoryTable({
+  clinicOverrides,
+  workerOverrides,
+  onEdit,
+}: {
+  clinicOverrides: OverrideRow[]
+  workerOverrides: OverrideRow[]
+  onEdit: (scope: Scope, date: string) => void
+}) {
+  const router = useRouter()
+  const rows = [...clinicOverrides, ...workerOverrides].sort((a, b) => a.date.localeCompare(b.date))
+
+  async function handleDelete(row: OverrideRow, e: React.MouseEvent) {
+    e.stopPropagation()
+    const res = row.workerId ? await deleteWorkerScheduleOverride(row.id) : await deleteClinicScheduleOverride(row.id)
+    if (res.ok) {
+      toast.success("Excepción eliminada.")
+      router.refresh()
+    } else toast.error(res.error ?? "Error")
+  }
+
+  return (
+    <Card className="overflow-hidden p-0">
+      <div className="border-b px-4 py-3">
+        <p className="text-sm font-medium">Próximas excepciones</p>
+        <p className="text-xs text-muted-foreground">Centro y empleadas juntas. Clic en una fila para editarla.</p>
+      </div>
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Fecha</TableHead>
+            <TableHead>Ámbito</TableHead>
+            <TableHead>Horario</TableHead>
+            <TableHead>Motivo</TableHead>
+            <TableHead className="text-right">Eliminar</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {rows.map((r) => (
+            <TableRow
+              key={r.id}
+              className="cursor-pointer"
+              onClick={() =>
+                onEdit(r.workerId ? { type: "WORKER", workerId: r.workerId, workerName: r.workerName! } : { type: "CLINIC" }, r.date)
+              }
+            >
+              <TableCell>{r.date}</TableCell>
+              <TableCell>{r.workerId ? r.workerName : "Centro"}</TableCell>
+              <TableCell>
+                {r.closed ? (
+                  <Badge variant="outline" className="text-muted-foreground">Cerrado</Badge>
+                ) : (
+                  r.slots.map((s) => `${s.startTime}–${s.endTime}`).join(", ")
+                )}
+              </TableCell>
+              <TableCell className="text-muted-foreground">{r.reason ?? "—"}</TableCell>
+              <TableCell className="text-right">
+                <Button variant="ghost" size="icon" onClick={(e) => handleDelete(r, e)}>
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              </TableCell>
+            </TableRow>
+          ))}
+          {rows.length === 0 && (
+            <TableRow>
+              <TableCell colSpan={5} className="py-8 text-center text-muted-foreground">
+                Sin excepciones próximas.
+              </TableCell>
+            </TableRow>
+          )}
+        </TableBody>
+      </Table>
+    </Card>
   )
 }
 

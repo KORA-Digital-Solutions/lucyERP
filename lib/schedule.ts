@@ -118,3 +118,60 @@ export function isWithinRanges(ranges: TimeRange[], startAt: Date, endAt: Date):
   const endMin = endAt.getHours() * 60 + endAt.getMinutes()
   return ranges.some((r) => startMin >= timeToMinutes(r.startTime) && endMin <= timeToMinutes(r.endTime))
 }
+
+// ---------------------------------------------------------------------------
+// Vista semanal (Horarios → Horario semanal): igual que arriba pero para un
+// rango de fechas de golpe, añadiendo el MOTIVO del cierre (festivo/vacaciones/
+// asuntos propios) que getEffectiveClinicHours/getEffectiveWorkerHours no
+// devuelven, para poder etiquetar la celda en vez de dejarla en blanco.
+// ---------------------------------------------------------------------------
+
+export interface ClinicDayCell {
+  date: string
+  ranges: TimeRange[]
+  closedReason: "HOLIDAY" | null
+  holidayName: string | null
+}
+
+export interface WorkerDayCell {
+  date: string
+  ranges: TimeRange[]
+  closedReason: "VACATION" | "PERSONAL" | null
+}
+
+export async function getClinicWeekCells(clinicId: string, dates: string[]): Promise<ClinicDayCell[]> {
+  const holidays = await prisma.holiday.findMany({ where: { clinicId, date: { in: dates } } })
+  const holidayByDate = new Map(holidays.map((h) => [h.date, h.name]))
+  return Promise.all(
+    dates.map(async (date) => {
+      const ranges = await getEffectiveClinicHours(clinicId, date)
+      const holidayName = holidayByDate.get(date) ?? null
+      return {
+        date,
+        ranges,
+        closedReason: ranges.length === 0 && holidayName ? ("HOLIDAY" as const) : null,
+        holidayName,
+      }
+    }),
+  )
+}
+
+// Nota: las franjas mostradas son la INTERSECCIÓN con el centro (no solo su
+// horario individual) — si el centro está cerrado (festivo, excepción,
+// domingo…) nadie puede trabajar ese día, así que ninguna empleada debe
+// aparecer disponible aunque su horario semanal diga lo contrario.
+export async function getWorkerWeekCells(clinicId: string, workerId: string, dates: string[]): Promise<WorkerDayCell[]> {
+  const leaves = await prisma.workerLeave.findMany({ where: { workerId, date: { in: dates } } })
+  const leaveByDate = new Map(leaves.map((l) => [l.date, l.type]))
+  return Promise.all(
+    dates.map(async (date) => {
+      const ranges = await getEffectiveWorkingHours(clinicId, workerId, date)
+      const leaveType = leaveByDate.get(date)
+      return {
+        date,
+        ranges,
+        closedReason: ranges.length === 0 && (leaveType === "VACATION" || leaveType === "PERSONAL") ? leaveType : null,
+      }
+    }),
+  )
+}

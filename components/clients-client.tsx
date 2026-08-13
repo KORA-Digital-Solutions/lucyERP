@@ -6,7 +6,7 @@ import { toast } from "sonner"
 import {
   Plus, Search, Pencil, Trash2, Check, X, UserCheck, UserX,
   AlertTriangle, FileText, Wallet, ArrowUpCircle, ArrowDownCircle,
-  ShoppingCart, Gift, ArrowLeft, TrendingUp,
+  ShoppingCart, Gift, ArrowLeft, TrendingUp, Bell, CheckCircle2,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
@@ -24,7 +24,10 @@ import {
   AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { cn } from "@/lib/utils"
-import { saveCustomer, deleteCustomer, getClientProfile } from "@/lib/actions"
+import {
+  saveCustomer, deleteCustomer, getClientProfile,
+  getCustomerReminders, createCustomerReminder, completeCustomerReminder,
+} from "@/lib/actions"
 import { isValidPhone, normalizeSearch } from "@/lib/format"
 
 export interface ClientRow {
@@ -74,8 +77,9 @@ const MOV_META: Record<string, { label: string; sign: string; cls: string }> = {
 /* ─── Profile fullscreen view ────────────────────────────────────────────── */
 
 type ProfileData = Awaited<ReturnType<typeof getClientProfile>>
+type ReminderData = Awaited<ReturnType<typeof getCustomerReminders>>
 
-type ProfileTab = "resumen" | "citas" | "progresion" | "finanzas"
+type ProfileTab = "resumen" | "citas" | "recordatorios" | "progresion" | "finanzas"
 
 const STATUS_LABEL: Record<string, string> = { DONE: "Realizada", CONFIRMED: "Confirmada", PENDING: "Pendiente", CANCELLED: "Cancelada" }
 const STATUS_CLS: Record<string, string> = { DONE: "text-green-700", CONFIRMED: "text-blue-700", PENDING: "text-orange-600", CANCELLED: "text-muted-foreground" }
@@ -84,10 +88,58 @@ function ClientProfileView({ row, onBack, onEdit }: { row: ClientRow; onBack: ()
   const [data, setData] = useState<ProfileData | null>(null)
   const [loading, setLoading] = useState(true)
   const [tab, setTab] = useState<ProfileTab>("resumen")
+  const [reminders, setReminders] = useState<ReminderData>([])
+  const [remindersLoading, setRemindersLoading] = useState(true)
+  const [newTitle, setNewTitle] = useState("")
+  const [newDueDate, setNewDueDate] = useState("")
+  const [newAlertDays, setNewAlertDays] = useState("7")
+  const [savingReminder, setSavingReminder] = useState(false)
+  const [completingId, setCompletingId] = useState<string | null>(null)
 
   useEffect(() => {
     getClientProfile(row.id).then((d) => { setData(d); setLoading(false) })
   }, [row.id])
+
+  function reloadReminders() {
+    setRemindersLoading(true)
+    getCustomerReminders(row.id).then((rs) => { setReminders(rs); setRemindersLoading(false) })
+  }
+
+  useEffect(() => { reloadReminders() }, [row.id])
+
+  async function addReminder(e: React.FormEvent) {
+    e.preventDefault()
+    if (!newTitle.trim() || !newDueDate) {
+      toast.error("Escribe el recordatorio y la fecha.")
+      return
+    }
+    const fd = new FormData()
+    fd.set("title", newTitle.trim())
+    fd.set("dueDate", newDueDate)
+    fd.set("alertDaysBefore", newAlertDays)
+    setSavingReminder(true)
+    const res = await createCustomerReminder(row.id, fd)
+    setSavingReminder(false)
+    if (res.ok) {
+      toast.success("Recordatorio creado.")
+      setNewTitle(""); setNewDueDate(""); setNewAlertDays("7")
+      reloadReminders()
+    } else {
+      toast.error(res.error ?? "Error al crear el recordatorio.")
+    }
+  }
+
+  async function markComplete(id: string) {
+    setCompletingId(id)
+    const res = await completeCustomerReminder(id)
+    setCompletingId(null)
+    if (res.ok) {
+      toast.success("Recordatorio completado.")
+      reloadReminders()
+    } else {
+      toast.error(res.error ?? "Error al completar el recordatorio.")
+    }
+  }
 
   const movements = data?.movements ?? []
   const sales = data?.recentSales ?? []
@@ -97,12 +149,15 @@ function ClientProfileView({ row, onBack, onEdit }: { row: ClientRow; onBack: ()
     ? Math.floor((Date.now() - new Date(row.birthDate).getTime()) / (365.25 * 24 * 3600 * 1000))
     : null
   const fullLastName = [row.lastName, row.lastName2].filter(Boolean).join(" ")
+  const pendingReminders = reminders.filter((r) => !r.completedAt)
+  const completedReminders = reminders.filter((r) => r.completedAt)
 
   const TABS: { key: ProfileTab; label: string }[] = [
-    { key: "resumen",    label: "Resumen" },
-    { key: "citas",      label: `Citas${appointments.length ? ` (${appointments.length})` : ""}` },
-    { key: "progresion", label: "Progresión" },
-    { key: "finanzas",   label: "Finanzas" },
+    { key: "resumen",       label: "Resumen" },
+    { key: "citas",         label: `Citas${appointments.length ? ` (${appointments.length})` : ""}` },
+    { key: "recordatorios", label: `Recordatorios${pendingReminders.length ? ` (${pendingReminders.length})` : ""}` },
+    { key: "progresion",    label: "Progresión" },
+    { key: "finanzas",      label: "Finanzas" },
   ]
 
   return (
@@ -239,6 +294,104 @@ function ClientProfileView({ row, onBack, onEdit }: { row: ClientRow; onBack: ()
             </div>
           )}
 
+          {/* ── Recordatorios ── */}
+          {tab === "recordatorios" && (
+            <div className="max-w-xl space-y-6 text-sm">
+              <form onSubmit={addReminder} className="rounded-xl border p-4 space-y-3">
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Nuevo recordatorio</p>
+                <div className="space-y-1.5">
+                  <Label htmlFor="reminder-title">Nota / recordatorio</Label>
+                  <Textarea
+                    id="reminder-title"
+                    placeholder="Ej. Se hizo un láser, cita de seguimiento en 6 meses"
+                    value={newTitle}
+                    onChange={(e) => setNewTitle(e.target.value)}
+                    rows={2}
+                  />
+                </div>
+                <div className="flex gap-3">
+                  <div className="flex-1 space-y-1.5">
+                    <Label htmlFor="reminder-due">Fecha del recordatorio</Label>
+                    <Input
+                      id="reminder-due"
+                      type="date"
+                      value={newDueDate}
+                      onChange={(e) => setNewDueDate(e.target.value)}
+                    />
+                  </div>
+                  <div className="w-40 space-y-1.5">
+                    <Label htmlFor="reminder-days">Avisar con (días)</Label>
+                    <Input
+                      id="reminder-days"
+                      type="number"
+                      min={0}
+                      value={newAlertDays}
+                      onChange={(e) => setNewAlertDays(e.target.value)}
+                    />
+                  </div>
+                </div>
+                <Button type="submit" size="sm" disabled={savingReminder} className="gap-1.5">
+                  <Plus className="h-4 w-4" /> Añadir recordatorio
+                </Button>
+              </form>
+
+              <div className="space-y-2">
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Pendientes</p>
+                {remindersLoading ? (
+                  <p className="text-xs text-muted-foreground">Cargando…</p>
+                ) : pendingReminders.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">Sin recordatorios pendientes.</p>
+                ) : pendingReminders.map((r) => (
+                  <div key={r.id} className="flex items-start justify-between gap-3 rounded-xl border px-4 py-3">
+                    <div className="flex items-start gap-2 min-w-0">
+                      <Bell className="h-4 w-4 shrink-0 mt-0.5 text-blue-500" />
+                      <div className="min-w-0">
+                        <p className="font-medium">{r.title}</p>
+                        <p className="text-xs text-muted-foreground">
+                          Vence el {new Date(r.dueDate).toLocaleDateString("es-ES", { day: "2-digit", month: "long", year: "numeric" })}
+                          {" · "}avisa {r.alertDaysBefore} días antes
+                        </p>
+                      </div>
+                    </div>
+                    <Button
+                      variant="ghost" size="sm" className="shrink-0 gap-1"
+                      disabled={completingId === r.id}
+                      onClick={() => markComplete(r.id)}
+                    >
+                      <CheckCircle2 className="h-4 w-4" /> Completar
+                    </Button>
+                  </div>
+                ))}
+              </div>
+
+              {completedReminders.length > 0 && (
+                <div className="space-y-2">
+                  <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Completados</p>
+                  {completedReminders.map((r) => (
+                    <div key={r.id} className="flex items-start gap-2 rounded-xl border px-4 py-3 opacity-60">
+                      <CheckCircle2 className="h-4 w-4 shrink-0 mt-0.5 text-green-600" />
+                      <div className="min-w-0">
+                        <p className="font-medium line-through">{r.title}</p>
+                        <p className="text-xs text-muted-foreground">
+                          Vencía el {new Date(r.dueDate).toLocaleDateString("es-ES", { day: "2-digit", month: "long", year: "numeric" })}
+                        </p>
+                        {r.completedAt && (
+                          <p className="text-xs text-muted-foreground">
+                            Completado{r.completedByUser ? ` por ${r.completedByUser.name}${r.completedByUser.lastName ? ` ${r.completedByUser.lastName}` : ""}` : ""}
+                            {" el "}
+                            {new Date(r.completedAt).toLocaleDateString("es-ES", { day: "2-digit", month: "long", year: "numeric" })}
+                            {" a las "}
+                            {new Date(r.completedAt).toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" })}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
           {/* ── Progresión ── */}
           {tab === "progresion" && (
             <div className="max-w-xl">
@@ -328,6 +481,14 @@ export function ClientsClient({ rows, inactivityWarningDays }: { rows: ClientRow
   const [loading, setLoading] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<ClientRow | null>(null)
   const [profileRow, setProfileRow] = useState<ClientRow | null>(null)
+
+  useEffect(() => {
+    const openId = new URLSearchParams(window.location.search).get("open")
+    if (!openId) return
+    const match = rows.find((r) => r.id === openId)
+    if (match) setProfileRow(match)
+    router.replace("/clients")
+  }, [rows, router])
 
   const filtered = useMemo(() => {
     const q = normalizeSearch(search)

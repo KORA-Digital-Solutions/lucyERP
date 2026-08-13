@@ -15,7 +15,10 @@ export function KPICard({ title, value, trend, trendUp, icon: Icon, className }:
   return (
     <Card className={cn("overflow-hidden", className)}>
       <CardContent className="p-6">
-        <div className="flex items-start justify-between">
+        <div className="flex items-start gap-4">
+          <div className="rounded-lg bg-accent p-2">
+            <Icon className="h-4 w-4 text-accent-foreground" />
+          </div>
           <div className="space-y-2">
             <p className="text-sm font-medium text-muted-foreground">{title}</p>
             <p className="text-3xl font-bold tracking-tight">{value}</p>
@@ -29,9 +32,6 @@ export function KPICard({ title, value, trend, trendUp, icon: Icon, className }:
                 {trend}
               </p>
             )}
-          </div>
-          <div className="rounded-lg bg-accent p-3">
-            <Icon className="h-5 w-5 text-accent-foreground" />
           </div>
         </div>
       </CardContent>

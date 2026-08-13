@@ -13,8 +13,11 @@ export default defineConfig({
   test: {
     environment: "node",
     globalSetup: "./tests/global-setup.ts",
+    // Prisma resuelve las rutas "file:" relativas al directorio de
+    // schema.prisma (prisma/), no a la raíz del repo — por eso aquí NO se
+    // repite el prefijo "prisma/".
     env: {
-      DATABASE_URL: "file:./prisma/test.db",
+      DATABASE_URL: "file:./test.db",
     },
     // Las suites comparten una única "clínica activa" (mismo supuesto que la
     // app real: getActiveClinic() coge la primera clínica). Correrlas en

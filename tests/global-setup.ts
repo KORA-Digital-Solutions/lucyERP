@@ -4,7 +4,9 @@ import path from "path"
 import { PrismaClient } from "@prisma/client"
 
 const TEST_DB_PATH = path.resolve(__dirname, "..", "prisma", "test.db")
-const TEST_DATABASE_URL = "file:./prisma/test.db"
+// Relativa a prisma/schema.prisma (así resuelve Prisma las URLs "file:"), NO
+// a la raíz del repo — de ahí que no lleve el prefijo "prisma/".
+const TEST_DATABASE_URL = "file:./test.db"
 
 // Corre una vez antes de toda la batería: recrea el esquema en una base
 // SQLite de test aislada (nunca prisma/dev.db) y siembra la única "clínica

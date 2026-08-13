@@ -3,9 +3,9 @@
 import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
-import { Pencil, Eye, X, Trash2 } from "lucide-react"
+import { Pencil, Eye, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardTitle, CardDescription } from "@/components/ui/card"
+import { Card } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
@@ -13,8 +13,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { saveLeaveBalance, addWorkerLeaveRange, deleteWorkerLeave } from "@/lib/actions"
 import { LEAVE_TYPE_META, type LeaveType } from "@/lib/enums"
-import { DateRangeFilter } from "@/components/schedules-client"
-import { cn } from "@/lib/utils"
+import { DateRangeFilter, ConfirmDeleteDialog, startOfWeek } from "@/components/schedules-client"
 
 export interface BalanceRow {
   workerId: string
@@ -248,6 +247,7 @@ export function LeaveRangeForm({
   const [type, setType] = useState<LeaveType>((editing?.type as LeaveType) ?? "VACATION")
   const [notes, setNotes] = useState(editing?.notes ?? "")
   const [loading, setLoading] = useState(false)
+  const [confirmingDelete, setConfirmingDelete] = useState(false)
 
   const meta = LEAVE_TYPE_META[type]
 
@@ -300,98 +300,108 @@ export function LeaveRangeForm({
     router.refresh()
   }
 
+  // Sin tarjeta ni cabecera propias: vive dentro del panel lateral de
+  // Horarios, que ya pone título, subtítulo y cerrar (igual que Clientes).
   return (
-    <div className="min-w-0 flex-1">
-      <Card className="overflow-hidden p-0">
-        <div className="flex items-start justify-between gap-3 border-b px-6 py-5">
-          <div>
-            <CardTitle>{editing ? "Editar ausencia" : "Asignar ausencia"}</CardTitle>
-            <CardDescription className="mt-1">
-              Un día o un rango. Bloquea la agenda esos días.
-            </CardDescription>
-          </div>
-          {onClose && (
-            <Button type="button" variant="ghost" size="icon" className="shrink-0" onClick={onClose} aria-label="Cerrar panel">
-              <X className="h-4 w-4" />
-            </Button>
-          )}
+    <div className="space-y-4">
+      <div className="space-y-2">
+        <Label>Empleada</Label>
+        <Select value={workerId} onValueChange={setWorkerId}>
+          <SelectTrigger>
+            <SelectValue placeholder="Seleccionar" />
+          </SelectTrigger>
+          <SelectContent>
+            {workers.map((w) => (
+              <SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      <div className="space-y-2">
+        <Label>Tipo de ausencia</Label>
+        <Select value={type} onValueChange={(v) => setType(v as LeaveType)}>
+          <SelectTrigger>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {(Object.keys(LEAVE_TYPE_META) as LeaveType[]).map((k) => (
+              <SelectItem key={k} value={k}>
+                <span className="flex items-center gap-2">
+                  <span className="h-2 w-2 rounded-full" style={{ backgroundColor: LEAVE_TYPE_META[k].color }} />
+                  {LEAVE_TYPE_META[k].label}
+                </span>
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <p className="text-xs text-muted-foreground">
+          {meta.quota ? "Descuenta del saldo anual." : "No descuenta saldo anual."}
+        </p>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3">
+        <div className="space-y-2">
+          <Label>Desde</Label>
+          <Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
         </div>
-        <CardContent className="space-y-4 py-6">
-          <div className="space-y-2">
-            <Label>Empleada</Label>
-            <Select value={workerId} onValueChange={setWorkerId}>
-              <SelectTrigger>
-                <SelectValue placeholder="Seleccionar" />
-              </SelectTrigger>
-              <SelectContent>
-                {workers.map((w) => (
-                  <SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+        <div className="space-y-2">
+          <Label>Hasta</Label>
+          <Input type="date" value={endDate} min={startDate || undefined} onChange={(e) => setEndDate(e.target.value)} />
+        </div>
+      </div>
+      <p className="text-xs text-muted-foreground">
+        Deja "Hasta" vacío para un solo día. Los fines de semana y festivos del rango se omiten.
+      </p>
 
-          <div className="space-y-2">
-            <Label>Tipo de ausencia</Label>
-            <Select value={type} onValueChange={(v) => setType(v as LeaveType)}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {(Object.keys(LEAVE_TYPE_META) as LeaveType[]).map((k) => (
-                  <SelectItem key={k} value={k}>
-                    <span className="flex items-center gap-2">
-                      <span className="h-2 w-2 rounded-full" style={{ backgroundColor: LEAVE_TYPE_META[k].color }} />
-                      {LEAVE_TYPE_META[k].label}
-                    </span>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <p className={cn("text-xs", meta.quota ? "text-muted-foreground" : "text-muted-foreground")}>
-              {meta.quota ? "Descuenta del saldo anual." : "No descuenta saldo anual."}
-            </p>
-          </div>
+      <div className="space-y-2">
+        <Label>Notas (opcional)</Label>
+        <Input value={notes} onChange={(e) => setNotes(e.target.value)} />
+      </div>
 
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-2">
-              <Label>Desde</Label>
-              <Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
-            </div>
-            <div className="space-y-2">
-              <Label>Hasta</Label>
-              <Input type="date" value={endDate} min={startDate || undefined} onChange={(e) => setEndDate(e.target.value)} />
-            </div>
-          </div>
-          <p className="text-xs text-muted-foreground">
-            Deja "Hasta" vacío para un solo día. Los fines de semana y festivos del rango se omiten.
-          </p>
+      <div className="flex items-center justify-between gap-2 border-t pt-4">
+        {editing ? (
+          <Button
+            type="button"
+            variant="outline"
+            className="text-destructive hover:text-destructive"
+            disabled={loading}
+            onClick={() => setConfirmingDelete(true)}
+          >
+            <Trash2 className="mr-2 h-4 w-4" /> Eliminar
+          </Button>
+        ) : (
+          <span />
+        )}
+        <Button onClick={handleSubmit} disabled={loading}>
+          {loading ? "Guardando…" : editing ? "Guardar" : "Asignar"}
+        </Button>
+      </div>
 
-          <div className="space-y-2">
-            <Label>Notas (opcional)</Label>
-            <Input value={notes} onChange={(e) => setNotes(e.target.value)} />
-          </div>
-
-          <div className="flex items-center justify-between gap-2">
-            {editing ? (
-              <Button
-                type="button"
-                variant="outline"
-                className="text-destructive hover:text-destructive"
-                disabled={loading}
-                onClick={handleDelete}
-              >
-                <Trash2 className="mr-2 h-4 w-4" /> Eliminar
-              </Button>
-            ) : (
-              <span />
-            )}
-            <Button onClick={handleSubmit} disabled={loading}>
-              {loading ? "Guardando…" : editing ? "Guardar" : "Asignar"}
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
+      {editing && (
+        <ConfirmDeleteDialog
+          open={confirmingDelete}
+          onOpenChange={setConfirmingDelete}
+          title="¿Eliminar la ausencia?"
+          description={
+            <>
+              Se eliminarán los {editing.days} día(s) de{" "}
+              <strong>{LEAVE_TYPE_META[editing.type as LeaveType]?.label ?? editing.type}</strong> de{" "}
+              <strong>{editing.workerName}</strong>
+              {editing.startDate === editing.endDate
+                ? ` del ${editing.startDate}`
+                : ` del ${editing.startDate} al ${editing.endDate}`}
+              {LEAVE_TYPE_META[editing.type as LeaveType]?.quota ? ", y volverán a su saldo anual" : ""}. Esta acción no
+              se puede deshacer.
+            </>
+          }
+          confirmLabel="Eliminar ausencia"
+          onConfirm={() => {
+            setConfirmingDelete(false)
+            handleDelete()
+          }}
+        />
+      )}
     </div>
   )
 }
@@ -418,6 +428,7 @@ export function AbsencesTable({
   const [periodFilter, setPeriodFilter] = useState<"upcoming" | "past" | "all">("upcoming")
   const [fromDate, setFromDate] = useState("")
   const [toDate, setToDate] = useState("")
+  const weekStart = startOfWeek(today)
 
   const all = groupLeaves(leaves, holidayDates)
   const rows = all
@@ -425,13 +436,23 @@ export function AbsencesTable({
     .filter((g) => typeFilter === "all" || g.type === typeFilter)
     .filter((g) => {
       if (periodFilter === "all") return true
-      // "Próximas" incluye las que siguen en curso (terminan hoy o después).
-      return periodFilter === "upcoming" ? g.endDate >= today : g.endDate < today
+      // Se corta por el lunes de esta semana, no por hoy, para que lo que se
+      // acaba de asignar desde "Esta semana" siempre salga listado aquí.
+      return periodFilter === "upcoming" ? g.endDate >= weekStart : g.endDate < weekStart
     })
     // Cualquier solape con el rango filtrado cuenta, no solo las contenidas
     // enteras: una ausencia de 3 semanas debe salir al filtrar una de ellas.
     .filter((g) => (!fromDate || g.endDate >= fromDate) && (!toDate || g.startDate <= toDate))
     .sort((a, b) => (periodFilter === "past" ? b.startDate.localeCompare(a.startDate) : a.startDate.localeCompare(b.startDate)))
+
+  const hidden = all.length - rows.length
+  function clearFilters() {
+    setWorkerFilter("all")
+    setTypeFilter("all")
+    setPeriodFilter("all")
+    setFromDate("")
+    setToDate("")
+  }
 
   return (
     <Card className="overflow-hidden p-0">
@@ -441,6 +462,13 @@ export function AbsencesTable({
           <p className="text-xs text-muted-foreground">
             {rows.length} de {all.length} · consulta; para cambiarlas, ve a la semana
           </p>
+          {/* Que se filtre nunca puede ser silencioso: si no, una ausencia
+              recién asignada "desaparece" y parece que no se ha guardado. */}
+          {hidden > 0 && (
+            <button type="button" onClick={clearFilters} className="text-xs text-primary hover:underline">
+              {hidden === 1 ? "1 oculta por los filtros" : `${hidden} ocultas por los filtros`} — verlas todas
+            </button>
+          )}
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Select value={workerFilter} onValueChange={setWorkerFilter}>
@@ -466,12 +494,12 @@ export function AbsencesTable({
             </SelectContent>
           </Select>
           <Select value={periodFilter} onValueChange={(v) => setPeriodFilter(v as typeof periodFilter)}>
-            <SelectTrigger className="h-8 w-32 text-xs">
+            <SelectTrigger className="h-8 w-48 text-xs">
               <SelectValue placeholder="Periodo" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="upcoming">Próximas</SelectItem>
-              <SelectItem value="past">Pasadas</SelectItem>
+              <SelectItem value="upcoming">Esta semana y próximas</SelectItem>
+              <SelectItem value="past">Anteriores</SelectItem>
               <SelectItem value="all">Todas</SelectItem>
             </SelectContent>
           </Select>

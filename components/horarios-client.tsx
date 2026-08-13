@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
-import { ChevronLeft, ChevronRight } from "lucide-react"
+import { ChevronLeft, ChevronRight, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardTitle, CardDescription } from "@/components/ui/card"
 import { Label } from "@/components/ui/label"
@@ -166,14 +166,19 @@ export function HorariosClient({
   }
 
   return (
-    <div className="p-6 space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Horarios</h1>
-        <p className="text-muted-foreground">Horario semanal, excepciones, vacaciones y festivos.</p>
+    // Mismo esqueleto que Clientes: cabecera a todo lo ancho y, debajo, la fila
+    // contenido + panel. Así el panel lateral arranca justo bajo la cabecera y
+    // ocupa todo el alto, en vez de flotar dentro del contenido.
+    <div className="flex h-screen flex-col">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-card p-6">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">Horarios</h1>
+          <p className="text-muted-foreground">Horario semanal, excepciones, vacaciones y festivos.</p>
+        </div>
       </div>
 
-      <div className="flex gap-6">
-        <div className="min-w-0 flex-1">
+      <div className="flex flex-1 overflow-hidden">
+        <div className="min-w-0 flex-1 overflow-auto p-6">
           <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as HorariosTab)}>
             <TabsList>
               <TabsTrigger value="schedule">Esta semana</TabsTrigger>
@@ -295,12 +300,37 @@ export function HorariosClient({
           />
         )}
         {panel && (
-          <aside className="fixed inset-y-0 right-0 z-50 flex w-full max-w-md flex-col overflow-y-auto border-l bg-card shadow-xl lg:static lg:z-auto lg:w-[400px] lg:max-w-none lg:shadow-none">
+          <aside
+            className={cn(
+              "flex w-full flex-col border-l bg-card shadow-xl",
+              "fixed inset-y-0 right-0 z-50 max-w-md",
+              "lg:static lg:z-auto lg:w-[420px] lg:max-w-none lg:shadow-none",
+            )}
+          >
+            {/* Cabecera del panel con el mismo formato que Clientes: título,
+                subtítulo y cerrar. Los formularios de dentro ya no traen la
+                suya para no duplicar. */}
+            <div className="flex items-start justify-between gap-3 border-b px-5 py-4">
+              <div className="min-w-0">
+                <h2 className="truncate text-lg font-semibold">
+                  {panel.scope.type === "CLINIC" ? "Centro" : panel.scope.workerName}
+                </h2>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  {panel.mode === "override"
+                    ? "Cambios de un día concreto. El horario base semanal no se toca."
+                    : "Un día o un rango. Bloquea la agenda esos días."}
+                </p>
+              </div>
+              <Button variant="ghost" size="icon" className="shrink-0" onClick={() => setPanel(null)} aria-label="Cerrar panel">
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+
             {/* Qué se va a gestionar de ese día. Solo para empleadas: el centro
                 no tiene vacaciones ni bajas, sus días especiales son festivos
                 y se resuelven dentro del formulario de horario. */}
             {panel.scope.type === "WORKER" && (
-              <div className="grid grid-cols-2 gap-1.5 border-b px-4 py-3">
+              <div className="grid grid-cols-2 gap-1.5 border-b px-5 py-3">
                 {([
                   { value: "override", label: "Cambio de horario" },
                   { value: "leave", label: "Ausencia" },
@@ -322,32 +352,34 @@ export function HorariosClient({
               </div>
             )}
 
-            {panel.mode === "override" ? (
-              <OverridesPanel
-                key={scopeKey(panel.scope) + ":" + panel.date}
-                scope={panel.scope}
-                clinicWeekly={clinicWeekly}
-                workerWeekly={panel.scope.type === "WORKER" ? (workerWeeklyByWorker[panel.scope.workerId] ?? []) : []}
-                clinicOverrides={clinicOverrides}
-                workerOverrides={workerOverrides}
-                holidays={holidays}
-                // Del año, no solo de la semana visible: dentro del panel se
-                // puede cambiar la fecha y hay que seguir detectando ausencias.
-                leaves={yearLeaves}
-                initialDate={panel.date}
-                onClose={() => setPanel(null)}
-                onManageLeave={() => setPanelMode("leave")}
-              />
-            ) : (
-              <LeaveRangeForm
-                key={(panel.editingLeave?.ids[0] ?? "new") + ":" + panel.date}
-                workers={workers}
-                defaultWorkerId={panel.scope.type === "WORKER" ? panel.scope.workerId : undefined}
-                defaultDate={panel.date}
-                editing={panel.editingLeave}
-                onClose={() => setPanel(null)}
-              />
-            )}
+            <div className="flex-1 space-y-4 overflow-y-auto px-5 py-4">
+              {panel.mode === "override" ? (
+                <OverridesPanel
+                  key={scopeKey(panel.scope) + ":" + panel.date}
+                  scope={panel.scope}
+                  clinicWeekly={clinicWeekly}
+                  workerWeekly={panel.scope.type === "WORKER" ? (workerWeeklyByWorker[panel.scope.workerId] ?? []) : []}
+                  clinicOverrides={clinicOverrides}
+                  workerOverrides={workerOverrides}
+                  holidays={holidays}
+                  // Del año, no solo de la semana visible: dentro del panel se
+                  // puede cambiar la fecha y hay que seguir detectando ausencias.
+                  leaves={yearLeaves}
+                  initialDate={panel.date}
+                  onClose={() => setPanel(null)}
+                  onManageLeave={() => setPanelMode("leave")}
+                />
+              ) : (
+                <LeaveRangeForm
+                  key={(panel.editingLeave?.ids[0] ?? "new") + ":" + panel.date}
+                  workers={workers}
+                  defaultWorkerId={panel.scope.type === "WORKER" ? panel.scope.workerId : undefined}
+                  defaultDate={panel.date}
+                  editing={panel.editingLeave}
+                  onClose={() => setPanel(null)}
+                />
+              )}
+            </div>
           </aside>
         )}
       </div>

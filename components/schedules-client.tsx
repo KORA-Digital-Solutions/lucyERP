@@ -1,17 +1,27 @@
 "use client"
 
-import { useState } from "react"
+import { useState, type ReactNode } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
-import { Plus, Trash2, Pencil, Eye, CalendarOff, Upload, ChevronLeft, ChevronRight, X } from "lucide-react"
+import { Plus, Trash2, Eye, CalendarOff, Upload, ChevronLeft, ChevronRight, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardTitle, CardDescription } from "@/components/ui/card"
+import { Card } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import {
   saveClinicScheduleOverride,
@@ -22,8 +32,6 @@ import {
   deleteHoliday,
   copyFixedHolidaysToYear,
   bulkImportHolidays,
-  addWorkerLeaveRange,
-  deleteWorkerLeave,
   type WeeklySlotInput,
 } from "@/lib/actions"
 import { WEEKDAY_LABELS, HOLIDAY_SCOPE_META, LEAVE_TYPE_META, type HolidayScope, type LeaveType } from "@/lib/enums"
@@ -199,6 +207,46 @@ export function WeeklyScheduleEditor({
 
 /* --------------------------- ámbito: lista + detalle ----------------------- */
 
+// Confirmación de borrado, con el mismo formato que en Clientes, Usuarios,
+// Stock e Historial de citas: título, qué se pierde, Cancelar y un botón
+// destructivo. Aquí está compartida porque Horarios tiene cuatro borrados
+// (excepción, festivo desde el panel, ausencia y festivo desde su pestaña).
+export function ConfirmDeleteDialog({
+  open,
+  onOpenChange,
+  title,
+  description,
+  confirmLabel = "Eliminar",
+  onConfirm,
+}: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  title: string
+  description: ReactNode
+  confirmLabel?: string
+  onConfirm: () => void
+}) {
+  return (
+    <AlertDialog open={open} onOpenChange={onOpenChange}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{title}</AlertDialogTitle>
+          <AlertDialogDescription>{description}</AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancelar</AlertDialogCancel>
+          <AlertDialogAction
+            onClick={onConfirm}
+            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+          >
+            {confirmLabel}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  )
+}
+
 export type Scope = { type: "CLINIC" } | { type: "WORKER"; workerId: string; workerName: string }
 
 export function scopeKey(scope: Scope): string {
@@ -265,15 +313,27 @@ function dayOfWeekFromDateStr(date: string): number {
   return new Date(y, m - 1, d).getDay()
 }
 
+// Lunes de la semana que contiene `date`. Las tablas de consulta cortan por
+// aquí, y no por hoy: lo que se acaba de tocar en "Esta semana" tiene que
+// aparecer en ellas aunque sea lunes y hoy sea jueves.
+export function startOfWeek(date: string): string {
+  const [y, m, d] = date.split("-").map(Number)
+  const dt = new Date(y, m - 1, d)
+  dt.setDate(dt.getDate() + (dt.getDay() === 0 ? -6 : 1 - dt.getDay()))
+  return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}-${String(dt.getDate()).padStart(2, "0")}`
+}
+
 // Lo que puede pasar un día concreto. Son excluyentes: para un ámbito y una
 // fecha solo hay UN resultado, por eso el panel usa un único selector en vez
 // de bloques independientes con guardados distintos.
-type DayMode = "OPEN" | "CLOSED" | "HOLIDAY" | "WORK" | "OFF" | "ABSENCE"
+type DayMode = "OPEN" | "CLOSED" | "WORK" | "OFF"
 
+// Los festivos NO se crean ni se borran desde aquí: su alta, edición y baja
+// viven solo en la pestaña "Festivos". Este panel se limita a abrir o cerrar
+// una fecha concreta, y si ese día es festivo lo dice a título informativo.
 const CLINIC_MODES: { value: DayMode; label: string }[] = [
   { value: "OPEN", label: "Abierto" },
   { value: "CLOSED", label: "Cerrado" },
-  { value: "HOLIDAY", label: "Festivo" },
 ]
 // Las ausencias (vacaciones, bajas…) NO se gestionan aquí: van en la pestaña
 // "Ausencia" del propio panel, que cubre día suelto y rango. Este panel es
@@ -295,7 +355,7 @@ function resolveDateState(
   workerWeekly: WeeklyDay[],
   holidays: HolidayRow[],
   leaves: LeaveRow[],
-): { mode: DayMode; slots: WeeklySlotInput[]; reason: string; holidayName: string; leaveType: LeaveType } {
+): { mode: DayMode; slots: WeeklySlotInput[]; reason: string } {
   const dow = dayOfWeekFromDateStr(date)
   const weekly = (scope.type === "CLINIC" ? clinicWeekly : workerWeekly).find((d) => d.dayOfWeek === dow)?.slots ?? []
   const existing = rows.find((r) => r.date === date)
@@ -306,26 +366,23 @@ function resolveDateState(
         mode: existing.closed ? "OFF" : "WORK",
         slots: existing.closed ? weekly : existing.slots,
         reason: existing.reason ?? "",
-        holidayName: "",
-        leaveType: "VACATION",
       }
     }
-    return { mode: weekly.length === 0 ? "OFF" : "WORK", slots: weekly, reason: "", holidayName: "", leaveType: "VACATION" }
+    return { mode: weekly.length === 0 ? "OFF" : "WORK", slots: weekly, reason: "" }
   }
 
-  const holiday = holidays.find((h) => h.date === date)
   if (existing) {
     // Una excepción explícita manda sobre el festivo (caso "reabrir un festivo").
     return {
       mode: existing.closed ? "CLOSED" : "OPEN",
       slots: existing.closed ? weekly : existing.slots,
       reason: existing.reason ?? "",
-      holidayName: holiday?.name ?? "",
-      leaveType: "VACATION",
     }
   }
-  if (holiday) return { mode: "HOLIDAY", slots: weekly, reason: "", holidayName: holiday.name, leaveType: "VACATION" }
-  return { mode: weekly.length === 0 ? "CLOSED" : "OPEN", slots: weekly, reason: "", holidayName: "", leaveType: "VACATION" }
+  // Un festivo cierra el centro, así que la fecha abre como "Cerrado" aunque
+  // el horario base de ese día de la semana diga lo contrario.
+  if (holidays.some((h) => h.date === date)) return { mode: "CLOSED", slots: weekly, reason: "" }
+  return { mode: weekly.length === 0 ? "CLOSED" : "OPEN", slots: weekly, reason: "" }
 }
 
 // Panel de excepciones de horario de un día concreto. Un solo selector
@@ -368,9 +425,9 @@ export function OverridesPanel({
   const [mode, setMode] = useState<DayMode>(initialResolved?.mode ?? (scope.type === "CLINIC" ? "CLOSED" : "WORK"))
   const [slots, setSlots] = useState<WeeklySlotInput[]>(initialResolved?.slots ?? [emptySlot()])
   const [reason, setReason] = useState(initialResolved?.reason ?? "")
-  const [holidayName, setHolidayName] = useState(initialResolved?.holidayName ?? "")
   const [loading, setLoading] = useState(false)
   const [prefilled, setPrefilled] = useState(!!initialDate)
+  const [confirmingDelete, setConfirmingDelete] = useState(false)
 
   const modes = scope.type === "CLINIC" ? CLINIC_MODES : WORKER_MODES
   const showSlots = mode === "OPEN" || mode === "WORK"
@@ -389,7 +446,6 @@ export function OverridesPanel({
     setMode(r.mode)
     setSlots(r.slots.length > 0 ? r.slots : [emptySlot()])
     setReason(r.reason)
-    setHolidayName(r.holidayName)
     setPrefilled(true)
   }
 
@@ -406,30 +462,10 @@ export function OverridesPanel({
       toast.error("Añade al menos una franja horaria.")
       return
     }
-    if (mode === "HOLIDAY" && !holidayName.trim()) {
-      toast.error("Indica el nombre del festivo.")
-      return
-    }
-
     setLoading(true)
     try {
       let res: { ok: boolean; error?: string }
-      if (mode === "HOLIDAY") {
-        // Una excepción del centro manda sobre el festivo, así que si la hay
-        // se elimina para que el festivo sea realmente efectivo.
-        if (existingOverride) {
-          const del = await deleteClinicScheduleOverride(existingOverride.id)
-          if (!del.ok) {
-            toast.error(del.error ?? "Error al limpiar la excepción anterior.")
-            return
-          }
-        }
-        const fd = new FormData()
-        fd.set("date", date)
-        fd.set("name", holidayName.trim())
-        fd.set("scope", "LOCAL")
-        res = await saveHoliday(existingHoliday?.id ?? null, fd)
-      } else if (scope.type === "CLINIC") {
+      if (scope.type === "CLINIC") {
         const closed = mode === "CLOSED"
         res = await saveClinicScheduleOverride(date, closed, closed ? [] : slots, reason || null)
       } else {
@@ -449,17 +485,6 @@ export function OverridesPanel({
     }
   }
 
-  async function handleRemoveHoliday() {
-    if (!existingHoliday) return
-    setLoading(true)
-    const res = await deleteHoliday(existingHoliday.id)
-    setLoading(false)
-    if (res.ok) {
-      toast.success("Festivo eliminado.")
-      router.refresh()
-    } else toast.error(res.error ?? "Error")
-  }
-
   // Elimina la excepción de ese día: vuelve a mandar el horario base semanal
   // (o el festivo, si lo hay).
   async function handleDeleteOverride() {
@@ -476,66 +501,45 @@ export function OverridesPanel({
     } else toast.error(res.error ?? "Error")
   }
 
+  // Sin tarjeta ni cabecera propias: vive dentro del panel lateral de
+  // Horarios, que ya pone título, subtítulo y cerrar (igual que Clientes).
   return (
-    <div className="min-w-0 flex-1 space-y-6">
-      <Card className="overflow-hidden p-0">
-        <div className={cn("flex items-start justify-between gap-3 px-6 py-5", scope.type === "CLINIC" ? "bg-accent" : "border-b")}>
-          <div>
-            <CardTitle className={cn(scope.type === "CLINIC" && "text-accent-foreground")}>
-              {scope.type === "CLINIC" ? "Centro" : scope.workerName}
-            </CardTitle>
-            <CardDescription className={cn("mt-1", scope.type === "CLINIC" && "text-accent-foreground/70")}>
-              Cambios de un día concreto. El horario base semanal no se toca.
-            </CardDescription>
-          </div>
-          {onClose && (
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className={cn("shrink-0", scope.type === "CLINIC" && "text-accent-foreground hover:bg-accent-foreground/10")}
-              onClick={onClose}
-              aria-label="Cerrar panel"
-            >
-              <X className="h-4 w-4" />
+    <div className="space-y-4">
+      <div className="space-y-2">
+        <Label>Fecha</Label>
+        <Input type="date" value={date} onChange={(e) => handleDateChange(e.target.value)} />
+        {/* El aviso sobra cuando lo que manda ese día es una ausencia o un
+            festivo: de eso ya informan sus propios bloques, y decir "según el
+            horario base" ahí contradiría lo que muestra el selector. */}
+        {date && prefilled && !existingLeave && (existingOverride || !existingHoliday) && (
+          <p className="text-xs text-muted-foreground">
+            {existingOverride
+              ? "Ya había una excepción guardada para este día — la estás editando."
+              : `Según el horario base de los ${WEEKDAY_LABELS[dayOfWeekFromDateStr(date)].toLowerCase()}.`}
+          </p>
+        )}
+      </div>
+
+      {/* Con una ausencia ese día no hay nada que decidir aquí: la ausencia
+          manda y el resto del formulario solo confundiría (mostraría el
+          horario base como si la empleada trabajase). */}
+      {existingLeave ? (
+        <div className="space-y-3 rounded-lg border bg-muted/30 p-3">
+          <p className="text-xs text-muted-foreground">
+            Este día es{" "}
+            <span className="font-medium text-foreground">
+              {LEAVE_TYPE_META[existingLeave.type as LeaveType]?.label ?? existingLeave.type}
+            </span>
+            . Para cambiar su horario, quita antes la ausencia.
+          </p>
+          {onManageLeave && (
+            <Button type="button" variant="outline" size="sm" onClick={() => onManageLeave(existingLeave)}>
+              Ver la ausencia
             </Button>
           )}
         </div>
-        <CardContent className="space-y-4 py-6">
-          <div className="space-y-2">
-            <Label>Fecha</Label>
-            <Input type="date" value={date} onChange={(e) => handleDateChange(e.target.value)} />
-            {/* Con una ausencia ese día el aviso sobra: el bloque de abajo ya
-                explica qué pasa y que aquí no se toca. */}
-            {date && prefilled && !existingLeave && (
-              <p className="text-xs text-muted-foreground">
-                {existingOverride || existingHoliday
-                  ? "Ya había algo guardado para este día — lo estás editando."
-                  : `Según el horario base de los ${WEEKDAY_LABELS[dayOfWeekFromDateStr(date)].toLowerCase()}.`}
-              </p>
-            )}
-          </div>
-
-          {/* Con una ausencia ese día no hay nada que decidir aquí: la ausencia
-              manda y el resto del formulario solo confundiría (mostraría el
-              horario base como si la empleada trabajase). */}
-          {existingLeave ? (
-            <div className="space-y-3 rounded-lg border bg-muted/30 p-3">
-              <p className="text-xs text-muted-foreground">
-                Este día es{" "}
-                <span className="font-medium text-foreground">
-                  {LEAVE_TYPE_META[existingLeave.type as LeaveType]?.label ?? existingLeave.type}
-                </span>
-                . Para cambiar su horario, quita antes la ausencia.
-              </p>
-              {onManageLeave && (
-                <Button type="button" variant="outline" size="sm" onClick={() => onManageLeave(existingLeave)}>
-                  Ver la ausencia
-                </Button>
-              )}
-            </div>
-          ) : (
-            <>
+      ) : (
+        <>
           <div className="space-y-2">
             <Label>¿Qué pasa este día?</Label>
             <div className="grid grid-cols-2 gap-1.5">
@@ -560,21 +564,10 @@ export function OverridesPanel({
                 Cambio de turno (p.ej. cambia qué día libra esa semana), sin tocar su saldo de vacaciones.
               </p>
             )}
-            {scope.type === "CLINIC" && mode === "HOLIDAY" && (
+            {scope.type === "CLINIC" && mode === "CLOSED" && (
               <p className="text-xs text-muted-foreground">Cierra el centro y a todas las empleadas ese día.</p>
             )}
           </div>
-
-          {mode === "HOLIDAY" && (
-            <div className="space-y-2">
-              <Label>Nombre del festivo</Label>
-              <Input
-                value={holidayName}
-                onChange={(e) => setHolidayName(e.target.value)}
-                placeholder="Ej. Navidad, fiesta local…"
-              />
-            </div>
-          )}
 
           {showSlots && (
             <div className="space-y-2">
@@ -583,37 +576,35 @@ export function OverridesPanel({
             </div>
           )}
 
-          {mode !== "HOLIDAY" && (
-            <div className="space-y-2">
-              <Label>Motivo (opcional)</Label>
-              <Input
-                value={reason}
-                onChange={(e) => setReason(e.target.value)}
-                placeholder="Ej. cierre anticipado, cita médica…"
-              />
-            </div>
-          )}
+          <div className="space-y-2">
+            <Label>Motivo (opcional)</Label>
+            <Input
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              placeholder="Ej. cierre anticipado, cita médica…"
+            />
+          </div>
 
-          {scope.type === "CLINIC" && existingHoliday && mode !== "HOLIDAY" && (
+          {/* Informativo, sin acciones: los festivos se crean y se borran solo
+              en su pestaña. Aquí únicamente se abre o se cierra esta fecha. */}
+          {scope.type === "CLINIC" && existingHoliday && (
             <p className="rounded-lg border bg-muted/30 p-3 text-xs text-muted-foreground">
-              Este día es festivo ({existingHoliday.name}); al guardar se abre/cierra solo esta fecha y el festivo se
-              mantiene en el calendario.{" "}
-              <button type="button" onClick={handleRemoveHoliday} className="font-medium text-primary hover:underline">
-                Quitar festivo
-              </button>
+              Este día es festivo (<span className="font-medium text-foreground">{existingHoliday.name}</span>), así que
+              el centro cierra. Si lo abres, se abre solo esta fecha y el festivo se mantiene en el calendario. Para
+              quitarlo o cambiarlo, ve a la pestaña <span className="font-medium text-foreground">Festivos</span>.
             </p>
           )}
 
           {hasOverlap && <p className="text-xs text-destructive">Corrige las franjas solapadas antes de guardar.</p>}
 
-          <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center justify-between gap-2 border-t pt-4">
             {existingOverride ? (
               <Button
                 type="button"
                 variant="outline"
                 className="text-destructive hover:text-destructive"
                 disabled={loading}
-                onClick={handleDeleteOverride}
+                onClick={() => setConfirmingDelete(true)}
               >
                 <Trash2 className="mr-2 h-4 w-4" /> Eliminar
               </Button>
@@ -624,10 +615,26 @@ export function OverridesPanel({
               {loading ? "Guardando…" : "Guardar"}
             </Button>
           </div>
-            </>
-          )}
-        </CardContent>
-      </Card>
+        </>
+      )}
+
+      <ConfirmDeleteDialog
+        open={confirmingDelete}
+        onOpenChange={setConfirmingDelete}
+        title="¿Eliminar la excepción?"
+        description={
+          <>
+            El {date} volverá a regirse por el horario base semanal
+            {existingHoliday ? ` (o por el festivo «${existingHoliday.name}», que se mantiene)` : ""}. Esta acción no se
+            puede deshacer.
+          </>
+        }
+        confirmLabel="Eliminar excepción"
+        onConfirm={() => {
+          setConfirmingDelete(false)
+          handleDeleteOverride()
+        }}
+      />
     </div>
   )
 }
@@ -703,6 +710,7 @@ export function OverridesHistoryTable({
   const [periodFilter, setPeriodFilter] = useState<"upcoming" | "past" | "all">("upcoming")
   const [fromDate, setFromDate] = useState("")
   const [toDate, setToDate] = useState("")
+  const weekStart = startOfWeek(today)
 
   const all = [...clinicOverrides, ...workerOverrides]
   const rows = all
@@ -713,12 +721,20 @@ export function OverridesHistoryTable({
     })
     .filter((r) => {
       if (periodFilter === "all") return true
-      return periodFilter === "upcoming" ? r.date >= today : r.date < today
+      return periodFilter === "upcoming" ? r.date >= weekStart : r.date < weekStart
     })
     .filter((r) => (!fromDate || r.date >= fromDate) && (!toDate || r.date <= toDate))
-    // Próximas en orden ascendente (lo siguiente que llega, primero); pasadas
+    // Próximas en orden ascendente (lo siguiente que llega, primero); anteriores
     // en descendente (lo más reciente, primero).
     .sort((a, b) => (periodFilter === "past" ? b.date.localeCompare(a.date) : a.date.localeCompare(b.date)))
+
+  const hidden = all.length - rows.length
+  function clearFilters() {
+    setScopeFilter("all")
+    setPeriodFilter("all")
+    setFromDate("")
+    setToDate("")
+  }
 
   return (
     <Card className="overflow-hidden p-0">
@@ -728,6 +744,13 @@ export function OverridesHistoryTable({
           <p className="text-xs text-muted-foreground">
             {rows.length} de {all.length} · consulta; para cambiarlas, ve a la semana
           </p>
+          {/* Que se filtre nunca puede ser silencioso: si no, una excepción
+              recién creada "desaparece" y parece que no se ha guardado. */}
+          {hidden > 0 && (
+            <button type="button" onClick={clearFilters} className="text-xs text-primary hover:underline">
+              {hidden === 1 ? "1 oculta por los filtros" : `${hidden} ocultas por los filtros`} — verlas todas
+            </button>
+          )}
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Select value={scopeFilter} onValueChange={setScopeFilter}>
@@ -743,12 +766,12 @@ export function OverridesHistoryTable({
             </SelectContent>
           </Select>
           <Select value={periodFilter} onValueChange={(v) => setPeriodFilter(v as typeof periodFilter)}>
-            <SelectTrigger className="h-8 w-36 text-xs">
+            <SelectTrigger className="h-8 w-48 text-xs">
               <SelectValue placeholder="Periodo" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="upcoming">Próximas</SelectItem>
-              <SelectItem value="past">Pasadas</SelectItem>
+              <SelectItem value="upcoming">Esta semana y próximas</SelectItem>
+              <SelectItem value="past">Anteriores</SelectItem>
               <SelectItem value="all">Todas</SelectItem>
             </SelectContent>
           </Select>
@@ -1032,6 +1055,10 @@ export function HolidaysTab({ holidays }: { holidays: HolidayRow[] }) {
   const [year, setYear] = useState(currentYear)
   // Fecha preseleccionada al crear desde el calendario (clic en un día).
   const [createDate, setCreateDate] = useState<string | null>(null)
+  // Festivo pendiente de confirmar su borrado. Se guarda entero (y no solo el
+  // id) para poder nombrarlo en la confirmación con el diálogo de edición ya
+  // cerrado, en vez de anidar dos modales.
+  const [deleteTarget, setDeleteTarget] = useState<HolidayRow | null>(null)
 
   function openCreate(date: string | null) {
     setEditing(null)
@@ -1177,7 +1204,7 @@ export function HolidaysTab({ holidays }: { holidays: HolidayRow[] }) {
                   type="button"
                   variant="outline"
                   className="text-destructive hover:text-destructive"
-                  onClick={() => { onDelete(editing.id); setOpen(false) }}
+                  onClick={() => { setDeleteTarget(editing); setOpen(false) }}
                 >
                   <Trash2 className="mr-2 h-4 w-4" /> Eliminar
                 </Button>
@@ -1192,6 +1219,23 @@ export function HolidaysTab({ holidays }: { holidays: HolidayRow[] }) {
       </Dialog>
 
       <BulkImportDialog open={bulkOpen} onOpenChange={setBulkOpen} defaultYear={year} />
+
+      <ConfirmDeleteDialog
+        open={!!deleteTarget}
+        onOpenChange={(o) => !o && setDeleteTarget(null)}
+        title="¿Eliminar el festivo?"
+        description={
+          <>
+            Se quitará <strong>{deleteTarget?.name}</strong> del {deleteTarget?.date} del calendario. Ese día el centro
+            volverá a regirse por su horario base. Esta acción no se puede deshacer.
+          </>
+        }
+        confirmLabel="Eliminar festivo"
+        onConfirm={() => {
+          if (deleteTarget) onDelete(deleteTarget.id)
+          setDeleteTarget(null)
+        }}
+      />
     </div>
   )
 }

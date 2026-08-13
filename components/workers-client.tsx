@@ -113,205 +113,205 @@ export function WorkersClient({
   }
 
   return (
-    <div className="p-6 space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Usuarios</h1>
-        <p className="text-muted-foreground">Empleadas, accesos y roles.</p>
-      </div>
-
-      <div className="flex items-center justify-between gap-3">
-        <p className="text-sm text-muted-foreground">{rows.length} usuarios · gestiona accesos y roles</p>
+    <div>
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-card p-6">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">Usuarios</h1>
+          <p className="text-muted-foreground">{rows.length} usuarios · gestiona accesos y roles</p>
+        </div>
         <Button onClick={() => openForm(null)}>
           <Plus className="mr-2 h-4 w-4" /> Nuevo usuario
         </Button>
       </div>
 
-      <Card className="overflow-hidden p-0">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Nombre</TableHead>
-              <TableHead>Rol</TableHead>
-              <TableHead>Email</TableHead>
-              <TableHead>Teléfono</TableHead>
-              <TableHead>Acceso</TableHead>
-              <TableHead>Activo</TableHead>
-              <TableHead className="text-right">
-                <div className="flex justify-end text-xs font-normal text-muted-foreground">
-                  <span className="flex w-24 items-center justify-center gap-1"><KeyRound className="h-3.5 w-3.5" /> Contraseña</span>
-                  <span className="flex w-20 items-center justify-center gap-1"><Pencil className="h-3.5 w-3.5" /> Editar</span>
-                  <span className="flex w-20 items-center justify-center gap-1"><Trash2 className="h-3.5 w-3.5 text-destructive" /> Eliminar</span>
-                </div>
-              </TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {rows.map((r) => (
-              <TableRow key={r.id}>
-                <TableCell className="font-medium">
-                  <span className="mr-2 inline-block h-3 w-3 rounded-full align-middle" style={{ backgroundColor: r.color }} />
-                  {r.name}{r.lastName ? ` ${r.lastName}` : ""}
-                </TableCell>
-                <TableCell>
-                  <Badge variant={r.role === "ADMIN" ? "default" : "secondary"}>
-                    {r.role === "ADMIN" ? "Administrador" : "Trabajador"}
-                  </Badge>
-                </TableCell>
-                <TableCell className="text-muted-foreground">{r.email ?? "—"}</TableCell>
-                <TableCell className="text-muted-foreground">{r.phone ?? "—"}</TableCell>
-                <TableCell>
-                  {r.email ? (
-                    r.mustChangePassword
-                      ? <span className="text-xs text-yellow-600">Cambio pendiente</span>
-                      : <span className="text-xs text-green-700">Activo</span>
-                  ) : (
-                    <span className="text-xs text-muted-foreground">Sin acceso</span>
-                  )}
-                </TableCell>
-                <TableCell>
-                  <Switch checked={r.active} onCheckedChange={() => onToggle(r)} />
-                </TableCell>
-                <TableCell className="text-right">
-                  <div className="flex justify-end">
-                    <span className="flex w-24 justify-center">
-                      <Button variant="ghost" size="icon" title="Asignar contraseña" onClick={() => openSetPassword(r)}>
-                        <KeyRound className="h-4 w-4" />
-                      </Button>
-                    </span>
-                    <span className="flex w-20 justify-center">
-                      <Button variant="ghost" size="icon" onClick={() => openForm(r)}>
-                        <Pencil className="h-4 w-4" />
-                      </Button>
-                    </span>
-                    <span className="flex w-20 justify-center">
-                      {!r.active && (
-                        <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive" title="Eliminar usuario" onClick={() => setDeleteTarget(r)}>
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      )}
-                    </span>
-                  </div>
-                </TableCell>
-              </TableRow>
-            ))}
-            {rows.length === 0 && (
+      <div className="p-6 space-y-6">
+        <Card className="overflow-hidden p-0">
+          <Table>
+            <TableHeader>
               <TableRow>
-                <TableCell colSpan={7} className="py-8 text-center text-muted-foreground">Sin usuarios.</TableCell>
+                <TableHead>Nombre</TableHead>
+                <TableHead>Rol</TableHead>
+                <TableHead>Email</TableHead>
+                <TableHead>Teléfono</TableHead>
+                <TableHead>Acceso</TableHead>
+                <TableHead>Activo</TableHead>
+                <TableHead className="text-right">
+                  <div className="flex justify-end text-xs font-normal text-muted-foreground">
+                    <span className="flex w-24 items-center justify-center gap-1"><KeyRound className="h-3.5 w-3.5" /> Contraseña</span>
+                    <span className="flex w-20 items-center justify-center gap-1"><Pencil className="h-3.5 w-3.5" /> Editar</span>
+                    <span className="flex w-20 items-center justify-center gap-1"><Trash2 className="h-3.5 w-3.5 text-destructive" /> Eliminar</span>
+                  </div>
+                </TableHead>
               </TableRow>
-            )}
-          </TableBody>
-        </Table>
-      </Card>
+            </TableHeader>
+            <TableBody>
+              {rows.map((r) => (
+                <TableRow key={r.id}>
+                  <TableCell className="font-medium">
+                    <span className="mr-2 inline-block h-3 w-3 rounded-full align-middle" style={{ backgroundColor: r.color }} />
+                    {r.name}{r.lastName ? ` ${r.lastName}` : ""}
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant={r.role === "ADMIN" ? "default" : "secondary"}>
+                      {r.role === "ADMIN" ? "Administrador" : "Trabajador"}
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="text-muted-foreground">{r.email ?? "—"}</TableCell>
+                  <TableCell className="text-muted-foreground">{r.phone ?? "—"}</TableCell>
+                  <TableCell>
+                    {r.email ? (
+                      r.mustChangePassword
+                        ? <span className="text-xs text-yellow-600">Cambio pendiente</span>
+                        : <span className="text-xs text-green-700">Activo</span>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">Sin acceso</span>
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    <Switch checked={r.active} onCheckedChange={() => onToggle(r)} />
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <div className="flex justify-end">
+                      <span className="flex w-24 justify-center">
+                        <Button variant="ghost" size="icon" title="Asignar contraseña" onClick={() => openSetPassword(r)}>
+                          <KeyRound className="h-4 w-4" />
+                        </Button>
+                      </span>
+                      <span className="flex w-20 justify-center">
+                        <Button variant="ghost" size="icon" onClick={() => openForm(r)}>
+                          <Pencil className="h-4 w-4" />
+                        </Button>
+                      </span>
+                      <span className="flex w-20 justify-center">
+                        {!r.active && (
+                          <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive" title="Eliminar usuario" onClick={() => setDeleteTarget(r)}>
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        )}
+                      </span>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))}
+              {rows.length === 0 && (
+                <TableRow>
+                  <TableCell colSpan={7} className="py-8 text-center text-muted-foreground">Sin usuarios.</TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </Card>
 
-      {/* Diálogo editar/crear usuario */}
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{editing ? "Editar usuario" : "Nuevo usuario"}</DialogTitle>
-          </DialogHeader>
-          <form onSubmit={onSubmit} className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="name">Nombre</Label>
-                <Input id="name" name="name" value={nameValue} required onChange={(e) => {
-                  setNameValue(e.target.value)
-                  if (!emailManual) setEmailValue(buildEmail(e.target.value, lastNameValue))
-                }} />
+        {/* Diálogo editar/crear usuario */}
+        <Dialog open={open} onOpenChange={setOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>{editing ? "Editar usuario" : "Nuevo usuario"}</DialogTitle>
+            </DialogHeader>
+            <form onSubmit={onSubmit} className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="name">Nombre</Label>
+                  <Input id="name" name="name" value={nameValue} required onChange={(e) => {
+                    setNameValue(e.target.value)
+                    if (!emailManual) setEmailValue(buildEmail(e.target.value, lastNameValue))
+                  }} />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="lastName">Apellidos</Label>
+                  <Input id="lastName" name="lastName" value={lastNameValue} required onChange={(e) => {
+                    setLastNameValue(e.target.value)
+                    if (!emailManual) setEmailValue(buildEmail(nameValue, e.target.value))
+                  }} />
+                </div>
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="lastName">Apellidos</Label>
-                <Input id="lastName" name="lastName" value={lastNameValue} required onChange={(e) => {
-                  setLastNameValue(e.target.value)
-                  if (!emailManual) setEmailValue(buildEmail(nameValue, e.target.value))
-                }} />
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="email">Email de acceso</Label>
+                  <Input id="email" name="email" type="email" value={emailValue} required
+                    onChange={(e) => { setEmailValue(e.target.value); setEmailManual(true) }} />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="phone">Teléfono</Label>
+                  <Input id="phone" name="phone" defaultValue={editing?.phone ?? ""} />
+                </div>
               </div>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="email">Email de acceso</Label>
-                <Input id="email" name="email" type="email" value={emailValue} required
-                  onChange={(e) => { setEmailValue(e.target.value); setEmailManual(true) }} />
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>Rol</Label>
+                  <Select value={role} onValueChange={setRole}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="WORKER">Trabajador</SelectItem>
+                      <SelectItem value="ADMIN">Administrador</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="color">Color en agenda</Label>
+                  <Input id="color" name="color" type="color" defaultValue={editing?.color ?? "#3C54A4"} className="h-10 p-1" />
+                </div>
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="phone">Teléfono</Label>
-                <Input id="phone" name="phone" defaultValue={editing?.phone ?? ""} />
+              <div className="flex items-center justify-between rounded-lg border p-3">
+                <Label htmlFor="active">Activo</Label>
+                <Switch id="active" name="active" defaultChecked={editing?.active ?? true} />
               </div>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
+              <DialogFooter>
+                <Button type="button" variant="outline" onClick={() => setOpen(false)}>Cancelar</Button>
+                <Button type="submit" disabled={loading}>{loading ? "Guardando…" : "Guardar"}</Button>
+              </DialogFooter>
+            </form>
+          </DialogContent>
+        </Dialog>
+
+        {/* Diálogo asignar contraseña temporal */}
+        <Dialog open={pwOpen} onOpenChange={setPwOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Asignar contraseña temporal</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4">
+              <p className="text-sm text-muted-foreground">
+                Asigna una contraseña temporal a <strong>{pwTarget?.name}{pwTarget?.lastName ? ` ${pwTarget.lastName}` : ""}</strong>. Se le pedirá que la cambie en el siguiente acceso.
+              </p>
               <div className="space-y-2">
-                <Label>Rol</Label>
-                <Select value={role} onValueChange={setRole}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="WORKER">Trabajador</SelectItem>
-                    <SelectItem value="ADMIN">Administrador</SelectItem>
-                  </SelectContent>
-                </Select>
+                <Label htmlFor="tempPw">Contraseña temporal</Label>
+                <Input
+                  id="tempPw"
+                  type="text"
+                  value={tempPw}
+                  onChange={(e) => setTempPw(e.target.value)}
+                  placeholder="Mínimo 6 caracteres"
+                  autoComplete="off"
+                />
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="color">Color en agenda</Label>
-                <Input id="color" name="color" type="color" defaultValue={editing?.color ?? "#3C54A4"} className="h-10 p-1" />
-              </div>
-            </div>
-            <div className="flex items-center justify-between rounded-lg border p-3">
-              <Label htmlFor="active">Activo</Label>
-              <Switch id="active" name="active" defaultChecked={editing?.active ?? true} />
             </div>
             <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setOpen(false)}>Cancelar</Button>
-              <Button type="submit" disabled={loading}>{loading ? "Guardando…" : "Guardar"}</Button>
+              <Button type="button" variant="outline" onClick={() => setPwOpen(false)}>Cancelar</Button>
+              <Button onClick={onSetPassword} disabled={loading || tempPw.length < 6}>
+                {loading ? "Guardando…" : "Asignar contraseña"}
+              </Button>
             </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
+          </DialogContent>
+        </Dialog>
 
-      {/* Diálogo asignar contraseña temporal */}
-      <Dialog open={pwOpen} onOpenChange={setPwOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Asignar contraseña temporal</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4">
-            <p className="text-sm text-muted-foreground">
-              Asigna una contraseña temporal a <strong>{pwTarget?.name}{pwTarget?.lastName ? ` ${pwTarget.lastName}` : ""}</strong>. Se le pedirá que la cambie en el siguiente acceso.
-            </p>
-            <div className="space-y-2">
-              <Label htmlFor="tempPw">Contraseña temporal</Label>
-              <Input
-                id="tempPw"
-                type="text"
-                value={tempPw}
-                onChange={(e) => setTempPw(e.target.value)}
-                placeholder="Mínimo 6 caracteres"
-                autoComplete="off"
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => setPwOpen(false)}>Cancelar</Button>
-            <Button onClick={onSetPassword} disabled={loading || tempPw.length < 6}>
-              {loading ? "Guardando…" : "Asignar contraseña"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <AlertDialog open={!!deleteTarget} onOpenChange={(o) => !o && setDeleteTarget(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>¿Eliminar usuario?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Se eliminará permanentemente a <strong>{deleteTarget?.name} {deleteTarget?.lastName}</strong>. Esta acción no se puede deshacer.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancelar</AlertDialogCancel>
-            <AlertDialogAction onClick={onDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
-              Eliminar
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+        <AlertDialog open={!!deleteTarget} onOpenChange={(o) => !o && setDeleteTarget(null)}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>¿Eliminar usuario?</AlertDialogTitle>
+              <AlertDialogDescription>
+                Se eliminará permanentemente a <strong>{deleteTarget?.name} {deleteTarget?.lastName}</strong>. Esta acción no se puede deshacer.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancelar</AlertDialogCancel>
+              <AlertDialogAction onClick={onDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+                Eliminar
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      </div>
     </div>
   )
 }

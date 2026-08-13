@@ -82,8 +82,8 @@ export function CashRegisterClient({ todayRegister, history, suggestedOpeningCen
     : 0
 
   return (
-    <div className="p-8 space-y-6">
-      <div className="flex items-center justify-between">
+    <div>
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-card p-6">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Caja diaria</h1>
           <p className="text-muted-foreground">{new Date(today + "T12:00:00").toLocaleDateString("es-ES", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}</p>
@@ -105,205 +105,207 @@ export function CashRegisterClient({ todayRegister, history, suggestedOpeningCen
         )}
       </div>
 
-      {/* TODAY SUMMARY */}
-      {todayRegister ? (
-        <div className="grid gap-4 md:grid-cols-4">
-          <Card className="border-primary/30 bg-primary/5">
-            <CardHeader className="pb-1"><CardTitle className="text-sm font-medium text-muted-foreground">Total del día</CardTitle></CardHeader>
-            <CardContent><p className="text-2xl font-bold text-primary">{fmt(todayTotal)}</p></CardContent>
+      <div className="p-8 space-y-6">
+        {/* TODAY SUMMARY */}
+        {todayRegister ? (
+          <div className="grid gap-4 md:grid-cols-4">
+            <Card className="border-primary/30 bg-primary/5">
+              <CardHeader className="pb-1"><CardTitle className="text-sm font-medium text-muted-foreground">Total del día</CardTitle></CardHeader>
+              <CardContent><p className="text-2xl font-bold text-primary">{fmt(todayTotal)}</p></CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="pb-1"><CardTitle className="text-sm font-medium text-muted-foreground">Pagos en efectivo</CardTitle></CardHeader>
+              <CardContent><p className="text-2xl font-semibold">{fmt(todayRegister.totalCashCents)}</p></CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="pb-1"><CardTitle className="text-sm font-medium text-muted-foreground">Pagos con tarjeta</CardTitle></CardHeader>
+              <CardContent><p className="text-2xl font-semibold">{fmt(todayRegister.totalCardCents)}</p></CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="pb-1"><CardTitle className="text-sm font-medium text-muted-foreground">Efectivo esperado en caja</CardTitle></CardHeader>
+              <CardContent><p className="text-2xl font-semibold">{fmt(expectedCash)}</p></CardContent>
+            </Card>
+          </div>
+        ) : (
+          <Card className="border-dashed">
+            <CardContent className="py-12 flex flex-col items-center gap-3 text-muted-foreground">
+              <Wallet className="h-10 w-10 opacity-30" />
+              <p>No hay caja abierta para hoy.</p>
+              <Button variant="outline" onClick={() => setShowOpen(true)}>Abrir caja ahora</Button>
+            </CardContent>
           </Card>
-          <Card>
-            <CardHeader className="pb-1"><CardTitle className="text-sm font-medium text-muted-foreground">Pagos en efectivo</CardTitle></CardHeader>
-            <CardContent><p className="text-2xl font-semibold">{fmt(todayRegister.totalCashCents)}</p></CardContent>
+        )}
+
+        {todayRegister?.status === "CLOSED" && todayRegister.differenceCents !== null && (
+          <Card className={Math.abs(todayRegister.differenceCents) > 0 ? "border-orange-200 bg-orange-50/40" : "border-green-200 bg-green-50/40"}>
+            <CardContent className="py-4 text-sm grid grid-cols-3 gap-4">
+              <div>
+                <p className="text-muted-foreground">Efectivo en caja al cierre</p>
+                <p className="font-semibold text-lg">{fmt(todayRegister.closingDeclaredCents!)}</p>
+              </div>
+              <div>
+                <p className="text-muted-foreground">Diferencia de efectivo al cierre</p>
+                <p className={`font-semibold text-lg ${Math.abs(todayRegister.differenceCents) > 0 ? "text-orange-700" : "text-green-700"}`}>
+                  {todayRegister.differenceCents > 0 ? "+" : ""}{fmt(todayRegister.differenceCents)}
+                </p>
+              </div>
+              <div>
+                <p className="text-muted-foreground">Guardado en caja</p>
+                <p className="font-semibold text-lg">{fmt(todayRegister.closingKeptCents!)}</p>
+              </div>
+            </CardContent>
           </Card>
+        )}
+
+        {/* HISTORY */}
+        <div>
+          <h2 className="text-base font-semibold mb-3">Historial</h2>
           <Card>
-            <CardHeader className="pb-1"><CardTitle className="text-sm font-medium text-muted-foreground">Pagos con tarjeta</CardTitle></CardHeader>
-            <CardContent><p className="text-2xl font-semibold">{fmt(todayRegister.totalCardCents)}</p></CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="pb-1"><CardTitle className="text-sm font-medium text-muted-foreground">Efectivo esperado en caja</CardTitle></CardHeader>
-            <CardContent><p className="text-2xl font-semibold">{fmt(expectedCash)}</p></CardContent>
+            <CardContent className="p-0">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b text-muted-foreground">
+                    <th className="px-4 py-3 text-left font-medium">Fecha</th>
+                    <th className="px-4 py-3 text-right font-medium">Apertura</th>
+                    <th className="px-4 py-3 text-right font-medium">Efectivo</th>
+                    <th className="px-4 py-3 text-right font-medium">Tarjeta</th>
+                    <th className="px-4 py-3 text-right font-medium">Efectivo en caja al cierre</th>
+                    <th className="px-4 py-3 text-right font-medium">Diferencia de efectivo al cierre</th>
+                    <th className="px-4 py-3 text-left font-medium">Estado</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {history.length === 0 && (
+                    <tr><td colSpan={7} className="py-8 text-center text-muted-foreground">Sin historial.</td></tr>
+                  )}
+                  {history.map((r) => (
+                    <tr key={r.id} className="border-b last:border-0 hover:bg-muted/30 transition-colors">
+                      <td className="px-4 py-3">{new Date(r.date + "T12:00:00").toLocaleDateString("es-ES", { day: "2-digit", month: "short", year: "numeric" })}</td>
+                      <td className="px-4 py-3 text-right">{fmt(r.openingCashCents)}</td>
+                      <td className="px-4 py-3 text-right">{fmt(r.totalCashCents)}</td>
+                      <td className="px-4 py-3 text-right">{fmt(r.totalCardCents)}</td>
+                      <td className="px-4 py-3 text-right">{r.closingDeclaredCents !== null ? fmt(r.closingDeclaredCents) : "—"}</td>
+                      <td className={`px-4 py-3 text-right ${r.differenceCents && Math.abs(r.differenceCents) > 0 ? "text-orange-700 font-medium" : "text-green-700"}`}>
+                        {r.differenceCents !== null ? `${r.differenceCents > 0 ? "+" : ""}${fmt(r.differenceCents)}` : "—"}
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className={`rounded-full border px-2 py-0.5 text-xs ${r.status === "CLOSED" ? "bg-gray-100 text-gray-600 border-gray-200" : "bg-green-100 text-green-700 border-green-200"}`}>
+                          {r.status === "CLOSED" ? "Cerrada" : "Abierta"}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </CardContent>
           </Card>
         </div>
-      ) : (
-        <Card className="border-dashed">
-          <CardContent className="py-12 flex flex-col items-center gap-3 text-muted-foreground">
-            <Wallet className="h-10 w-10 opacity-30" />
-            <p>No hay caja abierta para hoy.</p>
-            <Button variant="outline" onClick={() => setShowOpen(true)}>Abrir caja ahora</Button>
-          </CardContent>
-        </Card>
-      )}
 
-      {todayRegister?.status === "CLOSED" && todayRegister.differenceCents !== null && (
-        <Card className={Math.abs(todayRegister.differenceCents) > 0 ? "border-orange-200 bg-orange-50/40" : "border-green-200 bg-green-50/40"}>
-          <CardContent className="py-4 text-sm grid grid-cols-3 gap-4">
-            <div>
-              <p className="text-muted-foreground">Efectivo en caja al cierre</p>
-              <p className="font-semibold text-lg">{fmt(todayRegister.closingDeclaredCents!)}</p>
-            </div>
-            <div>
-              <p className="text-muted-foreground">Diferencia de efectivo al cierre</p>
-              <p className={`font-semibold text-lg ${Math.abs(todayRegister.differenceCents) > 0 ? "text-orange-700" : "text-green-700"}`}>
-                {todayRegister.differenceCents > 0 ? "+" : ""}{fmt(todayRegister.differenceCents)}
-              </p>
-            </div>
-            <div>
-              <p className="text-muted-foreground">Guardado en caja</p>
-              <p className="font-semibold text-lg">{fmt(todayRegister.closingKeptCents!)}</p>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* HISTORY */}
-      <div>
-        <h2 className="text-base font-semibold mb-3">Historial</h2>
-        <Card>
-          <CardContent className="p-0">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b text-muted-foreground">
-                  <th className="px-4 py-3 text-left font-medium">Fecha</th>
-                  <th className="px-4 py-3 text-right font-medium">Apertura</th>
-                  <th className="px-4 py-3 text-right font-medium">Efectivo</th>
-                  <th className="px-4 py-3 text-right font-medium">Tarjeta</th>
-                  <th className="px-4 py-3 text-right font-medium">Efectivo en caja al cierre</th>
-                  <th className="px-4 py-3 text-right font-medium">Diferencia de efectivo al cierre</th>
-                  <th className="px-4 py-3 text-left font-medium">Estado</th>
-                </tr>
-              </thead>
-              <tbody>
-                {history.length === 0 && (
-                  <tr><td colSpan={7} className="py-8 text-center text-muted-foreground">Sin historial.</td></tr>
+        {/* OPEN DIALOG */}
+        <Dialog open={showOpen} onOpenChange={setShowOpen}>
+          <DialogContent style={{ maxWidth: "26rem" }}>
+            <DialogHeader>
+              <DialogTitle>Abrir caja</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-3 text-sm">
+              <div className="space-y-1">
+                <label className="text-muted-foreground text-xs">Efectivo en caja al abrir (€)</label>
+                <Input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={openingInput}
+                  onChange={(e) => setOpeningInput(e.target.value)}
+                />
+                {suggestedOpeningCents > 0 && (
+                  <p className="text-xs text-muted-foreground">Sugerido del cierre anterior: {fmt(suggestedOpeningCents)}</p>
                 )}
-                {history.map((r) => (
-                  <tr key={r.id} className="border-b last:border-0 hover:bg-muted/30 transition-colors">
-                    <td className="px-4 py-3">{new Date(r.date + "T12:00:00").toLocaleDateString("es-ES", { day: "2-digit", month: "short", year: "numeric" })}</td>
-                    <td className="px-4 py-3 text-right">{fmt(r.openingCashCents)}</td>
-                    <td className="px-4 py-3 text-right">{fmt(r.totalCashCents)}</td>
-                    <td className="px-4 py-3 text-right">{fmt(r.totalCardCents)}</td>
-                    <td className="px-4 py-3 text-right">{r.closingDeclaredCents !== null ? fmt(r.closingDeclaredCents) : "—"}</td>
-                    <td className={`px-4 py-3 text-right ${r.differenceCents && Math.abs(r.differenceCents) > 0 ? "text-orange-700 font-medium" : "text-green-700"}`}>
-                      {r.differenceCents !== null ? `${r.differenceCents > 0 ? "+" : ""}${fmt(r.differenceCents)}` : "—"}
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className={`rounded-full border px-2 py-0.5 text-xs ${r.status === "CLOSED" ? "bg-gray-100 text-gray-600 border-gray-200" : "bg-green-100 text-green-700 border-green-200"}`}>
-                        {r.status === "CLOSED" ? "Cerrada" : "Abierta"}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </CardContent>
-        </Card>
-      </div>
+              </div>
+              {error && <p className="text-xs text-destructive flex items-center gap-1"><AlertTriangle className="h-3 w-3" />{error}</p>}
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setShowOpen(false)}>Cancelar</Button>
+              <Button onClick={handleOpen} disabled={loading || Number(openingInput) < 0}>{loading ? "Abriendo…" : "Abrir caja"}</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
-      {/* OPEN DIALOG */}
-      <Dialog open={showOpen} onOpenChange={setShowOpen}>
-        <DialogContent style={{ maxWidth: "26rem" }}>
-          <DialogHeader>
-            <DialogTitle>Abrir caja</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-3 text-sm">
-            <div className="space-y-1">
-              <label className="text-muted-foreground text-xs">Efectivo en caja al abrir (€)</label>
-              <Input
-                type="number"
-                step="0.01"
-                min="0"
-                value={openingInput}
-                onChange={(e) => setOpeningInput(e.target.value)}
-              />
-              {suggestedOpeningCents > 0 && (
-                <p className="text-xs text-muted-foreground">Sugerido del cierre anterior: {fmt(suggestedOpeningCents)}</p>
+        {/* CLOSE DIALOG */}
+        <Dialog open={showClose} onOpenChange={setShowClose}>
+          <DialogContent style={{ maxWidth: "34rem" }}>
+            <DialogHeader>
+              <DialogTitle>Cerrar caja</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4 text-sm">
+              <div className="rounded-lg bg-muted/40 border p-3 grid grid-cols-2 gap-2 text-xs">
+                <div>
+                  <p className="text-muted-foreground">Apertura efectivo</p>
+                  <p className="font-medium">{fmt(todayRegister?.openingCashCents ?? 0)}</p>
+                </div>
+                <div>
+                  <p className="text-muted-foreground">Cobros efectivo hoy</p>
+                  <p className="font-medium">{fmt(todayRegister?.totalCashCents ?? 0)}</p>
+                </div>
+                <div>
+                  <p className="text-muted-foreground">Cobros tarjeta hoy</p>
+                  <p className="font-medium">{fmt(todayRegister?.totalCardCents ?? 0)}</p>
+                </div>
+                <div className="text-green-700">
+                  <p className="text-muted-foreground">Efectivo esperado</p>
+                  <p className="font-semibold">{fmt(expectedCash)}</p>
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-xs text-muted-foreground">Efectivo contado (€)</label>
+                <Input
+                  type="number" step="0.01" min="0"
+                  placeholder="0.00"
+                  value={declaredInput}
+                  onChange={(e) => {
+                    setDeclaredInput(e.target.value)
+                    if (!keptInput) setKeptInput(e.target.value)
+                  }}
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs text-muted-foreground">Efectivo que queda en caja (€)</label>
+                <Input
+                  type="number" step="0.01" min="0"
+                  placeholder="0.00"
+                  value={keptInput}
+                  onChange={(e) => setKeptInput(e.target.value)}
+                />
+              </div>
+              {declaredInput && (
+                <div className="text-xs rounded border p-2 bg-background">
+                  Diferencia de efectivo al cierre: <span className={Math.abs(Math.round(Number(declaredInput) * 100) - expectedCash) > 0 ? "text-orange-700 font-semibold" : "text-green-700 font-semibold"}>
+                    {(() => {
+                      const diff = Math.round(Number(declaredInput) * 100) - expectedCash
+                      return `${diff > 0 ? "+" : ""}${fmt(diff)}`
+                    })()}
+                  </span>
+                </div>
               )}
-            </div>
-            {error && <p className="text-xs text-destructive flex items-center gap-1"><AlertTriangle className="h-3 w-3" />{error}</p>}
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowOpen(false)}>Cancelar</Button>
-            <Button onClick={handleOpen} disabled={loading || Number(openingInput) < 0}>{loading ? "Abriendo…" : "Abrir caja"}</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* CLOSE DIALOG */}
-      <Dialog open={showClose} onOpenChange={setShowClose}>
-        <DialogContent style={{ maxWidth: "34rem" }}>
-          <DialogHeader>
-            <DialogTitle>Cerrar caja</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4 text-sm">
-            <div className="rounded-lg bg-muted/40 border p-3 grid grid-cols-2 gap-2 text-xs">
-              <div>
-                <p className="text-muted-foreground">Apertura efectivo</p>
-                <p className="font-medium">{fmt(todayRegister?.openingCashCents ?? 0)}</p>
+              <div className="space-y-1">
+                <label className="text-xs text-muted-foreground">Notas de denominaciones (opcional)</label>
+                <Input
+                  placeholder="Ej: 2×50€, 5×20€, 3×10€…"
+                  value={denomInput}
+                  onChange={(e) => setDenomInput(e.target.value)}
+                />
               </div>
-              <div>
-                <p className="text-muted-foreground">Cobros efectivo hoy</p>
-                <p className="font-medium">{fmt(todayRegister?.totalCashCents ?? 0)}</p>
-              </div>
-              <div>
-                <p className="text-muted-foreground">Cobros tarjeta hoy</p>
-                <p className="font-medium">{fmt(todayRegister?.totalCardCents ?? 0)}</p>
-              </div>
-              <div className="text-green-700">
-                <p className="text-muted-foreground">Efectivo esperado</p>
-                <p className="font-semibold">{fmt(expectedCash)}</p>
-              </div>
+              {error && <p className="text-xs text-destructive flex items-center gap-1"><AlertTriangle className="h-3 w-3" />{error}</p>}
             </div>
-
-            <div className="space-y-1">
-              <label className="text-xs text-muted-foreground">Efectivo contado (€)</label>
-              <Input
-                type="number" step="0.01" min="0"
-                placeholder="0.00"
-                value={declaredInput}
-                onChange={(e) => {
-                  setDeclaredInput(e.target.value)
-                  if (!keptInput) setKeptInput(e.target.value)
-                }}
-              />
-            </div>
-            <div className="space-y-1">
-              <label className="text-xs text-muted-foreground">Efectivo que queda en caja (€)</label>
-              <Input
-                type="number" step="0.01" min="0"
-                placeholder="0.00"
-                value={keptInput}
-                onChange={(e) => setKeptInput(e.target.value)}
-              />
-            </div>
-            {declaredInput && (
-              <div className="text-xs rounded border p-2 bg-background">
-                Diferencia de efectivo al cierre: <span className={Math.abs(Math.round(Number(declaredInput) * 100) - expectedCash) > 0 ? "text-orange-700 font-semibold" : "text-green-700 font-semibold"}>
-                  {(() => {
-                    const diff = Math.round(Number(declaredInput) * 100) - expectedCash
-                    return `${diff > 0 ? "+" : ""}${fmt(diff)}`
-                  })()}
-                </span>
-              </div>
-            )}
-            <div className="space-y-1">
-              <label className="text-xs text-muted-foreground">Notas de denominaciones (opcional)</label>
-              <Input
-                placeholder="Ej: 2×50€, 5×20€, 3×10€…"
-                value={denomInput}
-                onChange={(e) => setDenomInput(e.target.value)}
-              />
-            </div>
-            {error && <p className="text-xs text-destructive flex items-center gap-1"><AlertTriangle className="h-3 w-3" />{error}</p>}
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowClose(false)}>Cancelar</Button>
-            <Button onClick={handleClose} disabled={loading || !declaredInput || !keptInput}>
-              {loading ? "Cerrando…" : "Cerrar caja"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setShowClose(false)}>Cancelar</Button>
+              <Button onClick={handleClose} disabled={loading || !declaredInput || !keptInput}>
+                {loading ? "Cerrando…" : "Cerrar caja"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </div>
     </div>
   )
 }

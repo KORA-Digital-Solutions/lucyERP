@@ -49,8 +49,8 @@ export function CabinsClient({ rows }: { rows: CabinRow[] }) {
   }
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex items-center justify-between gap-3">
+    <div>
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-card p-6">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Cabinas</h1>
           <p className="text-muted-foreground">{rows.length} cabinas · las inactivas no admiten nuevas citas</p>
@@ -60,85 +60,87 @@ export function CabinsClient({ rows }: { rows: CabinRow[] }) {
         </Button>
       </div>
 
-      <Card className="overflow-hidden p-0">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead className="w-16">Orden</TableHead>
-              <TableHead>Nombre</TableHead>
-              <TableHead>Descripción</TableHead>
-              <TableHead>Activa</TableHead>
-              <TableHead className="text-right">
-                <div className="flex justify-end text-xs font-normal text-muted-foreground">
-                  <span className="flex w-36 items-center justify-center gap-1"><ToggleRight className="h-3.5 w-3.5 text-primary" /> Activar/Desactivar</span>
-                  <span className="flex w-20 items-center justify-center gap-1"><Pencil className="h-3.5 w-3.5" /> Editar</span>
-                </div>
-              </TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {rows.map((r) => (
-              <TableRow key={r.id}>
-                <TableCell>{r.sortOrder}</TableCell>
-                <TableCell className="font-medium">{r.name}</TableCell>
-                <TableCell className="text-muted-foreground">{r.description ?? "—"}</TableCell>
-                <TableCell>
-                  <Badge variant={r.active ? "secondary" : "outline"} className={r.active ? "" : "text-muted-foreground"}>
-                    {r.active ? "Activa" : "Inactiva"}
-                  </Badge>
-                </TableCell>
-                <TableCell>
-                  <div className="flex items-center justify-end">
-                    <span className="flex w-36 justify-center">
-                      <Switch checked={r.active} onCheckedChange={() => onToggle(r)} />
-                    </span>
-                    <span className="flex w-20 justify-center">
-                      <Button variant="ghost" size="icon" onClick={() => { setEditing(r); setOpen(true) }}>
-                        <Pencil className="h-4 w-4" />
-                      </Button>
-                    </span>
-                  </div>
-                </TableCell>
-              </TableRow>
-            ))}
-            {rows.length === 0 && (
+      <div className="p-6 space-y-6">
+        <Card className="overflow-hidden p-0">
+          <Table>
+            <TableHeader>
               <TableRow>
-                <TableCell colSpan={5} className="py-8 text-center text-muted-foreground">Sin cabinas.</TableCell>
+                <TableHead className="w-16">Orden</TableHead>
+                <TableHead>Nombre</TableHead>
+                <TableHead>Descripción</TableHead>
+                <TableHead>Activa</TableHead>
+                <TableHead className="text-right">
+                  <div className="flex justify-end text-xs font-normal text-muted-foreground">
+                    <span className="flex w-36 items-center justify-center gap-1"><ToggleRight className="h-3.5 w-3.5 text-primary" /> Activar/Desactivar</span>
+                    <span className="flex w-20 items-center justify-center gap-1"><Pencil className="h-3.5 w-3.5" /> Editar</span>
+                  </div>
+                </TableHead>
               </TableRow>
-            )}
-          </TableBody>
-        </Table>
-      </Card>
+            </TableHeader>
+            <TableBody>
+              {rows.map((r) => (
+                <TableRow key={r.id}>
+                  <TableCell>{r.sortOrder}</TableCell>
+                  <TableCell className="font-medium">{r.name}</TableCell>
+                  <TableCell className="text-muted-foreground">{r.description ?? "—"}</TableCell>
+                  <TableCell>
+                    <Badge variant={r.active ? "secondary" : "outline"} className={r.active ? "" : "text-muted-foreground"}>
+                      {r.active ? "Activa" : "Inactiva"}
+                    </Badge>
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex items-center justify-end">
+                      <span className="flex w-36 justify-center">
+                        <Switch checked={r.active} onCheckedChange={() => onToggle(r)} />
+                      </span>
+                      <span className="flex w-20 justify-center">
+                        <Button variant="ghost" size="icon" onClick={() => { setEditing(r); setOpen(true) }}>
+                          <Pencil className="h-4 w-4" />
+                        </Button>
+                      </span>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))}
+              {rows.length === 0 && (
+                <TableRow>
+                  <TableCell colSpan={5} className="py-8 text-center text-muted-foreground">Sin cabinas.</TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </Card>
 
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{editing ? "Editar cabina" : "Nueva cabina"}</DialogTitle>
-          </DialogHeader>
-          <form onSubmit={onSubmit} className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="name">Nombre</Label>
-              <Input id="name" name="name" defaultValue={editing?.name} required />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="description">Descripción</Label>
-              <Textarea id="description" name="description" rows={2} className="resize-none" defaultValue={editing?.description ?? ""} />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="sortOrder">Orden visual</Label>
-              <Input id="sortOrder" name="sortOrder" type="number" min={0} defaultValue={editing?.sortOrder ?? rows.length + 1} />
-            </div>
-            <div className="flex items-center justify-between rounded-lg border p-3">
-              <Label htmlFor="active">Cabina activa</Label>
-              <Switch id="active" name="active" defaultChecked={editing?.active ?? true} />
-            </div>
-            <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setOpen(false)}>Cancelar</Button>
-              <Button type="submit" disabled={loading}>{loading ? "Guardando…" : "Guardar"}</Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
+        <Dialog open={open} onOpenChange={setOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>{editing ? "Editar cabina" : "Nueva cabina"}</DialogTitle>
+            </DialogHeader>
+            <form onSubmit={onSubmit} className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="name">Nombre</Label>
+                <Input id="name" name="name" defaultValue={editing?.name} required />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="description">Descripción</Label>
+                <Textarea id="description" name="description" rows={2} className="resize-none" defaultValue={editing?.description ?? ""} />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="sortOrder">Orden visual</Label>
+                <Input id="sortOrder" name="sortOrder" type="number" min={0} defaultValue={editing?.sortOrder ?? rows.length + 1} />
+              </div>
+              <div className="flex items-center justify-between rounded-lg border p-3">
+                <Label htmlFor="active">Cabina activa</Label>
+                <Switch id="active" name="active" defaultChecked={editing?.active ?? true} />
+              </div>
+              <DialogFooter>
+                <Button type="button" variant="outline" onClick={() => setOpen(false)}>Cancelar</Button>
+                <Button type="submit" disabled={loading}>{loading ? "Guardando…" : "Guardar"}</Button>
+              </DialogFooter>
+            </form>
+          </DialogContent>
+        </Dialog>
+      </div>
     </div>
   )
 }

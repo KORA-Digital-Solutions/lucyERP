@@ -1,5 +1,5 @@
 import Link from "next/link"
-import { Calendar, AlertTriangle, CheckCircle2, ArrowRight, Package, ShoppingCart } from "lucide-react"
+import { Calendar, AlertTriangle, CheckCircle2, ArrowRight, Package, ShoppingCart, Lock, Receipt } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { KPICard } from "@/components/kpi-card"
@@ -18,7 +18,11 @@ export default async function DashboardPage() {
   const { start, end } = dayRange(today)
   const now = new Date()
 
-  const [todays, failed, upcoming, lowStockProducts, todaySales, activeReminders] = await Promise.all([
+  // La caja se indexa por fecha UTC (ver openCashRegister en lib/actions),
+  // no por la fecha local que usa el resto del dashboard.
+  const cashDate = new Date().toISOString().slice(0, 10)
+
+  const [todays, failed, upcoming, lowStockProducts, todaySales, activeReminders, todayRegister] = await Promise.all([
     prisma.appointment.findMany({
       where: { clinicId: clinic.id, startAt: { gte: start, lte: end }, status: { not: "CANCELLED" } },
       include: { customer: true, service: true, worker: true },
@@ -46,6 +50,10 @@ export default async function DashboardPage() {
       include: { customer: { select: { firstName: true, lastName: true } } },
       orderBy: { dueDate: "asc" },
     }).then((rs) => rs.filter((r) => isReminderActive(r.dueDate, r.alertDaysBefore, now))),
+    prisma.cashRegister.findUnique({
+      where: { clinicId_date: { clinicId: clinic.id, date: cashDate } },
+      select: { status: true },
+    }),
   ])
 
   const reminderRows: DashboardReminderRow[] = activeReminders.map((r) => ({
@@ -147,20 +155,36 @@ export default async function DashboardPage() {
         </div>
 
         <div className="grid gap-6 lg:grid-cols-2">
-          {todaySales.length > 0 && (
-            <Card className="flex min-h-[260px] flex-col">
-              <CardHeader className="flex flex-row items-center justify-between pb-2 shrink-0">
-                <div className="flex items-center gap-2">
-                  <div className="rounded-lg bg-accent p-2">
-                    <ShoppingCart className="h-4 w-4 text-accent-foreground" />
-                  </div>
-                  <CardTitle className="text-base font-medium">Ventas de hoy</CardTitle>
+          <Card className="flex min-h-[260px] flex-col">
+            <CardHeader className="flex flex-row items-center justify-between pb-2 shrink-0">
+              <div className="flex items-center gap-2">
+                <div className="rounded-lg bg-accent p-2">
+                  <ShoppingCart className="h-4 w-4 text-accent-foreground" />
                 </div>
+                <CardTitle className="text-base font-medium">Ventas de hoy</CardTitle>
+              </div>
+              {todaySales.length > 0 && (
                 <Button variant="ghost" size="sm" asChild>
                   <Link href="/sales">Ver ventas <ArrowRight className="ml-1 h-4 w-4" /></Link>
                 </Button>
-              </CardHeader>
-              <CardContent className="flex-1">
+              )}
+            </CardHeader>
+            <CardContent className="flex-1 overflow-y-auto">
+              {!todayRegister ? (
+                <div className="flex h-full flex-col items-center justify-center gap-2 text-center text-sm text-muted-foreground">
+                  <Lock className="h-6 w-6 opacity-40" />
+                  <p className="font-medium text-foreground">Caja sin abrir</p>
+                  <p>Ábrela para poder registrar ventas.</p>
+                  <Button variant="outline" size="sm" asChild>
+                    <Link href="/cash-register">Ir a caja</Link>
+                  </Button>
+                </div>
+              ) : todaySales.length === 0 ? (
+                <div className="flex h-full flex-col items-center justify-center gap-2 text-center text-sm text-muted-foreground">
+                  <Receipt className="h-6 w-6 opacity-40" />
+                  <p>Sin ventas registradas hoy.</p>
+                </div>
+              ) : (
                 <div className="flex flex-wrap gap-x-8 gap-y-4 text-sm">
                   <div>
                     <p className="text-muted-foreground">Total</p>
@@ -179,12 +203,11 @@ export default async function DashboardPage() {
                     <p className="text-xl font-medium">{todaySales.length}</p>
                   </div>
                 </div>
-              </CardContent>
-            </Card>
-          )}
+              )}
+            </CardContent>
+          </Card>
 
-          {/* Sin ventas hoy la tarjeta de stock ocupa la fila entera en vez de dejar un hueco. */}
-          <Card className={`flex min-h-[260px] flex-col${todaySales.length === 0 ? " lg:col-span-2" : ""}`}>
+          <Card className="flex min-h-[260px] flex-col">
             <CardHeader className="flex flex-row items-center justify-between pb-2 shrink-0">
               <div className="flex items-center gap-2">
                 <div className="rounded-lg bg-accent p-2">

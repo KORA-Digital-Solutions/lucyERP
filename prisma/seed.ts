@@ -42,6 +42,14 @@ async function main() {
   console.log("🌱 Sembrando datos demo…")
 
   // Reset (orden por FKs)
+  // Ventas y caja van primero: las FK a Clinic/User/Customer son obligatorias y
+  // sin `onDelete`, o sea Restrict, así que sembrar sobre una base con ventas
+  // reventaba en `customer.deleteMany()` con media base ya borrada.
+  await prisma.customerBalanceMovement.deleteMany()
+  await prisma.saleLine.deleteMany()
+  await prisma.sale.deleteMany()
+  await prisma.cashRegister.deleteMany()
+  await prisma.customerReminder.deleteMany()
   await prisma.whatsappMessage.deleteMany()
   await prisma.appointment.deleteMany()
   await prisma.stockMovement.deleteMany()

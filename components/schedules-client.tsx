@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import { Plus, Trash2, CalendarOff, Upload, ChevronLeft, ChevronRight } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
+import { Card, CardContent, CardTitle, CardDescription } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
@@ -15,8 +15,6 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import {
-  saveClinicWeeklySchedule,
-  saveWorkerWeeklySchedule,
   saveClinicScheduleOverride,
   saveWorkerScheduleOverride,
   deleteClinicScheduleOverride,
@@ -137,7 +135,7 @@ export function SlotRows({
 
 /* --------------------------- horario semanal ------------------------------ */
 
-function WeeklyScheduleEditor({
+export function WeeklyScheduleEditor({
   initialDays,
   onSave,
 }: {
@@ -203,28 +201,130 @@ function WeeklyScheduleEditor({
   )
 }
 
+/* --------------------------- ámbito: lista + detalle ----------------------- */
+
+export type Scope = { type: "CLINIC" } | { type: "WORKER"; workerId: string; workerName: string }
+
+export function scopeKey(scope: Scope): string {
+  return scope.type === "CLINIC" ? "CLINIC" : scope.workerId
+}
+
+export function ScopeList({
+  workers,
+  selectedKey,
+  onSelect,
+}: {
+  workers: (WorkerOption & { color?: string })[]
+  selectedKey: string
+  onSelect: (scope: Scope) => void
+}) {
+  return (
+    <div className="w-40 shrink-0 space-y-4">
+      <div className="space-y-0.5">
+        <p className="px-2.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">Centro</p>
+        <button
+          type="button"
+          onClick={() => onSelect({ type: "CLINIC" })}
+          className={cn(
+            "flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm",
+            selectedKey === "CLINIC" ? "bg-accent font-medium text-accent-foreground" : "text-muted-foreground hover:bg-accent/50",
+          )}
+        >
+          <span className="h-2 w-2 shrink-0 rounded-full bg-foreground/70" />
+          General
+        </button>
+      </div>
+
+      <div className="space-y-0.5">
+        <p className="px-2.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">Empleadas</p>
+        {workers.map((w) => (
+          <button
+            key={w.id}
+            type="button"
+            onClick={() => onSelect({ type: "WORKER", workerId: w.id, workerName: w.name })}
+            className={cn(
+              "flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm",
+              selectedKey === w.id ? "bg-accent font-medium text-accent-foreground" : "text-muted-foreground hover:bg-accent/50",
+            )}
+          >
+            <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: w.color ?? "#3C54A4" }} />
+            {w.name}
+          </button>
+        ))}
+        {workers.length === 0 && (
+          <p className="px-2.5 text-xs text-muted-foreground">Sin empleadas activas.</p>
+        )}
+      </div>
+    </div>
+  )
+}
+
 /* ------------------------------ excepciones -------------------------------- */
 
-export function OverridesTab({
-  workers,
+// dayOfWeek: 0=domingo .. 6=sábado (Date.getDay()). Duplicado a propósito de
+// lib/schedule.ts: ese módulo importa Prisma y no es seguro traerlo a un
+// componente cliente.
+function dayOfWeekFromDateStr(date: string): number {
+  const [y, m, d] = date.split("-").map(Number)
+  return new Date(y, m - 1, d).getDay()
+}
+
+// Cerrar el día completo aquí es válido tanto para el centro como para una
+// empleada: representa que ese día su turno cambia (p.ej. intercambia el día
+// libre de la semana), no que esté ausente. Una ausencia real (vacaciones o
+// asuntos propios, con saldo) se gestiona siempre desde Vacaciones — nunca
+// desde aquí, para no descontar saldo por algo que no lo es.
+export function OverridesPanel({
+  scope,
+  clinicWeekly,
+  workerWeekly,
   clinicOverrides,
   workerOverrides,
+  onGoToVacations,
 }: {
-  workers: WorkerOption[]
+  scope: Scope
+  clinicWeekly: WeeklyDay[]
+  workerWeekly: WeeklyDay[]
   clinicOverrides: OverrideRow[]
   workerOverrides: OverrideRow[]
+  onGoToVacations: () => void
 }) {
   const router = useRouter()
-  const [scope, setScope] = useState<"CLINIC" | "WORKER">("CLINIC")
-  const [workerId, setWorkerId] = useState<string>(workers[0]?.id ?? "")
   const [date, setDate] = useState("")
-  const [closed, setClosed] = useState(true)
-  const [slots, setSlots] = useState<WeeklySlotInput[]>([])
+  const [closed, setClosed] = useState(scope.type === "CLINIC")
+  const [slots, setSlots] = useState<WeeklySlotInput[]>(scope.type === "CLINIC" ? [] : [emptySlot()])
   const [reason, setReason] = useState("")
   const [loading, setLoading] = useState(false)
+  const [prefilled, setPrefilled] = useState(false)
   const hasOverlap = !closed && overlappingIndices(slots).size > 0
 
-  const all = [...clinicOverrides, ...workerOverrides].sort((a, b) => a.date.localeCompare(b.date))
+  const rows = (scope.type === "CLINIC" ? clinicOverrides : workerOverrides.filter((o) => o.workerId === scope.workerId))
+    .slice()
+    .sort((a, b) => a.date.localeCompare(b.date))
+
+  // Al elegir una fecha, carga lo que ya hay ese día: la excepción existente
+  // si ya se había guardado una (para editarla en vez de pisarla a ciegas), o
+  // si no, el horario semanal normal de ese día de la semana (para partir de
+  // lo real y solo tocar lo que cambia, no de una franja genérica).
+  function handleDateChange(newDate: string) {
+    setDate(newDate)
+    setPrefilled(false)
+    if (!newDate) return
+    const existing = rows.find((r) => r.date === newDate)
+    if (existing) {
+      setClosed(existing.closed)
+      setSlots(existing.closed ? [] : existing.slots)
+      setReason(existing.reason ?? "")
+      setPrefilled(true)
+      return
+    }
+    const dow = dayOfWeekFromDateStr(newDate)
+    const weekly = (scope.type === "CLINIC" ? clinicWeekly : workerWeekly).find((d) => d.dayOfWeek === dow)?.slots ?? []
+    setClosed(weekly.length === 0)
+    setSlots(weekly)
+    setReason("")
+    setPrefilled(true)
+  }
 
   async function handleSave() {
     if (!date) {
@@ -235,16 +335,21 @@ export function OverridesTab({
       toast.error("Corrige las franjas solapadas antes de guardar.")
       return
     }
+    if (!closed && slots.length === 0) {
+      toast.error("Añade al menos una franja horaria.")
+      return
+    }
     setLoading(true)
     const res =
-      scope === "CLINIC"
+      scope.type === "CLINIC"
         ? await saveClinicScheduleOverride(date, closed, closed ? [] : slots, reason || null)
-        : await saveWorkerScheduleOverride(workerId, date, closed, closed ? [] : slots, reason || null)
+        : await saveWorkerScheduleOverride(scope.workerId, date, closed, closed ? [] : slots, reason || null)
     setLoading(false)
     if (res.ok) {
       toast.success("Excepción guardada.")
       setDate("")
-      setSlots([])
+      setClosed(scope.type === "CLINIC")
+      setSlots(scope.type === "CLINIC" ? [] : [emptySlot()])
       setReason("")
       router.refresh()
     } else {
@@ -261,60 +366,52 @@ export function OverridesTab({
   }
 
   return (
-    <div className="space-y-6">
-      <Card>
-        <CardHeader>
-          <CardTitle>Nueva excepción puntual</CardTitle>
-          <CardDescription>
-            Sobrescribe el horario base de un día concreto, sin alterar el horario semanal por defecto.
+    <div className="min-w-0 flex-1 space-y-6">
+      <Card className="overflow-hidden p-0">
+        <div className={cn("px-6 py-5", scope.type === "CLINIC" ? "bg-accent" : "border-b")}>
+          <CardTitle className={cn(scope.type === "CLINIC" && "text-accent-foreground")}>
+            Nueva excepción · {scope.type === "CLINIC" ? "Centro" : scope.workerName}
+          </CardTitle>
+          <CardDescription className={cn("mt-1", scope.type === "CLINIC" && "text-accent-foreground/70")}>
+            {scope.type === "CLINIC"
+              ? "Sobrescribe el horario del centro un día concreto, sin alterar el horario semanal por defecto."
+              : "Cambia las franjas de esta empleada un día concreto, sin alterar su horario semanal por defecto."}
           </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid gap-4 sm:grid-cols-3">
-            <div className="space-y-2">
-              <Label>Ámbito</Label>
-              <Select value={scope} onValueChange={(v) => setScope(v as "CLINIC" | "WORKER")}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="CLINIC">Centro</SelectItem>
-                  <SelectItem value="WORKER">Empleada</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            {scope === "WORKER" && (
-              <div className="space-y-2">
-                <Label>Empleada</Label>
-                <Select value={workerId} onValueChange={setWorkerId}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Seleccionar" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {workers.map((w) => (
-                      <SelectItem key={w.id} value={w.id}>
-                        {w.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+        </div>
+        <CardContent className="space-y-4 py-6">
+          <div className="max-w-xs space-y-2">
+            <Label>Fecha</Label>
+            <Input type="date" value={date} onChange={(e) => handleDateChange(e.target.value)} />
+            {date && prefilled && (
+              <p className="text-xs text-muted-foreground">
+                {rows.some((r) => r.date === date)
+                  ? "Ya había una excepción guardada para este día — la estás editando."
+                  : `Horario habitual de los ${WEEKDAY_LABELS[dayOfWeekFromDateStr(date)].toLowerCase()}. Edítalo para crear la excepción.`}
+              </p>
             )}
-            <div className="space-y-2">
-              <Label>Fecha</Label>
-              <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
-            </div>
           </div>
 
           <div className="flex items-center justify-between rounded-lg border p-3">
             <div>
-              <Label>No trabaja / cerrado ese día</Label>
+              <Label>{scope.type === "CLINIC" ? "Centro cerrado ese día" : "No trabaja ese día"}</Label>
               <p className="text-xs text-muted-foreground">
-                {scope === "CLINIC" ? "El centro cierra completamente." : "La empleada no genera huecos ese día."}
+                {scope.type === "CLINIC"
+                  ? "Cierre completo (festivo, evento, etc)."
+                  : "Cambio de turno (p.ej. cambia qué día libra esa semana), no una ausencia."}
               </p>
             </div>
             <Switch checked={closed} onCheckedChange={(v) => { setClosed(v); if (v) setSlots([]) }} />
           </div>
+
+          {scope.type === "WORKER" && (
+            <p className="text-xs text-muted-foreground">
+              ¿Es una ausencia real (vacaciones o asuntos propios)? Eso descuenta saldo, así que usa{" "}
+              <button type="button" onClick={onGoToVacations} className="font-medium text-primary hover:underline">
+                Vacaciones
+              </button>{" "}
+              en vez de esto.
+            </p>
+          )}
 
           {!closed && (
             <div className="space-y-2">
@@ -350,17 +447,15 @@ export function OverridesTab({
           <TableHeader>
             <TableRow>
               <TableHead>Fecha</TableHead>
-              <TableHead>Ámbito</TableHead>
               <TableHead>Horario</TableHead>
               <TableHead>Motivo</TableHead>
               <TableHead className="text-right">Eliminar</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {all.map((r) => (
+            {rows.map((r) => (
               <TableRow key={r.id}>
                 <TableCell>{r.date}</TableCell>
-                <TableCell>{r.workerId ? r.workerName : "Centro"}</TableCell>
                 <TableCell>
                   {r.closed ? (
                     <Badge variant="outline" className="text-muted-foreground">Cerrado</Badge>
@@ -376,9 +471,9 @@ export function OverridesTab({
                 </TableCell>
               </TableRow>
             ))}
-            {all.length === 0 && (
+            {rows.length === 0 && (
               <TableRow>
-                <TableCell colSpan={5} className="py-8 text-center text-muted-foreground">
+                <TableCell colSpan={4} className="py-8 text-center text-muted-foreground">
                   Sin excepciones próximas.
                 </TableCell>
               </TableRow>
@@ -709,60 +804,3 @@ export function HolidaysTab({ holidays }: { holidays: HolidayRow[] }) {
   )
 }
 
-/* ------------------------------ horario semanal (secciones) ------------------- */
-
-export function ClinicWeeklyTab({ clinicWeekly }: { clinicWeekly: WeeklyDay[] }) {
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Horario semanal del centro</CardTitle>
-        <CardDescription>Apertura/cierre por día. Admite horario partido (varias franjas por día).</CardDescription>
-      </CardHeader>
-      <CardContent>
-        <WeeklyScheduleEditor initialDays={clinicWeekly} onSave={saveClinicWeeklySchedule} />
-      </CardContent>
-    </Card>
-  )
-}
-
-export function WorkerWeeklyTab({
-  workers,
-  workerWeeklyByWorker,
-}: {
-  workers: WorkerOption[]
-  workerWeeklyByWorker: Record<string, WeeklyDay[]>
-}) {
-  const [selectedWorkerId, setSelectedWorkerId] = useState(workers[0]?.id ?? "")
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Horario semanal por empleada</CardTitle>
-        <CardDescription>Días y franjas en las que trabaja cada empleada según su contrato.</CardDescription>
-        <div className="pt-2">
-          <Select value={selectedWorkerId} onValueChange={setSelectedWorkerId}>
-            <SelectTrigger className="w-64">
-              <SelectValue placeholder="Seleccionar empleada" />
-            </SelectTrigger>
-            <SelectContent>
-              {workers.map((w) => (
-                <SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-      </CardHeader>
-      <CardContent>
-        {selectedWorkerId ? (
-          <WeeklyScheduleEditor
-            key={selectedWorkerId}
-            initialDays={workerWeeklyByWorker[selectedWorkerId] ?? []}
-            onSave={(days) => saveWorkerWeeklySchedule(selectedWorkerId, days)}
-          />
-        ) : (
-          <p className="text-sm text-muted-foreground">No hay empleadas activas.</p>
-        )}
-      </CardContent>
-    </Card>
-  )
-}

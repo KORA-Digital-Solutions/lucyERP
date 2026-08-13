@@ -14,7 +14,9 @@
     "db:seed-holidays": "tsx scripts/seed-holidays-albacete.ts",
     "db:studio": "prisma studio",
     "worker:reminders": "tsx scripts/reminder-worker.ts",
-    "start:local": "concurrently -n web,worker -c blue,magenta \"npm run dev\" \"npm run worker:reminders\""
+    "start:local": "concurrently -n web,worker -c blue,magenta \"npm run dev\" \"npm run worker:reminders\"",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
@@ -88,6 +90,7 @@
     "tailwindcss": "^4.1.9",
     "tsx": "^4.19.2",
     "tw-animate-css": "1.3.3",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^4.1.10"
   }
 }

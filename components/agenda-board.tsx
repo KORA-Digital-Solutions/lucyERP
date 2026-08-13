@@ -151,6 +151,10 @@ function DayOverrideDialog({
       toast.error("Corrige las franjas solapadas antes de guardar.")
       return
     }
+    if (!closed && slots.length === 0) {
+      toast.error("Añade al menos una franja horaria.")
+      return
+    }
     setLoading(true)
     const res =
       state.scope.type === "CLINIC"
@@ -178,13 +182,22 @@ function DayOverrideDialog({
 
             <div className="flex items-center justify-between rounded-lg border p-3">
               <div>
-                <Label>No trabaja / cerrado ese día</Label>
+                <Label>{state.scope.type === "CLINIC" ? "No trabaja / cerrado ese día" : "No trabaja ese día"}</Label>
                 <p className="text-xs text-muted-foreground">
-                  {state.scope.type === "CLINIC" ? "El centro cierra completamente." : "No genera huecos ese día."}
+                  {state.scope.type === "CLINIC"
+                    ? "El centro cierra completamente."
+                    : "Cambio de turno (p.ej. cambia qué día libra esa semana), no una ausencia."}
                 </p>
               </div>
               <Switch checked={closed} onCheckedChange={(v) => { setClosed(v); if (v) setSlots([]) }} />
             </div>
+
+            {state.scope.type === "WORKER" && (
+              <p className="text-xs text-muted-foreground">
+                ¿Es una ausencia real (vacaciones o asuntos propios)? Eso descuenta saldo — gestiónalo desde
+                Horarios → Vacaciones en vez de aquí.
+              </p>
+            )}
 
             {!closed && (
               <div className="space-y-2">

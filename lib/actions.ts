@@ -21,6 +21,7 @@ function revalidateAll() {
   revalidatePath("/services")
   revalidatePath("/workers")
   revalidatePath("/settings")
+  revalidatePath("/horarios")
 }
 
 function str(fd: FormData, key: string): string {
@@ -959,7 +960,7 @@ export async function saveClinicWeeklySchedule(days: WeeklyDayInput[]): Promise<
         ),
       ),
     ])
-    revalidatePath("/settings")
+    revalidatePath("/horarios")
     revalidateAll()
     return { ok: true }
   } catch (e) {
@@ -984,7 +985,7 @@ export async function saveWorkerWeeklySchedule(workerId: string, days: WeeklyDay
         ),
       ),
     ])
-    revalidatePath("/settings")
+    revalidatePath("/horarios")
     revalidateAll()
     return { ok: true }
   } catch (e) {
@@ -1014,7 +1015,7 @@ export async function saveClinicScheduleOverride(
         data: slots.map((s) => ({ overrideId: override.id, startTime: s.startTime, endTime: s.endTime })),
       })
     }
-    revalidatePath("/settings")
+    revalidatePath("/horarios")
     revalidateAll()
     return { ok: true, id: override.id }
   } catch (e) {
@@ -1025,7 +1026,7 @@ export async function saveClinicScheduleOverride(
 export async function deleteClinicScheduleOverride(id: string): Promise<ActionResult> {
   try {
     await prisma.clinicScheduleOverride.delete({ where: { id } })
-    revalidatePath("/settings")
+    revalidatePath("/horarios")
     revalidateAll()
     return { ok: true }
   } catch (e) {
@@ -1058,7 +1059,7 @@ export async function saveWorkerScheduleOverride(
         data: slots.map((s) => ({ overrideId: override.id, startTime: s.startTime, endTime: s.endTime })),
       })
     }
-    revalidatePath("/settings")
+    revalidatePath("/horarios")
     revalidateAll()
     return { ok: true, id: override.id }
   } catch (e) {
@@ -1069,7 +1070,7 @@ export async function saveWorkerScheduleOverride(
 export async function deleteWorkerScheduleOverride(id: string): Promise<ActionResult> {
   try {
     await prisma.workerScheduleOverride.delete({ where: { id } })
-    revalidatePath("/settings")
+    revalidatePath("/horarios")
     revalidateAll()
     return { ok: true }
   } catch (e) {
@@ -1091,7 +1092,7 @@ export async function saveHoliday(id: string | null, fd: FormData): Promise<Acti
     } else {
       await prisma.holiday.create({ data: { ...data, clinicId } })
     }
-    revalidatePath("/settings")
+    revalidatePath("/horarios")
     revalidateAll()
     return { ok: true }
   } catch (e) {
@@ -1102,7 +1103,7 @@ export async function saveHoliday(id: string | null, fd: FormData): Promise<Acti
 export async function deleteHoliday(id: string): Promise<ActionResult> {
   try {
     await prisma.holiday.delete({ where: { id } })
-    revalidatePath("/settings")
+    revalidatePath("/horarios")
     revalidateAll()
     return { ok: true }
   } catch (e) {
@@ -1134,7 +1135,7 @@ export async function copyFixedHolidaysToYear(targetYear: number): Promise<Actio
       await prisma.holiday.create({ data: { clinicId, date, name: h.name, scope: h.scope } })
       created++
     }
-    revalidatePath("/settings")
+    revalidatePath("/horarios")
     return { ok: true, id: String(created) }
   } catch (e) {
     return { ok: false, error: errMsg(e) }
@@ -1163,7 +1164,7 @@ export async function bulkImportHolidays(entries: BulkHolidayEntry[]): Promise<A
         created++
       }
     }
-    revalidatePath("/settings")
+    revalidatePath("/horarios")
     return { ok: true, id: `${created}|${updated}` }
   } catch (e) {
     return { ok: false, error: errMsg(e) }
@@ -1185,7 +1186,7 @@ export async function saveLeaveBalance(
       update: { vacationDaysTotal, personalDaysTotal },
       create: { clinicId, workerId, year, vacationDaysTotal, personalDaysTotal },
     })
-    revalidatePath("/workers")
+    revalidatePath("/horarios")
     return { ok: true }
   } catch (e) {
     return { ok: false, error: errMsg(e) }
@@ -1299,7 +1300,7 @@ export async function addWorkerLeaveRange(
         createdByUserId: session?.userId ?? null,
       })),
     })
-    revalidatePath("/workers")
+    revalidatePath("/horarios")
     revalidateAll()
     return { ok: true, assignedCount: chargeable.length, skippedWeekendCount, skippedHolidayCount }
   } catch (e) {
@@ -1310,7 +1311,7 @@ export async function addWorkerLeaveRange(
 export async function deleteWorkerLeave(id: string): Promise<ActionResult> {
   try {
     await prisma.workerLeave.delete({ where: { id } })
-    revalidatePath("/workers")
+    revalidatePath("/horarios")
     revalidateAll()
     return { ok: true }
   } catch (e) {

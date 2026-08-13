@@ -14,10 +14,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { saveWorker, toggleWorkerActive, setUserPassword, deleteWorker } from "@/lib/actions"
-import { VacationsSection, type BalanceRow, type LeaveRow } from "@/components/vacations-client"
-import { OverridesTab, type OverrideRow } from "@/components/schedules-client"
 
 export interface WorkerRow {
   id: string
@@ -31,34 +28,14 @@ export interface WorkerRow {
   mustChangePassword: boolean
 }
 
-interface VacationWorkerOption {
-  id: string
-  name: string
-}
-
 export function WorkersClient({
   rows,
   domain,
-  initialTab,
-  vacationYear,
-  vacationWorkers,
-  vacationBalances,
-  vacationLeaves,
-  clinicOverrides,
-  workerOverrides,
 }: {
   rows: WorkerRow[]
   domain: string
-  initialTab: "workers" | "vacations" | "overrides"
-  vacationYear: number
-  vacationWorkers: VacationWorkerOption[]
-  vacationBalances: BalanceRow[]
-  vacationLeaves: LeaveRow[]
-  clinicOverrides: OverrideRow[]
-  workerOverrides: OverrideRow[]
 }) {
   const router = useRouter()
-  const [activeTab, setActiveTab] = useState(initialTab)
   const [open, setOpen] = useState(false)
   const [editing, setEditing] = useState<WorkerRow | null>(null)
   const [role, setRole] = useState("WORKER")
@@ -139,17 +116,9 @@ export function WorkersClient({
     <div className="p-6 space-y-6">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Usuarios</h1>
-        <p className="text-muted-foreground">Empleadas, accesos y vacaciones.</p>
+        <p className="text-muted-foreground">Empleadas, accesos y roles.</p>
       </div>
 
-      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "workers" | "vacations" | "overrides")}>
-        <TabsList>
-          <TabsTrigger value="workers">Empleadas</TabsTrigger>
-          <TabsTrigger value="vacations">Vacaciones</TabsTrigger>
-          <TabsTrigger value="overrides">Excepciones puntuales</TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="workers" className="space-y-6">
       <div className="flex items-center justify-between gap-3">
         <p className="text-sm text-muted-foreground">{rows.length} usuarios · gestiona accesos y roles</p>
         <Button onClick={() => openForm(null)}>
@@ -233,21 +202,6 @@ export function WorkersClient({
           </TableBody>
         </Table>
       </Card>
-        </TabsContent>
-
-        <TabsContent value="vacations">
-          <VacationsSection
-            year={vacationYear}
-            workers={vacationWorkers}
-            balances={vacationBalances}
-            leaves={vacationLeaves}
-          />
-        </TabsContent>
-
-        <TabsContent value="overrides">
-          <OverridesTab workers={vacationWorkers} clinicOverrides={clinicOverrides} workerOverrides={workerOverrides} />
-        </TabsContent>
-      </Tabs>
 
       {/* Diálogo editar/crear usuario */}
       <Dialog open={open} onOpenChange={setOpen}>

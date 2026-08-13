@@ -2,43 +2,16 @@ import { prisma } from "@/lib/db"
 import { getActiveClinic } from "@/lib/clinic"
 import { isWhatsappConfigured } from "@/lib/whatsapp"
 import { SettingsClient } from "@/components/settings-client"
-import type { WeeklyDay, HolidayRow } from "@/components/schedules-client"
 
 export const dynamic = "force-dynamic"
-
-function groupByDay(rows: { dayOfWeek: number; startTime: string; endTime: string }[]): WeeklyDay[] {
-  const days: WeeklyDay[] = Array.from({ length: 7 }, (_, dayOfWeek) => ({ dayOfWeek, slots: [] }))
-  for (const r of rows) {
-    days[r.dayOfWeek].slots.push({ startTime: r.startTime, endTime: r.endTime })
-  }
-  for (const d of days) d.slots.sort((a, b) => a.startTime.localeCompare(b.startTime))
-  return days
-}
 
 export default async function SettingsPage() {
   const clinic = await getActiveClinic()
 
-  const [cabinCount, workers, clinicSlots, workerSlots, holidays] = await Promise.all([
+  const [cabinCount, workerCount] = await Promise.all([
     prisma.cabin.count({ where: { clinicId: clinic.id, active: true } }),
-    prisma.user.findMany({ where: { clinicId: clinic.id, active: true }, orderBy: { name: "asc" } }),
-    prisma.clinicWeeklySlot.findMany({ where: { clinicId: clinic.id } }),
-    prisma.workerWeeklySlot.findMany({ where: { clinicId: clinic.id } }),
-    prisma.holiday.findMany({ where: { clinicId: clinic.id }, orderBy: { date: "asc" } }),
+    prisma.user.count({ where: { clinicId: clinic.id, active: true } }),
   ])
-
-  const clinicWeekly = groupByDay(clinicSlots)
-
-  const workerWeeklyByWorker: Record<string, WeeklyDay[]> = {}
-  for (const w of workers) {
-    workerWeeklyByWorker[w.id] = groupByDay(workerSlots.filter((s) => s.workerId === w.id))
-  }
-
-  const holidayRows: HolidayRow[] = holidays.map((h) => ({
-    id: h.id,
-    date: h.date,
-    name: h.name,
-    scope: h.scope,
-  }))
 
   return (
     <SettingsClient
@@ -58,11 +31,7 @@ export default async function SettingsPage() {
       }}
       whatsappConfigured={isWhatsappConfigured()}
       cabinCount={cabinCount}
-      workerCount={workers.length}
-      workers={workers.map((w) => ({ id: w.id, name: w.name }))}
-      clinicWeekly={clinicWeekly}
-      workerWeeklyByWorker={workerWeeklyByWorker}
-      holidays={holidayRows}
+      workerCount={workerCount}
     />
   )
 }

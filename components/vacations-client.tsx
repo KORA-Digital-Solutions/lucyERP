@@ -284,7 +284,7 @@ export function VacationsSection({
   const [loading, setLoading] = useState(false)
 
   function goToYear(y: number) {
-    router.push(`/workers?tab=vacations&year=${y}`)
+    router.push(`/horarios?tab=vacations&year=${y}`)
   }
 
   async function handleAddLeave() {

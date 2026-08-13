@@ -145,7 +145,7 @@ export function AppointmentPanel({
   const [showResults, setShowResults] = useState(false)
   const searchRef = useRef<HTMLDivElement>(null)
 
-  // Inicialización al montar / cambiar de cita
+  // Inicialización al cambiar de cita a editar (o volver a "nueva")
   useEffect(() => {
     if (appointment) {
       setCustomerId(appointment.customerId)
@@ -161,24 +161,20 @@ export function AppointmentPanel({
       setCustomDuration(true)
       setQuery(customers.find((c) => c.id === appointment.customerId)?.label ?? "")
       setServiceQuery(services.find((s) => s.id === appointment.serviceId)?.name ?? "")
-    } else {
-      const t = defaultTime ?? "10:00"
-      const newCabinId = defaultCabinId ?? cabins[0]?.id ?? ""
-      setCustomerId("")
-      setServiceId("")
-      setServiceQuery("")
-      setWorkerId(workers[0]?.id ?? "")
-      setCabinId(newCabinId)
-      setDate(defaultDate)
-      setTime(t)
-      setDuration(60)
-      setEndTime(minToTime(timeToMin(t) + 60))
-      setStatus("PENDING")
-      setNotes("")
-      setCustomDuration(false)
-      setQuery("")
     }
-  }, [appointment, defaultDate, defaultCabinId, defaultTime, workers, cabins, customers])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [appointment])
+
+  // Al crear una cita nueva, el usuario puede reubicar el hueco haciendo clic en otra
+  // celda del calendario (defaultCabinId/defaultTime cambian sin desmontar el panel).
+  // Solo actualizamos cabina/hora: no debe perderse cliente, servicio, trabajador ni notas
+  // ya introducidos.
+  useEffect(() => {
+    if (appointment) return
+    if (defaultCabinId !== undefined) setCabinId(defaultCabinId)
+    if (defaultTime !== undefined) onChangeStart(defaultTime)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [appointment, defaultCabinId, defaultTime])
 
   // Cierra resultados al hacer clic fuera
   useEffect(() => {

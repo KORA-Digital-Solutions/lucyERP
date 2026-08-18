@@ -18,7 +18,6 @@ ERP local para clínicas estéticas. Gestiona agenda por cabinas, clientes, vent
 
 ```bash
 npm install
-npx prisma migrate dev
 npm run db:seed        # datos demo
 npm run start:local    # web + worker juntos
 ```
@@ -30,10 +29,25 @@ npm run dev                # http://localhost:3000
 npm run worker:reminders   # worker de recordatorios (otra terminal)
 ```
 
+### Tras un `git pull`
+
+No hay que hacer nada: `npm run dev` ejecuta antes `predev`, que regenera el
+cliente de Prisma y aplica las migraciones pendientes. Si el schema cambió y
+arrancas el servidor de otra forma, hazlo a mano:
+
+```bash
+npm run db:generate    # regenera el cliente Prisma
+npx prisma migrate deploy
+```
+
+> Si `prisma generate` falla con `EPERM ... query_engine-windows.dll.node`,
+> es que hay un `next dev` abierto bloqueando la DLL: ciérralo y repite.
+
 ## Variables de entorno (`.env`)
 
 ```env
-DATABASE_URL="file:./prisma/dev.db"
+# Ruta relativa a prisma/schema.prisma → genera prisma/dev.db
+DATABASE_URL="file:./dev.db"
 
 # WhatsApp — dejar vacío para modo simulado (no llama a Meta)
 WHATSAPP_ACCESS_TOKEN=

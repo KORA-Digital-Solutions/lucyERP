@@ -130,7 +130,7 @@ describe("configuración", () => {
     for (const ruta of ["/api/workers", "/api/services", "/api/cabins"]) {
       expect(src).toContain(ruta)
     }
-    for (const pagina of ["/horarios", "/appointments"]) {
+    for (const pagina of ["/horarios", "/appointments", "/reports"]) {
       expect(src).toContain(pagina)
     }
   })

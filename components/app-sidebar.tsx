@@ -18,6 +18,7 @@ import {
   ShieldCheck,
   ShieldOff,
   Clock,
+  BarChart3,
 } from "lucide-react"
 import { useState } from "react"
 import { cn } from "@/lib/utils"
@@ -33,6 +34,7 @@ const ALL_NAV = [
   { icon: Package,      label: "Stock",         href: "/stock",         roles: ["ADMIN", "WORKER"], group: "main" },
   { icon: Briefcase,    label: "Servicios",     href: "/services",      roles: ["ADMIN"],           group: "main" },
   { icon: DoorOpen,     label: "Cabinas",       href: "/cabins",        roles: ["ADMIN"],           group: "main" },
+  { icon: BarChart3,    label: "Informes",      href: "/reports",       roles: ["ADMIN"],           group: "history" },
   { icon: ClipboardList, label: "Historial citas", href: "/appointments", roles: ["ADMIN"],          group: "history" },
   { icon: UserCog,      label: "Usuarios",      href: "/workers",       roles: ["ADMIN"],           group: "admin" },
   { icon: Clock,        label: "Horarios",      href: "/horarios",      roles: ["ADMIN"],           group: "admin" },

@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs"
 import { resolve } from "node:path"
 import { PrismaClient } from "@prisma/client"
 import bcrypt from "bcryptjs"
+import { seedHolidays } from "../scripts/seed-holidays-albacete"
 
 // Carga .env si DATABASE_URL no está ya definido (p. ej. al ejecutar con tsx).
 if (!process.env.DATABASE_URL) {
@@ -150,20 +151,6 @@ async function main() {
       vacationDaysTotal: 21,
       personalDaysTotal: 1,
     })),
-  })
-
-  // Festivos: uno fijo nacional (para probar "Copiar fijos al año que viene")
-  // y uno local en la semana que viene, que sí se ve en la cuadrícula.
-  // Se deduplica por fecha porque Holiday es único por (clínica, fecha) y el
-  // festivo local podría caer justo en el fijo.
-  const holidaySeed = [
-    { date: `${currentYear}-12-25`, name: "Navidad", scope: "NATIONAL" },
-    { date: day(11), name: "Fiesta local", scope: "LOCAL" },
-  ]
-  await prisma.holiday.createMany({
-    data: holidaySeed
-      .filter((h, i) => holidaySeed.findIndex((o) => o.date === h.date) === i)
-      .map((h) => ({ clinicId: clinic.id, ...h })),
   })
 
   // Excepción del centro: el viernes de esta semana se cierra antes.
@@ -397,11 +384,19 @@ async function main() {
     }),
   ])
 
+  // Los festivos reales viven en su propio módulo y se encadenan aquí para que
+  // `npm run db:seed` deje la base lista de una vez y en el orden correcto:
+  // van después porque este seed borra la tabla Holiday.
+  //
+  // Las ventas y cajas de demo NO se siembran aquí a propósito: son registros
+  // transaccionales y ensucian la caja. Si hacen falta: `npm run db:seed-sales`.
+  await seedHolidays(prisma)
+
   console.log("✅ Seed completado:")
   console.log(`   Clínica: ${clinic.name}`)
   console.log(`   ${cabins.length} cabinas · 3 trabajadores · 5 servicios · 5 clientes · 5 citas`)
   console.log(`   2 proveedores (Dermoder, Lamdors) · 5 productos`)
-  console.log(`   Horarios: 2 festivos · 3 excepciones · 5 días de ausencia (semana del ${day(0)})`)
+  console.log(`   Horarios: 3 excepciones · 5 días de ausencia (semana del ${day(0)})`)
   console.log(`   Login demo: ${admin.email} / admin`)
 }
 

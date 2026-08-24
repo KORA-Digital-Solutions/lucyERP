@@ -15,7 +15,8 @@
  */
 import { PrismaClient } from "@prisma/client"
 
-const prisma = new PrismaClient()
+// El cliente lo inyecta quien llama: prisma/seed.ts reutiliza el suyo y la
+// entrada por CLI crea uno propio.
 
 const MARKER = "[demo]"
 const DAYS = 15
@@ -51,7 +52,7 @@ function atLocalTime(day: Date, hour: number, minute: number) {
 
 /* ─── Limpieza ───────────────────────────────────────────────────────────── */
 
-async function limpiar() {
+async function limpiar(prisma: PrismaClient) {
   const sales = await prisma.sale.findMany({
     where: { notes: { startsWith: MARKER } },
     select: { id: true },
@@ -98,7 +99,7 @@ async function limpiar() {
 
 /* ─── Generación ─────────────────────────────────────────────────────────── */
 
-async function generar() {
+async function generar(prisma: PrismaClient) {
   const clinic = await prisma.clinic.findFirst({ orderBy: { createdAt: "asc" } })
   if (!clinic) throw new Error("No hay ninguna clínica en la BD. Ejecuta antes npm run db:seed.")
 
@@ -289,12 +290,26 @@ async function generar() {
 
 /* ─── Entrada ────────────────────────────────────────────────────────────── */
 
-async function main() {
-  const limpiarSolo = process.argv.includes("--limpiar")
-  await limpiar() // siempre se limpia antes, así el script es reejecutable
-  if (!limpiarSolo) await generar()
+/**
+ * Siembra 15 días de ventas y cajas de demostración. Reejecutable: siempre
+ * limpia antes lo suyo (identificado por el MARKER) y regenera con la misma
+ * semilla, así que produce exactamente el mismo resultado cada vez.
+ *
+ * Es dato de demo, no de referencia: no debe ejecutarse contra producción.
+ */
+export async function seedDemoSales(prisma: PrismaClient, opts: { limpiarSolo?: boolean } = {}) {
+  await limpiar(prisma) // siempre se limpia antes, así el script es reejecutable
+  if (!opts.limpiarSolo) await generar(prisma)
 }
 
-main()
-  .catch((e) => { console.error(e); process.exit(1) })
-  .finally(() => prisma.$disconnect())
+// Entrada por CLI: `tsx scripts/seed-demo-sales.ts [--limpiar]`.
+// No se ejecuta al importar.
+if (require.main === module) {
+  const prisma = new PrismaClient()
+  seedDemoSales(prisma, { limpiarSolo: process.argv.includes("--limpiar") })
+    .catch((e) => {
+      console.error(e)
+      process.exit(1)
+    })
+    .finally(() => prisma.$disconnect())
+}

@@ -3,7 +3,10 @@ import { resolve } from "node:path"
 import { PrismaClient } from "@prisma/client"
 
 // Carga .env si DATABASE_URL no está ya definido (p. ej. al ejecutar con tsx).
-if (!process.env.DATABASE_URL) {
+// Solo hace falta al ejecutar este fichero como script; al importarlo desde
+// prisma/seed.ts el entorno ya viene resuelto.
+function loadEnv() {
+  if (process.env.DATABASE_URL) return
   try {
     for (const line of readFileSync(resolve(process.cwd(), ".env"), "utf8").split("\n")) {
       const m = line.match(/^\s*([\w.-]+)\s*=\s*(.*)?\s*$/)
@@ -13,8 +16,6 @@ if (!process.env.DATABASE_URL) {
     }
   } catch {}
 }
-
-const prisma = new PrismaClient()
 
 /**
  * Festivos oficiales de Albacete capital 2026, verificados cruzando dos
@@ -29,7 +30,7 @@ const prisma = new PrismaClient()
  * hay que actualizar esta lista cuando se publique el calendario del año
  * siguiente, no asumir que se repiten sin más.
  */
-const HOLIDAYS_ALBACETE_2026: { date: string; name: string; scope: "NATIONAL" | "REGIONAL" | "LOCAL" }[] = [
+export const HOLIDAYS_ALBACETE_2026: { date: string; name: string; scope: "NATIONAL" | "REGIONAL" | "LOCAL" }[] = [
   { date: "2026-01-01", name: "Año Nuevo", scope: "NATIONAL" },
   { date: "2026-01-06", name: "Epifanía del Señor", scope: "NATIONAL" },
   { date: "2026-04-02", name: "Jueves Santo", scope: "REGIONAL" },
@@ -46,7 +47,12 @@ const HOLIDAYS_ALBACETE_2026: { date: string; name: string; scope: "NATIONAL" | 
   { date: "2026-12-25", name: "Natividad del Señor", scope: "NATIONAL" },
 ]
 
-async function main() {
+/**
+ * Siembra los festivos de Albacete 2026. Es aditivo e idempotente: crea lo
+ * que falta y respeta lo que ya hay, nunca borra. Por eso puede ejecutarse
+ * contra una base de producción, a diferencia de prisma/seed.ts.
+ */
+export async function seedHolidays(prisma: PrismaClient) {
   const clinic = await prisma.clinic.findFirst({ orderBy: { createdAt: "asc" } })
   if (!clinic) {
     throw new Error("No hay clínica configurada. Ejecuta `npm run db:seed` primero.")
@@ -69,13 +75,19 @@ async function main() {
   }
 
   console.log(`✅ Festivos Albacete 2026: ${created} creado(s), ${skipped} ya existían.`)
+  return { created, skipped }
 }
 
-main()
-  .catch((e) => {
-    console.error(e)
-    process.exit(1)
-  })
-  .finally(async () => {
-    await prisma.$disconnect()
-  })
+// Entrada por CLI: `npm run db:seed-holidays`. No se ejecuta al importar.
+if (require.main === module) {
+  loadEnv()
+  const prisma = new PrismaClient()
+  seedHolidays(prisma)
+    .catch((e) => {
+      console.error(e)
+      process.exit(1)
+    })
+    .finally(async () => {
+      await prisma.$disconnect()
+    })
+}

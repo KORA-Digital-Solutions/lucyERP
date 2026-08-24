@@ -21,6 +21,7 @@ import {
 } from "@/components/ui/alert-dialog"
 import { cn } from "@/lib/utils"
 import { normalizeSearch } from "@/lib/format"
+import { STATUS_META, type AppointmentStatus } from "@/lib/enums"
 import { deleteAppointment } from "@/lib/actions"
 
 export interface AppointmentRow {
@@ -32,23 +33,6 @@ export interface AppointmentRow {
   serviceName: string
   workerName: string
   cabinName: string
-}
-
-const STATUS_LABEL: Record<string, string> = {
-  PENDING:   "Pendiente",
-  CONFIRMED: "Confirmada",
-  DONE:      "Realizada",
-  NO_SHOW:   "No asistió",
-  CANCELLED: "Cancelada",
-}
-
-// Mismos colores que STATUS_META en lib/enums.ts
-const STATUS_BADGE_CLS: Record<string, string> = {
-  PENDING:   "bg-[#FEF3E2] border-[#F59E0B] text-[#92400E]",
-  CONFIRMED: "bg-[#E6F4EA] border-[#34A853] text-[#1E6B34]",
-  DONE:      "bg-[#E5E9F7] border-[#3C54A4] text-[#274775]",
-  NO_SHOW:   "bg-[#FCE8E6] border-[#EA4335] text-[#B31412]",
-  CANCELLED: "bg-[#F1F2F4] border-[#9AA0A6] text-[#5F6368]",
 }
 
 function formatDate(iso: string) {
@@ -230,9 +214,9 @@ export function AppointmentsHistoryClient({ rows, defaultFrom, defaultTo, defaul
                   <TableCell>
                     <Badge
                       variant="outline"
-                      className={cn("text-xs", STATUS_BADGE_CLS[r.status] ?? "bg-muted text-muted-foreground")}
+                      className={cn("text-xs", STATUS_META[r.status as AppointmentStatus]?.className ?? "bg-muted text-muted-foreground")}
                     >
-                      {STATUS_LABEL[r.status] ?? r.status}
+                      {STATUS_META[r.status as AppointmentStatus]?.label ?? r.status}
                     </Badge>
                   </TableCell>
                   <TableCell onClick={(e) => e.stopPropagation()}>

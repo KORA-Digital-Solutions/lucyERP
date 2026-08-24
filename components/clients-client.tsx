@@ -29,6 +29,7 @@ import {
   getCustomerReminders, createCustomerReminder, completeCustomerReminder,
 } from "@/lib/actions"
 import { isValidPhone, normalizeSearch, onlyDigits } from "@/lib/format"
+import { STATUS_META, type AppointmentStatus } from "@/lib/enums"
 import {
   useTableSort, SortableTableHead, byText, byNumber, byDate, byBoolean,
 } from "@/components/sortable-table-head"
@@ -107,8 +108,6 @@ type ReminderData = Awaited<ReturnType<typeof getCustomerReminders>>
 
 type ProfileTab = "resumen" | "citas" | "recordatorios" | "progresion" | "finanzas"
 
-const STATUS_LABEL: Record<string, string> = { DONE: "Realizada", CONFIRMED: "Confirmada", PENDING: "Pendiente", CANCELLED: "Cancelada" }
-const STATUS_CLS: Record<string, string> = { DONE: "text-green-700", CONFIRMED: "text-blue-700", PENDING: "text-orange-600", CANCELLED: "text-muted-foreground" }
 
 function ClientProfileView({ row, onBack, onEdit }: { row: ClientRow; onBack: () => void; onEdit: () => void }) {
   const [data, setData] = useState<ProfileData | null>(null)
@@ -311,8 +310,8 @@ function ClientProfileView({ row, onBack, onEdit }: { row: ClientRow; onBack: ()
                         <p className="text-xs text-muted-foreground">{a.worker.name} · {a.cabin.name} · {a.durationMinutes} min</p>
                       </div>
                     </div>
-                    <span className={cn("text-xs font-medium", STATUS_CLS[a.status] ?? "")}>
-                      {STATUS_LABEL[a.status] ?? a.status}
+                    <span className={cn("text-xs font-medium", STATUS_META[a.status as AppointmentStatus]?.text ?? "")}>
+                      {STATUS_META[a.status as AppointmentStatus]?.label ?? a.status}
                     </span>
                   </div>
                 )

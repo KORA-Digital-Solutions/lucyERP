@@ -65,7 +65,10 @@ export default async function DashboardPage() {
     overdue: isReminderOverdue(r.dueDate, now),
   }))
 
-  const confirmed = todays.filter((a) => a.status === "CONFIRMED").length
+  // "Realizada" es el estado siguiente a "confirmada", no uno paralelo: la cita
+  // ya ha ocurrido, así que cuenta como confirmada. Si solo se mirase CONFIRMED,
+  // el contador bajaría según se van marcando las citas del día como realizadas.
+  const confirmed = todays.filter((a) => a.status === "CONFIRMED" || a.status === "DONE").length
   const todaySalesTotal = todaySales.reduce((s, x) => s + x.totalCents, 0)
   const todayCash = todaySales.filter((x) => x.paymentMethod === "CASH").reduce((s, x) => s + x.totalCents, 0)
   const todayCard = todaySales.filter((x) => x.paymentMethod === "CARD").reduce((s, x) => s + x.totalCents, 0)

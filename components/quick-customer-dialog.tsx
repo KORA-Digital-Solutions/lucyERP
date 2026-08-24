@@ -9,7 +9,7 @@ import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
 import { createCustomerQuick, type QuickCustomer } from "@/lib/actions"
-import { isValidPhone } from "@/lib/format"
+import { customerLabel, isValidPhone } from "@/lib/format"
 
 export type { QuickCustomer }
 
@@ -41,7 +41,7 @@ export function prefillFromQuery(query: string): Prefill {
 
 /* ─── Modal ──────────────────────────────────────────────────────────────── */
 
-type ExistingCustomer = { id: string; firstName: string; lastName: string | null; phone: string; balanceCents: number }
+type ExistingCustomer = { id: string; firstName: string; lastName: string | null; lastName2: string | null; phone: string; balanceCents: number }
 
 export function QuickCustomerDialog({
   open, query, customers, onOpenChange, onCreated, onSelectExisting,
@@ -182,7 +182,7 @@ export function QuickCustomerDialog({
                 <AlertCircle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
                 Ya existe un cliente con este teléfono:{" "}
                 <span className="font-medium">
-                  {duplicate.lastName ? `${duplicate.lastName}, ${duplicate.firstName}` : duplicate.firstName}
+                  {customerLabel(duplicate)}
                 </span>
               </p>
               {onSelectExisting && (

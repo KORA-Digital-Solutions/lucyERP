@@ -52,6 +52,7 @@ export interface CustomerOption {
   whatsappOptIn: boolean
   firstName: string
   lastName: string | null
+  lastName2: string | null
   phone: string
   balanceCents: number
 }
@@ -306,6 +307,7 @@ export function AppointmentPanel({
       whatsappOptIn: c.whatsappOptIn,
       firstName: c.firstName,
       lastName: c.lastName,
+      lastName2: c.lastName2,
       phone: c.phone,
       balanceCents: c.balanceCents,
     }

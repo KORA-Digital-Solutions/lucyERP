@@ -13,11 +13,12 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { createSale, payDebt, type SaleLineInput } from "@/lib/actions"
 import { QuickCustomerDialog } from "@/components/quick-customer-dialog"
+import { customerLabel } from "@/lib/format"
 import { cn } from "@/lib/utils"
 
 /* ─── Types ─────────────────────────────────────────────────────────────── */
 
-type Customer = { id: string; firstName: string; lastName: string | null; phone: string; balanceCents: number }
+type Customer = { id: string; firstName: string; lastName: string | null; lastName2: string | null; phone: string; balanceCents: number }
 type Worker   = { id: string; name: string; lastName: string | null; color: string | null }
 type Service  = { id: string; name: string; priceCents: number; pricingType: string; pricePerMinuteCents: number | null; durationMinutes: number }
 type Product  = { id: string; name: string; priceCents: number; stock: number }
@@ -63,15 +64,11 @@ function normalize(s: string) {
   return s.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "")
 }
 
-function customerLabel(c: Customer) {
-  return c.lastName ? `${c.lastName}, ${c.firstName}` : c.firstName
-}
-
 function searchCustomers(customers: Customer[], query: string): Customer[] {
   if (!query.trim()) return customers.slice(0, 8)
   const tokens = normalize(query).split(/\s+/).filter(Boolean)
   return customers.filter((c) => {
-    const hay = normalize(`${c.firstName} ${c.lastName ?? ""} ${c.phone}`)
+    const hay = normalize(`${c.firstName} ${c.lastName ?? ""} ${c.lastName2 ?? ""} ${c.phone}`)
     return tokens.every((t) => hay.includes(t))
   }).slice(0, 8)
 }
@@ -137,7 +134,9 @@ export function SalesClient({ sales, customers, services, products, workers, cur
     const to = dateTo ? new Date(dateTo + "T23:59:59") : null
     return sales.filter((s) => {
       if (q) {
-        const name = s.customer ? normalize(`${s.customer.firstName} ${s.customer.lastName ?? ""}`) : ""
+        const name = s.customer
+          ? normalize(`${s.customer.firstName} ${s.customer.lastName ?? ""} ${s.customer.lastName2 ?? ""}`)
+          : ""
         if (!name.includes(q)) return false
       }
       if (workerFilter !== "ALL") {

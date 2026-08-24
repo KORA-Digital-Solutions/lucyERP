@@ -39,20 +39,22 @@ const PERIODS = [
   { id: "custom", label: "Personalizado" },
 ] as const
 
+// Las empleadas son las del seed de demo (prisma/seed.ts): si se inventan
+// nombres, al enseñar el mockup parece que hay gente que no existe.
 const SAMPLE_WORKERS = [
-  { name: "Lucía",  servicesCents: 412_000, productsCents: 86_500,  tickets: 74 },
-  { name: "Marta",  servicesCents: 355_500, productsCents: 41_200,  tickets: 68 },
-  { name: "Carmen", servicesCents: 268_000, productsCents: 112_300, tickets: 55 },
-  { name: "Sara",   servicesCents: 151_500, productsCents: 23_000,  tickets: 31 },
+  { name: "Lucía Martínez", servicesCents: 412_000, productsCents: 86_500,  tickets: 74 },
+  { name: "Marta Sánchez",  servicesCents: 355_500, productsCents: 41_200,  tickets: 68 },
+  { name: "Lola Romero",    servicesCents: 268_000, productsCents: 112_300, tickets: 55 },
 ]
 
-const SAMPLE_MONTHS = [
+// Meses anteriores. El mes en curso se añade en el componente a partir del
+// total de las empleadas, para que las dos gráficas no se contradigan.
+const SAMPLE_PREVIOUS_MONTHS = [
   { label: "Mar", cents: 780_000 },
   { label: "Abr", cents: 845_000 },
   { label: "May", cents: 912_000 },
   { label: "Jun", cents: 1_034_000 },
-  { label: "Jul", cents: 1_180_000 },
-  { label: "Ago", cents: 1_450_000 },
+  { label: "Jul", cents: 1_140_000 },
 ]
 
 type Availability = "READY" | "PARTIAL" | "BLOCKED"
@@ -90,7 +92,7 @@ const GROUPS: ReportGroup[] = [
         title: "Facturación por empleada",
         question: "¿Cuánto factura cada una en servicios y cuánto en producto?",
         availability: "BLOCKED",
-        note: "El TPV ya pide la empleada en cada línea de servicio, pero no se guarda. Es un campo nuevo en la línea de venta.",
+        note: "El TPV pide la profesional en las líneas de servicio, pero al cobrar se descarta. Falta guardarla, y pedirla también en producto y tarjeta regalo.",
         featured: true,
       },
       {
@@ -143,6 +145,12 @@ const GROUPS: ReportGroup[] = [
         question: "¿Cuánto se va en alquiler, nóminas, luz, seguros…?",
         availability: "BLOCKED",
         note: "Hoy no existe ningún sitio donde anotar estos gastos. Haría falta una pantalla de gastos.",
+      },
+      {
+        title: "Margen por servicio",
+        question: "¿Cuánto deja de verdad cada tratamiento, descontando lo que cuesta darlo?",
+        availability: "BLOCKED",
+        note: "Pendiente de definir el coste de cabina: consumibles de stock, consumibles no inventariados, mano de obra por minuto y uso de aparatología.",
       },
       {
         title: "Resultado del período",
@@ -204,20 +212,15 @@ const GROUPS: ReportGroup[] = [
     reports: [
       {
         title: "Ocupación de agenda",
-        question: "¿Qué porcentaje de las horas disponibles se llena, por cabina y por empleada?",
+        question: "¿Qué porcentaje de las horas disponibles se llena?",
         availability: "READY",
+        note: "Por empleada mide carga de trabajo; por cabina, si hacen falta más puestos. Las cabinas son puestos calientes, así que no dicen nada del rendimiento de nadie.",
       },
       {
         title: "Cancelaciones y ausencias",
         question: "¿Cuántas citas se caen, cuándo y con qué servicio?",
         availability: "PARTIAL",
         note: "Se registra la cancelación; el «no asistió» depende de que se marque en la agenda.",
-      },
-      {
-        title: "Ingresos por hora de cabina",
-        question: "¿Qué cabina rinde más por hora ocupada?",
-        availability: "PARTIAL",
-        note: "Necesita enlazar la venta con la cita para saber en qué cabina se hizo.",
       },
       {
         title: "Horas trabajadas y ausencias",
@@ -245,7 +248,11 @@ export function ReportsClient() {
   const totalTickets = SAMPLE_WORKERS.reduce((s, w) => s + w.tickets, 0)
   const total = totalServices + totalProducts
   const maxWorkerTotal = Math.max(...SAMPLE_WORKERS.map((w) => w.servicesCents + w.productsCents))
-  const maxMonth = Math.max(...SAMPLE_MONTHS.map((m) => m.cents))
+
+  const months = [...SAMPLE_PREVIOUS_MONTHS, { label: "Ago", cents: total }]
+  const maxMonth = Math.max(...months.map((m) => m.cents))
+  const prevMonth = SAMPLE_PREVIOUS_MONTHS[SAMPLE_PREVIOUS_MONTHS.length - 1].cents
+  const growth = Math.round(((total - prevMonth) / prevMonth) * 100)
 
   const activeGroup = GROUPS.find((g) => g.id === group) ?? GROUPS[0]
 
@@ -294,7 +301,7 @@ export function ReportsClient() {
         <div className="mx-auto max-w-6xl space-y-8">
           {/* Resumen */}
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <SummaryCard label="Facturación" value={fmtEur(total)} hint="+12 % vs. mes pasado" icon={TrendingUp} />
+            <SummaryCard label="Facturación" value={fmtEur(total)} hint={`${growth > 0 ? "+" : ""}${growth} % vs. mes pasado`} icon={TrendingUp} />
             <SummaryCard label="Servicios" value={fmtEur(totalServices)} hint={`${Math.round((totalServices / total) * 100)} % del total`} icon={CalendarClock} />
             <SummaryCard label="Producto" value={fmtEur(totalProducts)} hint={`${Math.round((totalProducts / total) * 100)} % del total`} icon={Package} />
             <SummaryCard label="Ticket medio" value={fmtEur(Math.round(total / totalTickets))} hint={`${totalTickets} tickets`} icon={Wallet} />
@@ -388,7 +395,7 @@ export function ReportsClient() {
             </CardHeader>
             <CardContent>
               <div className="flex h-44 items-end gap-4">
-                {SAMPLE_MONTHS.map((m) => (
+                {months.map((m) => (
                   <div key={m.label} className="flex flex-1 flex-col items-center gap-2">
                     <span className="text-[11px] tabular-nums text-muted-foreground">{fmtEur(m.cents)}</span>
                     <div

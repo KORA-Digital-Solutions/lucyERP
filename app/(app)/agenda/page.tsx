@@ -123,6 +123,7 @@ export default async function AgendaPage({
         // Necesarios para el alta rápida: detectar duplicados y buscar por teléfono.
         firstName: c.firstName,
         lastName: c.lastName,
+        lastName2: c.lastName2,
         phone: c.phone,
         balanceCents: c.balanceCents,
       }))}

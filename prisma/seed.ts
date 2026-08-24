@@ -101,15 +101,15 @@ async function main() {
         email: "lucia.martinez@centroesteticalucia.com",
         role: "ADMIN",
         phone: "+34600000001",
-        color: "#274775",
+        color: "#A055A6",
         passwordHash: adminPasswordHash,
       },
     }),
     prisma.user.create({
-      data: { clinicId: clinic.id, name: "Marta", lastName: "Sánchez", role: "WORKER", color: "#3C54A4", email: "marta.sanchez@centroesteticalucia.com" },
+      data: { clinicId: clinic.id, name: "Marta", lastName: "Sánchez", role: "WORKER", color: "#487F2E", email: "marta.sanchez@centroesteticalucia.com" },
     }),
     prisma.user.create({
-      data: { clinicId: clinic.id, name: "Lola", lastName: "Romero", role: "WORKER", color: "#5F73B4", email: "lola.romero@centroesteticalucia.com" },
+      data: { clinicId: clinic.id, name: "Lola", lastName: "Romero", role: "WORKER", color: "#B25F18", email: "lola.romero@centroesteticalucia.com" },
     }),
   ])
 

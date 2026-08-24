@@ -36,10 +36,10 @@ export type LeaveType = keyof typeof LEAVE_TYPE
 // y las ausencias justificadas no consumen cupo: no se limitan por saldo ni
 // aparecen en el contador de días gastados.
 export const LEAVE_TYPE_META: Record<LeaveType, { label: string; quota: "vacation" | "personal" | null; color: string }> = {
-  VACATION: { label: "Vacaciones", quota: "vacation", color: "#3FBF8F" },
-  PERSONAL: { label: "Asuntos propios", quota: "personal", color: "#F5A524" },
-  SICK: { label: "Baja por enfermedad", quota: null, color: "#E08A7B" },
-  OTHER: { label: "Otra ausencia", quota: null, color: "#A78BC9" },
+  VACATION: { label: "Vacaciones", quota: "vacation", color: "#5F73B4" },
+  PERSONAL: { label: "Asuntos propios", quota: "personal", color: "#A8B4DE" },
+  SICK: { label: "Baja por enfermedad", quota: null, color: "#274775" },
+  OTHER: { label: "Otra ausencia", quota: null, color: "#8792B8" },
 }
 
 export const HOLIDAY_SCOPE = { NATIONAL: "NATIONAL", REGIONAL: "REGIONAL", LOCAL: "LOCAL" } as const

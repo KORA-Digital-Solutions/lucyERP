@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/db"
+import { requireSession, AuthError, authErrorResponse } from "@/lib/auth"
 import { getActiveClinicId } from "@/lib/clinic"
 import { validateAppointmentSlot } from "@/lib/availability"
 import { dayRange, toDateInputValue } from "@/lib/format"
@@ -7,21 +8,27 @@ import { dayRange, toDateInputValue } from "@/lib/format"
 
 // GET /api/appointments?date=YYYY-MM-DD
 export async function GET(req: NextRequest) {
-  const clinicId = await getActiveClinicId()
-  const date = req.nextUrl.searchParams.get("date") ?? toDateInputValue(new Date())
-  const { start, end } = dayRange(date)
+  try {
+    await requireSession()
+    const clinicId = await getActiveClinicId()
+    const date = req.nextUrl.searchParams.get("date") ?? toDateInputValue(new Date())
+    const { start, end } = dayRange(date)
 
-  const appointments = await prisma.appointment.findMany({
-    where: { clinicId, startAt: { gte: start, lte: end } },
-    include: { customer: true, service: true, worker: true, cabin: true },
-    orderBy: { startAt: "asc" },
-  })
-  return NextResponse.json(appointments)
+    const appointments = await prisma.appointment.findMany({
+      where: { clinicId, startAt: { gte: start, lte: end } },
+      include: { customer: true, service: true, worker: true, cabin: true },
+      orderBy: { startAt: "asc" },
+    })
+    return NextResponse.json(appointments)
+  } catch (e) {
+    return authErrorResponse(e)
+  }
 }
 
 // POST /api/appointments
 export async function POST(req: NextRequest) {
   try {
+    await requireSession()
     const clinicId = await getActiveClinicId()
     const body = await req.json()
     const service = await prisma.service.findUniqueOrThrow({ where: { id: body.serviceId } })
@@ -58,6 +65,7 @@ export async function POST(req: NextRequest) {
     })
     return NextResponse.json(appt, { status: 201 })
   } catch (err) {
+    if (err instanceof AuthError) return authErrorResponse(err)
     return NextResponse.json({ error: err instanceof Error ? err.message : "Error" }, { status: 400 })
   }
 }

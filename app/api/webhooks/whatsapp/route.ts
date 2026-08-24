@@ -1,6 +1,29 @@
+import crypto from "node:crypto"
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/db"
 import { getActiveClinicId } from "@/lib/clinic"
+
+/**
+ * Esta ruta es pública: Meta la llama sin cookie de sesión, así que el proxy la
+ * deja pasar. Su autenticación es la firma HMAC del cuerpo, no la sesión.
+ *
+ * Sin ella, cualquiera podría enviar eventos falsos y confirmar o CANCELAR las
+ * citas de cualquier clienta. Si WHATSAPP_APP_SECRET no está configurada se
+ * rechaza todo: mejor un webhook inactivo que uno abierto.
+ */
+function firmaValida(cuerpoCrudo: string, cabecera: string | null): boolean {
+  const appSecret = process.env.WHATSAPP_APP_SECRET
+  if (!appSecret) return false
+  if (!cabecera?.startsWith("sha256=")) return false
+
+  const esperada = crypto.createHmac("sha256", appSecret).update(cuerpoCrudo, "utf8").digest("hex")
+  const recibida = cabecera.slice("sha256=".length)
+  const a = Buffer.from(esperada, "hex")
+  const b = Buffer.from(recibida, "hex")
+  // Comparación en tiempo constante: un === filtraría la firma byte a byte.
+  if (a.length !== b.length || a.length === 0) return false
+  return crypto.timingSafeEqual(a, b)
+}
 
 // GET: verificación inicial de Meta.
 export async function GET(req: NextRequest) {
@@ -18,7 +41,15 @@ export async function GET(req: NextRequest) {
 // POST: recepción de eventos (estados de mensaje y respuestas entrantes).
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json()
+    // Hay que leer el cuerpo en crudo: la firma se calcula sobre los bytes
+    // exactos, y JSON.parse + re-serializar no los reproduce.
+    const cuerpoCrudo = await req.text()
+    if (!firmaValida(cuerpoCrudo, req.headers.get("x-hub-signature-256"))) {
+      console.warn("[webhook] firma inválida o WHATSAPP_APP_SECRET sin configurar")
+      return new NextResponse("Forbidden", { status: 403 })
+    }
+
+    const body = JSON.parse(cuerpoCrudo)
     const clinicId = await getActiveClinicId().catch(() => null)
     if (!clinicId) return NextResponse.json({ ok: true })
 

@@ -4,7 +4,7 @@ import { verifySession, getSessionFromRequest } from "@/lib/session"
 const PUBLIC = ["/login", "/api/auth"]
 const ADMIN_ONLY = ["/workers", "/services", "/cabins", "/settings"]
 
-export async function middleware(req: NextRequest) {
+export async function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl
 
   const isPublic = PUBLIC.some((p) => pathname.startsWith(p))

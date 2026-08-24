@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/db"
 import { getActiveClinic } from "@/lib/clinic"
 import { getSession } from "@/lib/session"
-import { dayRange, toDateInputValue, toTimeString, toTimeInputValue, formatLongDate } from "@/lib/format"
+import { dayRange, toDateInputValue, toTimeString, toTimeInputValue, formatLongDate, customerLabel } from "@/lib/format"
 import { getEffectiveClinicHours, getEffectiveWorkingHours } from "@/lib/schedule"
 import { AgendaBoard, type AgendaAppointment } from "@/components/agenda-board"
 
@@ -118,9 +118,13 @@ export default async function AgendaPage({
       }))}
       customers={customers.map((c) => ({
         id: c.id,
-        // Formato "primer apellido segundo apellido, nombre" (sin teléfono).
-        label: c.lastName ? `${[c.lastName, c.lastName2].filter(Boolean).join(" ")}, ${c.firstName}` : c.firstName,
+        label: customerLabel(c),
         whatsappOptIn: c.whatsappOptIn,
+        // Necesarios para el alta rápida: detectar duplicados y buscar por teléfono.
+        firstName: c.firstName,
+        lastName: c.lastName,
+        phone: c.phone,
+        balanceCents: c.balanceCents,
       }))}
       appointments={agendaAppointments}
     />

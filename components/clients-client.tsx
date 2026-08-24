@@ -28,7 +28,10 @@ import {
   saveCustomer, deleteCustomer, getClientProfile,
   getCustomerReminders, createCustomerReminder, completeCustomerReminder,
 } from "@/lib/actions"
-import { isValidPhone, normalizeSearch } from "@/lib/format"
+import { isValidPhone, normalizeSearch, onlyDigits } from "@/lib/format"
+import {
+  useTableSort, SortableTableHead, byText, byNumber, byDate, byBoolean,
+} from "@/components/sortable-table-head"
 
 export interface ClientRow {
   id: string
@@ -53,6 +56,29 @@ type ActivityStatus = "active" | "inactive"
 function getActivityStatus(row: ClientRow): ActivityStatus {
   return row.active ? "active" : "inactive"
 }
+
+const CLIENT_SORTERS = {
+  nombre: byText<ClientRow>((r) => `${r.lastName ?? ""} ${r.lastName2 ?? ""} ${r.firstName}`),
+  telefono: byText<ClientRow>((r) => r.phone),
+  nacimiento: byDate<ClientRow>((r) => r.birthDate),
+  whatsapp: byBoolean<ClientRow>((r) => r.whatsappOptIn),
+  // lastAppointment es un texto ya localizado ("12 ago 2026"), que como cadena
+  // ordenaría por nombre de mes. Se usa daysSinceLastAppt, que sí es numérico:
+  // más días = cita más antigua, así que asc deja las más antiguas primero.
+  ultimaCita: (a: ClientRow, b: ClientRow) => {
+    const va = a.daysSinceLastAppt
+    const vb = b.daysSinceLastAppt
+    if (va == null && vb == null) return 0
+    if (va == null) return 1
+    if (vb == null) return -1
+    return vb - va
+  },
+  saldo: byNumber<ClientRow>((r) => r.balanceCents),
+  deuda: byNumber<ClientRow>((r) => r.debtCents),
+  estado: byBoolean<ClientRow>((r) => r.active),
+}
+
+type ClientSortKey = keyof typeof CLIENT_SORTERS
 
 function hasInactivityWarning(row: ClientRow, threshold: number): boolean {
   return row.daysSinceLastAppt !== null && row.daysSinceLastAppt > threshold
@@ -493,15 +519,28 @@ export function ClientsClient({ rows, inactivityWarningDays }: { rows: ClientRow
   const filtered = useMemo(() => {
     const q = normalizeSearch(search)
     return rows.filter((r) => {
-      const words = normalizeSearch(`${r.lastName ?? ""} ${r.lastName2 ?? ""} ${r.firstName} ${r.phone}`).split(/\s+/).filter(Boolean)
+      const nameWords = normalizeSearch(`${r.lastName ?? ""} ${r.lastName2 ?? ""} ${r.firstName}`).split(/\s+/).filter(Boolean)
+      // Los teléfonos se guardan en formato internacional (+34600111222), así que
+      // se comparan solo los dígitos y por inclusión: buscar "600" encuentra el
+      // número aunque esté guardado con el prefijo del país delante.
+      const phoneDigits = [r.phone, r.phone2].filter(Boolean).map((p) => onlyDigits(String(p)))
       const tokens = q.split(/\s+/).filter(Boolean)
-      const matchesSearch = !q || tokens.every((t) => words.some((w) => w.startsWith(t)))
+      const matchesSearch =
+        !q ||
+        tokens.every((t) => {
+          const digits = onlyDigits(t)
+          const byName = nameWords.some((w) => w.startsWith(t))
+          const byPhone = digits.length > 0 && phoneDigits.some((p) => p.includes(digits))
+          return byName || byPhone
+        })
       const matchesStatus =
         statusFilter === "all" ||
         (statusFilter === "warning" ? hasInactivityWarning(r, inactivityWarningDays) : getActivityStatus(r) === statusFilter)
       return matchesSearch && matchesStatus
     })
-  }, [rows, search, statusFilter])
+  }, [rows, search, statusFilter, inactivityWarningDays])
+
+  const { sort, sorted, toggleSort } = useTableSort<ClientRow, ClientSortKey>(filtered, CLIENT_SORTERS)
 
   function openNew() { setEditing(null); setPanelOpen(true) }
   function openEdit(r: ClientRow) { setEditing(r); setPanelOpen(true) }
@@ -598,14 +637,14 @@ export function ClientsClient({ rows, inactivityWarningDays }: { rows: ClientRow
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Apellidos, Nombre</TableHead>
-                  <TableHead>Teléfono</TableHead>
-                  <TableHead>F. nacimiento</TableHead>
-                  <TableHead>WhatsApp</TableHead>
-                  <TableHead>Última cita</TableHead>
-                  <TableHead>Saldo a favor</TableHead>
-                  <TableHead>Deuda</TableHead>
-                  <TableHead>Estado</TableHead>
+                  <SortableTableHead sortKey="nombre" sort={sort} onToggle={toggleSort}>Apellidos, Nombre</SortableTableHead>
+                  <SortableTableHead sortKey="telefono" sort={sort} onToggle={toggleSort}>Teléfono</SortableTableHead>
+                  <SortableTableHead sortKey="nacimiento" sort={sort} onToggle={toggleSort}>F. nacimiento</SortableTableHead>
+                  <SortableTableHead sortKey="whatsapp" sort={sort} onToggle={toggleSort}>WhatsApp</SortableTableHead>
+                  <SortableTableHead sortKey="ultimaCita" sort={sort} onToggle={toggleSort}>Última cita</SortableTableHead>
+                  <SortableTableHead sortKey="saldo" sort={sort} onToggle={toggleSort}>Saldo a favor</SortableTableHead>
+                  <SortableTableHead sortKey="deuda" sort={sort} onToggle={toggleSort}>Deuda</SortableTableHead>
+                  <SortableTableHead sortKey="estado" sort={sort} onToggle={toggleSort}>Estado</SortableTableHead>
                   <TableHead className="text-right">
                     <div className="flex justify-end text-xs font-normal text-muted-foreground">
                       <span className="flex w-20 items-center justify-center gap-1"><Pencil className="h-3.5 w-3.5" /> Editar</span>
@@ -614,7 +653,7 @@ export function ClientsClient({ rows, inactivityWarningDays }: { rows: ClientRow
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filtered.map((r) => {
+                {sorted.map((r) => {
                   const status = getActivityStatus(r)
                   const badge = ACTIVITY_BADGE[status]
                   return (
@@ -684,7 +723,7 @@ export function ClientsClient({ rows, inactivityWarningDays }: { rows: ClientRow
                     </TableRow>
                   )
                 })}
-                {filtered.length === 0 && (
+                {sorted.length === 0 && (
                   <TableRow>
                     <TableCell colSpan={9} className="py-8 text-center text-muted-foreground">Sin resultados.</TableCell>
                   </TableRow>

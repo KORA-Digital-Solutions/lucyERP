@@ -66,6 +66,24 @@ export function formatLongDate(date: string): string {
   })
 }
 
+// Etiqueta de cliente en formato "primer apellido segundo apellido, nombre".
+// Se usa tanto al listar clientes desde el servidor como al dar de alta uno
+// nuevo sin recargar, para que ambos caminos muestren lo mismo.
+export function customerLabel(c: {
+  firstName: string
+  lastName?: string | null
+  lastName2?: string | null
+}): string {
+  const apellidos = [c.lastName, c.lastName2].filter(Boolean).join(" ")
+  return apellidos ? `${apellidos}, ${c.firstName}` : c.firstName
+}
+
+// Deja solo los dígitos de una cadena. Útil para comparar teléfonos sin que
+// estorben el prefijo "+", los espacios o los guiones.
+export function onlyDigits(s: string): string {
+  return s.replace(/\D/g, "")
+}
+
 // Normaliza un teléfono a formato internacional simple (+34...).
 export function normalizePhone(phone: string, defaultCountry = "34"): string {
   let p = phone.replace(/[\s\-().]/g, "")

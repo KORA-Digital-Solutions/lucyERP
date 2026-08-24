@@ -11,6 +11,28 @@ vi.mock("next/cache", () => ({
   revalidatePath: () => {},
 }))
 
+// Las server actions exigen ahora sesión y rol (lib/auth). Estas pruebas
+// verifican la lógica de horarios, no la autorización, así que se les inyecta
+// una sesión de administradora. Que los guardas existan se comprueba aparte,
+// en tests/security/authorization.test.ts.
+vi.mock("@/lib/auth", () => {
+  const sesion = {
+    userId: "test-admin",
+    email: "admin@test.local",
+    name: "Test",
+    lastName: null,
+    role: "ADMIN",
+    clinicId: "test-clinic",
+    mustChangePassword: false,
+  }
+  return {
+    requireSession: async () => sesion,
+    requireAdmin: async () => sesion,
+    AuthError: class AuthError extends Error {},
+    authErrorResponse: () => new Response(null, { status: 401 }),
+  }
+})
+
 // vi.mock() se hoista al principio del módulo, así que estos imports
 // estáticos ya reciben next/headers y next/cache mockeados.
 import { prisma } from "@/lib/db"

@@ -3,9 +3,28 @@ import { cookies } from "next/headers"
 import { NextRequest } from "next/server"
 
 const COOKIE = "lucia_session"
-const secret = new TextEncoder().encode(
-  process.env.SESSION_SECRET ?? "dev-secret-change-in-production-32chars!!"
-)
+// Sin SESSION_SECRET no se arranca en producción: con un fallback escrito en
+// el repo, cualquiera que lo lea puede firmarse un JWT de administradora.
+// En desarrollo se permite un valor fijo para no obligar a configurar nada.
+const SECRET_DESARROLLO = "dev-secret-change-in-production-32chars!!"
+
+function resolverSecreto(): string {
+  const fromEnv = process.env.SESSION_SECRET
+  if (fromEnv && fromEnv.length >= 32) return fromEnv
+
+  if (process.env.NODE_ENV === "production") {
+    throw new Error(
+      "SESSION_SECRET no está definida o tiene menos de 32 caracteres. " +
+        "Define una cadena larga y aleatoria antes de arrancar en producción.",
+    )
+  }
+  if (fromEnv) {
+    console.warn("[session] SESSION_SECRET es demasiado corta (<32); usando la de desarrollo.")
+  }
+  return SECRET_DESARROLLO
+}
+
+const secret = new TextEncoder().encode(resolverSecreto())
 
 export interface SessionPayload {
   userId: string

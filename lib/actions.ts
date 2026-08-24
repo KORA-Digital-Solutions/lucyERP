@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache"
 import bcrypt from "bcryptjs"
 import { prisma } from "@/lib/db"
 import { getActiveClinicId } from "@/lib/clinic"
+import { requireSession, requireAdmin } from "@/lib/auth"
 import { validateAppointmentSlot } from "@/lib/availability"
 import { sendReminderForAppointmentId } from "@/lib/whatsapp"
 import { combineDateTime, dayRange } from "@/lib/format"
@@ -52,6 +53,7 @@ function normalizePhone(phone: string): string {
 
 export async function createAppointment(fd: FormData): Promise<ActionResult> {
   try {
+    await requireSession()
     const clinicId = await getActiveClinicId()
     const serviceId = str(fd, "serviceId")
     const service = await prisma.service.findUniqueOrThrow({ where: { id: serviceId } })
@@ -92,6 +94,7 @@ export async function createAppointment(fd: FormData): Promise<ActionResult> {
 
 export async function updateAppointment(id: string, fd: FormData): Promise<ActionResult> {
   try {
+    await requireSession()
     const clinicId = await getActiveClinicId()
     const serviceId = str(fd, "serviceId")
     const service = await prisma.service.findUniqueOrThrow({ where: { id: serviceId } })
@@ -159,6 +162,7 @@ export async function updateAppointment(id: string, fd: FormData): Promise<Actio
 
 export async function setAppointmentStatus(id: string, status: string, reason?: string): Promise<ActionResult> {
   try {
+    await requireSession()
     const data: Record<string, unknown> = { status }
     if (status === "CANCELLED") {
       data.cancelledAt = new Date()
@@ -174,6 +178,7 @@ export async function setAppointmentStatus(id: string, status: string, reason?: 
 
 export async function deleteAppointment(id: string): Promise<ActionResult> {
   try {
+    await requireSession()
     await prisma.whatsappMessage.deleteMany({ where: { appointmentId: id } })
     await prisma.appointment.delete({ where: { id } })
     revalidateAll()
@@ -185,6 +190,7 @@ export async function deleteAppointment(id: string): Promise<ActionResult> {
 
 export async function sendReminder(appointmentId: string): Promise<ActionResult> {
   try {
+    await requireSession()
     const result = await sendReminderForAppointmentId(appointmentId)
     revalidateAll()
     if (!result.ok) return { ok: false, error: result.errorMessage || "Fallo al enviar." }
@@ -214,6 +220,7 @@ function customerDataFromForm(fd: FormData) {
 
 export async function saveCustomer(id: string | null, fd: FormData): Promise<ActionResult> {
   try {
+    await requireSession()
     const clinicId = await getActiveClinicId()
     const data = customerDataFromForm(fd)
     if (id) {
@@ -245,6 +252,7 @@ export async function createCustomerQuick(
   fd: FormData,
 ): Promise<ActionResult & { customer?: QuickCustomer }> {
   try {
+    await requireSession()
     const clinicId = await getActiveClinicId()
     const data = customerDataFromForm(fd)
     if (!data.firstName) return { ok: false, error: "El nombre es obligatorio." }
@@ -263,6 +271,7 @@ export async function createCustomerQuick(
 
 export async function deleteCustomer(id: string): Promise<ActionResult> {
   try {
+    await requireAdmin()
     const count = await prisma.appointment.count({ where: { customerId: id } })
     if (count > 0) return { ok: false, error: "No se puede borrar: el cliente tiene citas." }
     await prisma.customer.delete({ where: { id } })
@@ -277,6 +286,7 @@ export async function deleteCustomer(id: string): Promise<ActionResult> {
 
 export async function saveService(id: string | null, fd: FormData): Promise<ActionResult> {
   try {
+    await requireAdmin()
     const clinicId = await getActiveClinicId()
     const pricingType = str(fd, "pricingType") || "FIXED"
     const pricePerMinute = str(fd, "pricePerMinute")
@@ -308,6 +318,7 @@ export async function saveService(id: string | null, fd: FormData): Promise<Acti
 
 export async function toggleServiceActive(id: string, active: boolean): Promise<ActionResult> {
   try {
+    await requireAdmin()
     await prisma.service.update({ where: { id }, data: { active } })
     revalidateAll()
     return { ok: true }
@@ -320,6 +331,7 @@ export async function toggleServiceActive(id: string, active: boolean): Promise<
 
 export async function saveServiceFamily(id: string | null, fd: FormData): Promise<ActionResult> {
   try {
+    await requireAdmin()
     const clinicId = await getActiveClinicId()
     const data = {
       name: str(fd, "name"),
@@ -342,6 +354,7 @@ export async function saveServiceFamily(id: string | null, fd: FormData): Promis
 
 export async function toggleServiceFamilyActive(id: string, active: boolean): Promise<ActionResult> {
   try {
+    await requireAdmin()
     await prisma.serviceFamily.update({ where: { id }, data: { active } })
     revalidateAll()
     return { ok: true }
@@ -354,6 +367,7 @@ export async function toggleServiceFamilyActive(id: string, active: boolean): Pr
 
 export async function saveWorker(id: string | null, fd: FormData): Promise<ActionResult> {
   try {
+    await requireAdmin()
     const clinicId = await getActiveClinicId()
     const data = {
       name: str(fd, "name"),
@@ -378,6 +392,7 @@ export async function saveWorker(id: string | null, fd: FormData): Promise<Actio
 
 export async function setUserPassword(id: string, password: string): Promise<ActionResult> {
   try {
+    await requireAdmin()
     if (password.length < 6) return { ok: false, error: "La contraseña debe tener al menos 6 caracteres." }
     const hash = await bcrypt.hash(password, 12)
     await prisma.user.update({ where: { id }, data: { passwordHash: hash, mustChangePassword: true } })
@@ -390,6 +405,7 @@ export async function setUserPassword(id: string, password: string): Promise<Act
 
 export async function changeOwnPassword(userId: string, newPassword: string): Promise<ActionResult> {
   try {
+    await requireSession()
     if (newPassword.length < 6) return { ok: false, error: "La contraseña debe tener al menos 6 caracteres." }
     const hash = await bcrypt.hash(newPassword, 12)
     await prisma.user.update({ where: { id: userId }, data: { passwordHash: hash, mustChangePassword: false } })
@@ -407,6 +423,7 @@ export async function changeOwnPassword(userId: string, newPassword: string): Pr
 
 export async function toggleWorkerActive(id: string, active: boolean): Promise<ActionResult> {
   try {
+    await requireAdmin()
     await prisma.user.update({ where: { id }, data: { active } })
     revalidateAll()
     return { ok: true }
@@ -430,6 +447,7 @@ export async function checkAvailability(
   scheduleConflict: string | null
 }> {
   try {
+    await requireSession()
     if (!cabinId || !workerId || !customerId || !date || !time || durationMinutes <= 0) {
       return { cabinConflict: null, workerConflict: null, customerConflict: null, scheduleConflict: null }
     }
@@ -450,6 +468,7 @@ export async function checkAvailability(
 
 export async function deleteWorker(id: string): Promise<ActionResult> {
   try {
+    await requireAdmin()
     const user = await prisma.user.findUniqueOrThrow({ where: { id }, select: { active: true } })
     if (user.active) return { ok: false, error: "Desactiva el usuario antes de eliminarlo." }
     await prisma.user.delete({ where: { id } })
@@ -464,6 +483,7 @@ export async function deleteWorker(id: string): Promise<ActionResult> {
 
 export async function saveCabin(id: string | null, fd: FormData): Promise<ActionResult> {
   try {
+    await requireAdmin()
     const clinicId = await getActiveClinicId()
     const data = {
       name: str(fd, "name"),
@@ -485,6 +505,7 @@ export async function saveCabin(id: string | null, fd: FormData): Promise<Action
 
 export async function toggleCabinActive(id: string, active: boolean): Promise<ActionResult> {
   try {
+    await requireAdmin()
     await prisma.cabin.update({ where: { id }, data: { active } })
     revalidateAll()
     return { ok: true }
@@ -497,6 +518,7 @@ export async function toggleCabinActive(id: string, active: boolean): Promise<Ac
 
 export async function updateClinic(fd: FormData): Promise<ActionResult> {
   try {
+    await requireAdmin()
     const clinicId = await getActiveClinicId()
     await prisma.clinic.update({
       where: { id: clinicId },
@@ -526,6 +548,7 @@ export async function updateClinic(fd: FormData): Promise<ActionResult> {
 
 export async function saveSupplier(id: string | null, fd: FormData): Promise<ActionResult> {
   try {
+    await requireSession()
     const clinicId = await getActiveClinicId()
     const data = {
       name: str(fd, "name"),
@@ -548,6 +571,7 @@ export async function saveSupplier(id: string | null, fd: FormData): Promise<Act
 
 export async function deleteSupplier(id: string): Promise<ActionResult> {
   try {
+    await requireSession()
     const count = await prisma.product.count({ where: { supplierId: id } })
     if (count > 0) return { ok: false, error: "No se puede borrar: tiene productos asignados." }
     await prisma.supplier.delete({ where: { id } })
@@ -562,6 +586,7 @@ export async function deleteSupplier(id: string): Promise<ActionResult> {
 
 export async function saveProduct(id: string | null, fd: FormData): Promise<ActionResult> {
   try {
+    await requireSession()
     const clinicId = await getActiveClinicId()
     const data = {
       name: str(fd, "name"),
@@ -589,6 +614,7 @@ export async function registerOrder(
   notes: string | null,
 ): Promise<ActionResult> {
   try {
+    await requireSession()
     const session = await getSession()
     if (!session) return { ok: false, error: "No autenticado." }
     if (lines.length === 0) return { ok: false, error: "Añade al menos un producto." }
@@ -619,6 +645,7 @@ export async function addStockMovement(
   notes: string | null,
 ): Promise<ActionResult> {
   try {
+    await requireSession()
     const session = await getSession()
     if (!session) return { ok: false, error: "No autenticado." }
 
@@ -668,6 +695,7 @@ export async function createSale(
   balanceAppliedCents: number = 0,
 ): Promise<ActionResult> {
   try {
+    await requireSession()
     const session = await getSession()
     if (!session) return { ok: false, error: "No autenticado." }
     // El usuario de la sesión puede haber desaparecido (BD resembrada, usuario
@@ -809,6 +837,7 @@ export async function createSale(
 
 export async function payDebt(saleId: string, paymentMethod: "CARD" | "CASH"): Promise<ActionResult> {
   try {
+    await requireSession()
     const session = await getSession()
     if (!session) return { ok: false, error: "No autenticado." }
     const clinicId = await getActiveClinicId()
@@ -847,6 +876,7 @@ export async function payDebt(saleId: string, paymentMethod: "CARD" | "CASH"): P
 
 export async function openCashRegister(openingCashCents: number): Promise<ActionResult> {
   try {
+    await requireSession()
     const session = await getSession()
     if (!session) return { ok: false, error: "No autenticado." }
     const clinicId = await getActiveClinicId()
@@ -876,6 +906,7 @@ export async function closeCashRegister(
   denominationNotes: string | null,
 ): Promise<ActionResult> {
   try {
+    await requireSession()
     const session = await getSession()
     if (!session) return { ok: false, error: "No autenticado." }
 
@@ -906,6 +937,7 @@ export async function closeCashRegister(
 /* ---------------------------- FICHA CLIENTE ------------------------------ */
 
 export async function getClientProfile(customerId: string) {
+  await requireSession()
   const [customer, movements, recentSales, appointments] = await Promise.all([
     prisma.customer.findUnique({
       where: { id: customerId },
@@ -944,6 +976,7 @@ export async function getClientProfile(customerId: string) {
 }
 
 export async function getCustomerReminders(customerId: string) {
+  await requireSession()
   return prisma.customerReminder.findMany({
     where: { customerId },
     include: {
@@ -956,6 +989,7 @@ export async function getCustomerReminders(customerId: string) {
 
 export async function createCustomerReminder(customerId: string, fd: FormData): Promise<ActionResult> {
   try {
+    await requireSession()
     const session = await getSession()
     if (!session) return { ok: false, error: "No autenticado." }
 
@@ -987,6 +1021,7 @@ export async function createCustomerReminder(customerId: string, fd: FormData): 
 
 export async function completeCustomerReminder(id: string): Promise<ActionResult> {
   try {
+    await requireSession()
     const session = await getSession()
     if (!session) return { ok: false, error: "No autenticado." }
 
@@ -1006,6 +1041,9 @@ export async function getMonthOccupancy(
   year: number,
   month: number,
 ): Promise<Record<string, string[]>> {
+  // Ya estaba protegida antes de esta revisión. Se mantiene el fallo suave
+  // (devolver vacío en vez de lanzar) porque alimenta el mini calendario y
+  // un throw aquí rompería la vista; el proxy ya redirige al login.
   const session = await getSession()
   if (!session) return {}
   const clinicId = await getActiveClinicId()
@@ -1047,6 +1085,7 @@ function validateSlots(slots: WeeklySlotInput[]): string | null {
 
 export async function saveClinicWeeklySchedule(days: WeeklyDayInput[]): Promise<ActionResult> {
   try {
+    await requireAdmin()
     const clinicId = await getActiveClinicId()
     for (const d of days) {
       const err = validateSlots(d.slots)
@@ -1072,6 +1111,7 @@ export async function saveClinicWeeklySchedule(days: WeeklyDayInput[]): Promise<
 
 export async function saveWorkerWeeklySchedule(workerId: string, days: WeeklyDayInput[]): Promise<ActionResult> {
   try {
+    await requireAdmin()
     const clinicId = await getActiveClinicId()
     for (const d of days) {
       const err = validateSlots(d.slots)
@@ -1102,6 +1142,7 @@ export async function saveClinicScheduleOverride(
   reason: string | null,
 ): Promise<ActionResult> {
   try {
+    await requireAdmin()
     const clinicId = await getActiveClinicId()
     if (!closed) {
       const err = validateSlots(slots)
@@ -1127,6 +1168,7 @@ export async function saveClinicScheduleOverride(
 
 export async function deleteClinicScheduleOverride(id: string): Promise<ActionResult> {
   try {
+    await requireAdmin()
     await prisma.clinicScheduleOverride.delete({ where: { id } })
     revalidatePath("/horarios")
     revalidateAll()
@@ -1144,6 +1186,7 @@ export async function saveWorkerScheduleOverride(
   reason: string | null,
 ): Promise<ActionResult> {
   try {
+    await requireAdmin()
     const clinicId = await getActiveClinicId()
     if (!closed) {
       const err = validateSlots(slots)
@@ -1171,6 +1214,7 @@ export async function saveWorkerScheduleOverride(
 
 export async function deleteWorkerScheduleOverride(id: string): Promise<ActionResult> {
   try {
+    await requireAdmin()
     await prisma.workerScheduleOverride.delete({ where: { id } })
     revalidatePath("/horarios")
     revalidateAll()
@@ -1182,6 +1226,7 @@ export async function deleteWorkerScheduleOverride(id: string): Promise<ActionRe
 
 export async function saveHoliday(id: string | null, fd: FormData): Promise<ActionResult> {
   try {
+    await requireAdmin()
     const clinicId = await getActiveClinicId()
     const data = {
       date: str(fd, "date"),
@@ -1204,6 +1249,7 @@ export async function saveHoliday(id: string | null, fd: FormData): Promise<Acti
 
 export async function deleteHoliday(id: string): Promise<ActionResult> {
   try {
+    await requireAdmin()
     await prisma.holiday.delete({ where: { id } })
     revalidatePath("/horarios")
     revalidateAll()
@@ -1228,6 +1274,7 @@ const FIXED_CIVIL_HOLIDAYS = [
 
 export async function copyFixedHolidaysToYear(targetYear: number): Promise<ActionResult> {
   try {
+    await requireAdmin()
     const clinicId = await getActiveClinicId()
     let created = 0
     for (const h of FIXED_CIVIL_HOLIDAYS) {
@@ -1251,6 +1298,7 @@ export type BulkHolidayEntry = { date: string; name: string; scope: string }
 // resto de acciones de este archivo que no tienen un id único que devolver).
 export async function bulkImportHolidays(entries: BulkHolidayEntry[]): Promise<ActionResult> {
   try {
+    await requireAdmin()
     const clinicId = await getActiveClinicId()
     if (entries.length === 0) return { ok: false, error: "No hay festivos para importar." }
     let created = 0
@@ -1282,6 +1330,7 @@ export async function saveLeaveBalance(
   personalDaysTotal: number,
 ): Promise<ActionResult> {
   try {
+    await requireAdmin()
     const clinicId = await getActiveClinicId()
     await prisma.workerLeaveBalance.upsert({
       where: { clinicId_workerId_year: { clinicId, workerId, year } },
@@ -1326,6 +1375,7 @@ export async function addWorkerLeaveRange(
   notes: string | null,
 ): Promise<AddLeaveRangeResult> {
   try {
+    await requireAdmin()
     if (!startDate || !endDate) return { ok: false, error: "Indica la fecha de inicio y fin." }
     if (startDate > endDate) return { ok: false, error: "La fecha de fin debe ser posterior o igual a la de inicio." }
 
@@ -1419,6 +1469,7 @@ export async function addWorkerLeaveRange(
 
 export async function deleteWorkerLeave(id: string): Promise<ActionResult> {
   try {
+    await requireAdmin()
     await prisma.workerLeave.delete({ where: { id } })
     revalidatePath("/horarios")
     revalidateAll()

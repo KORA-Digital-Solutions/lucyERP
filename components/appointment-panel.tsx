@@ -3,7 +3,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
-import { Search, X, Send, XCircle, Clock, CheckCircle2, UserX, type LucideIcon } from "lucide-react"
+import { Search, X, Send, XCircle, Clock, CheckCircle2, UserX, UserPlus, type LucideIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -24,7 +24,8 @@ import {
   checkAvailability,
 } from "@/lib/actions"
 import { STATUS_META, REMINDER_META, type AppointmentStatus } from "@/lib/enums"
-import { formatDuration, normalizeSearch } from "@/lib/format"
+import { formatDuration, normalizeSearch, onlyDigits, customerLabel } from "@/lib/format"
+import { QuickCustomerDialog, type QuickCustomer } from "@/components/quick-customer-dialog"
 
 // Mismos iconos/colores que las acciones rápidas de la agenda.
 const STATUS_ICON: Record<AppointmentStatus, { Icon: LucideIcon; className: string }> = {
@@ -49,6 +50,10 @@ export interface CustomerOption {
   /** "primer apellido segundo apellido, nombre" */
   label: string
   whatsappOptIn: boolean
+  firstName: string
+  lastName: string | null
+  phone: string
+  balanceCents: number
 }
 export interface ExistingAppointment {
   id: string
@@ -210,11 +215,25 @@ export function AppointmentPanel({
     return () => clearTimeout(timer)
   }, [cabinId, workerId, customerId, date, time, duration, appointment?.id])
 
+  // Clientes dados de alta desde este mismo panel: la lista de props viene del
+  // servidor y no se refresca hasta recargar, así que se acumulan aparte.
+  const [extraCustomers, setExtraCustomers] = useState<CustomerOption[]>([])
+  const [creatingCustomer, setCreatingCustomer] = useState(false)
+  const allCustomers = useMemo(() => [...extraCustomers, ...customers], [extraCustomers, customers])
+
   const results = useMemo(() => {
     const q = normalizeSearch(query)
     if (!q) return []
-    return customers.filter((c) => normalizeSearch(c.label).includes(q)).slice(0, 8)
-  }, [query, customers])
+    const digits = onlyDigits(q)
+    return allCustomers
+      .filter((c) => {
+        // Por nombre, o por teléfono comparando solo dígitos: el número se
+        // guarda como +34600111222, así que buscar "600" tiene que encontrarlo.
+        if (normalizeSearch(c.label).includes(q)) return true
+        return digits.length > 0 && onlyDigits(c.phone).includes(digits)
+      })
+      .slice(0, 8)
+  }, [query, allCustomers])
 
   const serviceResults = useMemo(() => {
     const q = normalizeSearch(serviceQuery)
@@ -272,13 +291,37 @@ export function AppointmentPanel({
     setQuery(c.label)
     setShowResults(false)
   }
+
+  function openCreateCustomer() {
+    setShowResults(false)
+    setCreatingCustomer(true)
+  }
+
+  // El alta rápida devuelve el cliente creado; se añade a la lista local y se
+  // selecciona, para no perder lo que ya se llevaba escrito en la cita.
+  function handleCustomerCreated(c: QuickCustomer) {
+    const option: CustomerOption = {
+      id: c.id,
+      label: customerLabel(c),
+      whatsappOptIn: c.whatsappOptIn,
+      firstName: c.firstName,
+      lastName: c.lastName,
+      phone: c.phone,
+      balanceCents: c.balanceCents,
+    }
+    setExtraCustomers((prev) => [option, ...prev])
+    setCustomerId(option.id)
+    setQuery(option.label)
+    setCreatingCustomer(false)
+    setShowResults(false)
+  }
   function clearCustomer() {
     setCustomerId("")
     setQuery("")
     setShowResults(false)
   }
 
-  const selectedCustomer = customers.find((c) => c.id === customerId)
+  const selectedCustomer = allCustomers.find((c) => c.id === customerId)
 
   function buildFormData(): FormData {
     const fd = new FormData()
@@ -391,8 +434,16 @@ export function AppointmentPanel({
               </ul>
             )}
             {showResults && query.trim() && results.length === 0 && !customerId && (
-              <div className="absolute z-20 mt-1 w-full rounded-md border bg-popover px-3 py-2 text-sm text-muted-foreground shadow-md">
-                Sin resultados
+              <div className="absolute z-20 mt-1 w-full rounded-md border bg-popover p-1 shadow-md">
+                <p className="px-2 py-1.5 text-sm text-muted-foreground">Sin resultados</p>
+                <button
+                  type="button"
+                  onClick={openCreateCustomer}
+                  className="flex w-full items-center gap-2 rounded-sm px-2 py-2 text-left text-sm font-medium hover:bg-accent"
+                >
+                  <UserPlus className="h-4 w-4" />
+                  Crear cliente «{query.trim()}»
+                </button>
               </div>
             )}
           </div>
@@ -607,6 +658,20 @@ export function AppointmentPanel({
           {loading ? "Guardando…" : isEdit ? "Guardar" : "Crear cita"}
         </Button>
       </div>
+
+      <QuickCustomerDialog
+        open={creatingCustomer}
+        query={query}
+        customers={allCustomers}
+        onOpenChange={setCreatingCustomer}
+        onCreated={handleCustomerCreated}
+        onSelectExisting={(c) => {
+          setCustomerId(c.id)
+          setQuery(allCustomers.find((x) => x.id === c.id)?.label ?? `${c.firstName}`)
+          setCreatingCustomer(false)
+          setShowResults(false)
+        }}
+      />
     </aside>
   )
 }

@@ -235,8 +235,10 @@ export type QuickCustomer = {
   id: string
   firstName: string
   lastName: string | null
+  lastName2: string | null
   phone: string
   balanceCents: number
+  whatsappOptIn: boolean
 }
 
 export async function createCustomerQuick(
@@ -249,7 +251,7 @@ export async function createCustomerQuick(
     if (!data.phone) return { ok: false, error: "El teléfono es obligatorio." }
     const created = await prisma.customer.create({
       data: { ...data, clinicId },
-      select: { id: true, firstName: true, lastName: true, phone: true, balanceCents: true },
+      select: { id: true, firstName: true, lastName: true, lastName2: true, phone: true, balanceCents: true, whatsappOptIn: true },
     })
     revalidateAll()
     revalidatePath("/sales")

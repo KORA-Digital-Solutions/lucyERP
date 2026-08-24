@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
-import { ChevronLeft, ChevronRight, Plus, Filter, MessageCircle, CheckCircle2, XCircle, Clock, Send, UserX, Pencil } from "lucide-react"
+import { ChevronLeft, ChevronRight, Plus, Filter, MessageCircle, CheckCircle2, XCircle, Clock, Send, UserX, Pencil, Trash2, AlertTriangle } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Switch } from "@/components/ui/switch"
@@ -24,6 +24,11 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu"
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel,
+  AlertDialogContent, AlertDialogDescription,
+  AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { cn } from "@/lib/utils"
 import { STATUS_META, type AppointmentStatus } from "@/lib/enums"
 import { MiniCalendar } from "@/components/mini-calendar"
@@ -270,9 +275,18 @@ export function AgendaBoard({
   const [presetCabin, setPresetCabin] = useState<string | undefined>(undefined)
   const [presetTime, setPresetTime] = useState<string | undefined>(undefined)
   const [draft, setDraft] = useState<SlotDraft | null>(null)
+  // Cita pendiente de confirmar cancelación (menú contextual).
+  const [cancelTarget, setCancelTarget] = useState<{ id: string; customerName: string; serviceName: string; startLabel: string } | null>(null)
+
   async function quickStatusChange(apptId: string, newStatus: string) {
     await setAppointmentStatus(apptId, newStatus)
     router.refresh()
+  }
+
+  async function confirmCancel() {
+    if (!cancelTarget) return
+    await quickStatusChange(cancelTarget.id, "CANCELLED")
+    setCancelTarget(null)
   }
 
   async function quickSendReminder(apptId: string) {
@@ -295,6 +309,27 @@ export function AgendaBoard({
   }, [openingMinutes, closingMinutes])
 
   const totalHeight = hours.length * HOUR_PX
+
+  // Guía de la hora actual. Arranca en null y se rellena en el cliente para no
+  // desajustar la hidratación (el servidor y el navegador no dan la misma hora).
+  const [now, setNow] = useState<Date | null>(null)
+  useEffect(() => {
+    const tick = () => setNow(new Date())
+    tick()
+    const id = setInterval(tick, 60_000)
+    return () => clearInterval(id)
+  }, [])
+
+  // Solo se pinta si estás viendo el día de hoy y la hora cae dentro del
+  // horario del centro. Usa la misma fórmula que las citas para que cuadre.
+  const nowLine = useMemo(() => {
+    if (!now) return null
+    const hoy = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`
+    if (hoy !== date) return null
+    const mins = now.getHours() * 60 + now.getMinutes()
+    if (mins < openingMinutes || mins > closingMinutes) return null
+    return { top: ((mins - openingMinutes) / 60) * HOUR_PX }
+  }, [now, date, openingMinutes, closingMinutes])
 
   const visible = useMemo(
     () =>
@@ -479,7 +514,24 @@ export function AgendaBoard({
             <ClosedState reason={closedReason} />
           ) : (
             <Card className={cn("overflow-hidden p-0", isWeekend && "bg-[#E5E9F7]/40")}>
-              <div className="flex">
+              <div className="relative flex">
+                {/* Guía de la hora actual. El offset de 48px salta la fila de
+                    cabeceras (h-12), que queda fuera de la rejilla horaria. */}
+                {nowLine && (
+                  <div
+                    className="pointer-events-none absolute inset-x-0 z-20 flex items-center"
+                    style={{ top: 48 + nowLine.top }}
+                  >
+                    {/* Punto al final de la columna de horas, pegado al arranque
+                        de la línea. Sin etiqueta de hora: la posición ya la
+                        indica, y un texto quedaría desfasado entre refrescos. */}
+                    <span className="flex w-16 shrink-0 items-center justify-end">
+                      <span className="h-[7px] w-[7px] shrink-0 rounded-full bg-[#274775]" />
+                    </span>
+                    <div className="h-px flex-1 bg-[#274775]/70" />
+                  </div>
+                )}
+
                 {/* Columna de horas */}
                 <div className="w-16 shrink-0 border-r">
                   <div className="h-12 border-b" />
@@ -612,8 +664,11 @@ export function AgendaBoard({
                                     </ContextMenuItem>
                                   )}
                                   {!isCancelled && (
-                                    <ContextMenuItem onClick={() => quickStatusChange(a.id, "CANCELLED")}>
-                                      <XCircle className="mr-2 h-4 w-4 text-muted-foreground" /> Cancelar cita
+                                    <ContextMenuItem
+                                      className="text-[#B31412] focus:text-[#B31412]"
+                                      onClick={() => setCancelTarget({ id: a.id, customerName: a.customerName, serviceName: a.serviceName, startLabel: a.startLabel })}
+                                    >
+                                      <Trash2 className="mr-2 h-4 w-4 text-[#B31412]" /> Cancelar cita
                                     </ContextMenuItem>
                                   )}
                                   <ContextMenuSeparator />
@@ -662,6 +717,29 @@ export function AgendaBoard({
           />
         )}
       </div>
+
+      <AlertDialog open={!!cancelTarget} onOpenChange={(open) => !open && setCancelTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5 text-[#B31412]" /> ¿Cancelar la cita?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              Vas a cancelar la cita de{" "}
+              <span className="font-medium text-foreground">{cancelTarget?.customerName}</span>{" "}
+              ({cancelTarget?.serviceName}) de las{" "}
+              <span className="font-medium text-foreground">{cancelTarget?.startLabel}</span>.
+              La cita dejará el hueco libre y la clienta no recibirá el recordatorio.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Volver</AlertDialogCancel>
+            <AlertDialogAction className="bg-[#B31412] hover:bg-[#8B0000] text-white" onClick={confirmCancel}>
+              Sí, cancelar cita
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <DayOverrideDialog
         state={overrideDialogState}

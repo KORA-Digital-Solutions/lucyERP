@@ -2,12 +2,13 @@
 
 import { revalidatePath } from "next/cache"
 import bcrypt from "bcryptjs"
+import type { Prisma } from "@prisma/client"
 import { prisma } from "@/lib/db"
 import { getActiveClinicId } from "@/lib/clinic"
 import { requireSession, requireAdmin } from "@/lib/auth"
 import { validateAppointmentSlot } from "@/lib/availability"
 import { sendReminderForAppointmentId } from "@/lib/whatsapp"
-import { combineDateTime, dayRange } from "@/lib/format"
+import { combineDateTime, dayRange, isValidPhone, normalizePhone } from "@/lib/format"
 import { getSession } from "@/lib/session"
 import { WEEKDAY_LABELS, LEAVE_TYPE_META, type LeaveType } from "@/lib/enums"
 import { dayOfWeekFromDateStr } from "@/lib/schedule"
@@ -40,13 +41,6 @@ function bool(fd: FormData, key: string): boolean {
 function int(fd: FormData, key: string, fallback = 0): number {
   const n = Number(str(fd, key))
   return Number.isFinite(n) ? n : fallback
-}
-
-function normalizePhone(phone: string): string {
-  const digits = phone.replace(/\s+/g, "")
-  if (!digits) return ""
-  if (digits.startsWith("+")) return digits
-  return `+34${digits}`
 }
 
 /* ------------------------------- CITAS ---------------------------------- */
@@ -204,13 +198,27 @@ export async function sendReminder(appointmentId: string): Promise<ActionResult>
 
 function customerDataFromForm(fd: FormData) {
   const birthDateRaw = optStr(fd, "birthDate")
+  const phone = normalizePhone(str(fd, "phone"))
+  const phone2 = normalizePhone(optStr(fd, "phone2") ?? "") || null
   return {
     firstName: str(fd, "firstName"),
-    lastName: optStr(fd, "lastName"),
+    // Obligatorio, así que nunca es null: si viene vacío lo rechaza
+    // validateCustomer con un mensaje claro, no la base de datos.
+    lastName: str(fd, "lastName"),
     lastName2: optStr(fd, "lastName2"),
-    phone: normalizePhone(str(fd, "phone")),
-    phone2: normalizePhone(optStr(fd, "phone2") ?? "") || null,
+    sex: optStr(fd, "sex"),
+    profession: optStr(fd, "profession"),
+    phone,
+    // Sin teléfono la etiqueta no pinta nada: se limpia para que no quede un
+    // "madre" suelto si se borra el número. El formulario ya bloquea el campo,
+    // esto es el cinturón por si llega un envío sin pasar por él.
+    phoneLabel: phone ? optStr(fd, "phoneLabel") : null,
+    phone2,
+    phone2Label: phone2 ? optStr(fd, "phone2Label") : null,
     email: optStr(fd, "email"),
+    address: optStr(fd, "address"),
+    referralSource: optStr(fd, "referralSource"),
+    allergies: optStr(fd, "allergies"),
     birthDate: birthDateRaw ? new Date(birthDateRaw) : null,
     notes: optStr(fd, "notes"),
     whatsappOptIn: bool(fd, "whatsappOptIn"),
@@ -218,17 +226,44 @@ function customerDataFromForm(fd: FormData) {
   }
 }
 
+// Nombre, primer apellido y teléfono son los campos obligatorios de la ficha. Se
+// comprueban aquí, y no solo con el `required` del formulario, para que los
+// dos caminos de alta —la ficha y el alta rápida del TPV— tengan el mismo
+// rasero y no dependan de lo que valide el navegador.
+function validateCustomer(data: ReturnType<typeof customerDataFromForm>): string | null {
+  if (!data.firstName) return "El nombre es obligatorio."
+  if (!data.lastName) return "El primer apellido es obligatorio."
+  if (!data.phone) return "El teléfono es obligatorio."
+  if (!isValidPhone(data.phone)) return "Teléfono no válido. Ejemplo: 600 111 222."
+  if (data.phone2 && !isValidPhone(data.phone2)) return "El segundo teléfono no es válido."
+  return null
+}
+
+// Siguiente nº de expediente de la clínica. Se calcula dentro de la misma
+// transacción que el alta para que dos altas a la vez no cojan el mismo
+// número; el índice único (clinicId, fileNumber) es la última red de seguridad.
+async function nextFileNumber(tx: Prisma.TransactionClient, clinicId: string): Promise<number> {
+  const last = await tx.customer.aggregate({ where: { clinicId }, _max: { fileNumber: true } })
+  return (last._max.fileNumber ?? 0) + 1
+}
+
 export async function saveCustomer(id: string | null, fd: FormData): Promise<ActionResult> {
   try {
     await requireSession()
     const clinicId = await getActiveClinicId()
     const data = customerDataFromForm(fd)
+    const invalido = validateCustomer(data)
+    if (invalido) return { ok: false, error: invalido }
     if (id) {
       await prisma.customer.update({ where: { id }, data })
       revalidateAll()
       return { ok: true, id }
     }
-    const created = await prisma.customer.create({ data: { ...data, clinicId } })
+    const created = await prisma.$transaction(async (tx) =>
+      tx.customer.create({
+        data: { ...data, clinicId, fileNumber: await nextFileNumber(tx, clinicId) },
+      }),
+    )
     revalidateAll()
     return { ok: true, id: created.id }
   } catch (e) {
@@ -241,7 +276,7 @@ export async function saveCustomer(id: string | null, fd: FormData): Promise<Act
 export type QuickCustomer = {
   id: string
   firstName: string
-  lastName: string | null
+  lastName: string
   lastName2: string | null
   phone: string
   balanceCents: number
@@ -255,12 +290,14 @@ export async function createCustomerQuick(
     await requireSession()
     const clinicId = await getActiveClinicId()
     const data = customerDataFromForm(fd)
-    if (!data.firstName) return { ok: false, error: "El nombre es obligatorio." }
-    if (!data.phone) return { ok: false, error: "El teléfono es obligatorio." }
-    const created = await prisma.customer.create({
-      data: { ...data, clinicId },
-      select: { id: true, firstName: true, lastName: true, lastName2: true, phone: true, balanceCents: true, whatsappOptIn: true },
-    })
+    const invalido = validateCustomer(data)
+    if (invalido) return { ok: false, error: invalido }
+    const created = await prisma.$transaction(async (tx) =>
+      tx.customer.create({
+        data: { ...data, clinicId, fileNumber: await nextFileNumber(tx, clinicId) },
+        select: { id: true, firstName: true, lastName: true, lastName2: true, phone: true, balanceCents: true, whatsappOptIn: true },
+      }),
+    )
     revalidateAll()
     revalidatePath("/sales")
     return { ok: true, id: created.id, customer: created }

@@ -84,17 +84,103 @@ export function onlyDigits(s: string): string {
   return s.replace(/\D/g, "")
 }
 
-// Normaliza un teléfono a formato internacional simple (+34...).
-export function normalizePhone(phone: string, defaultCountry = "34"): string {
-  let p = phone.replace(/[\s\-().]/g, "")
+// ── Teléfonos ─────────────────────────────────────────────────────────────
+// Se guardan en formato internacional ("+34600111222") porque es lo que exige
+// la API de WhatsApp. En los formularios el prefijo va en su propio campo, con
+// +34 puesto de fábrica, para que no haya que escribirlo ni adivinar que se
+// añade solo.
+
+export const DEFAULT_PHONE_PREFIX = "+34"
+
+// Prefijos que se saben partir. NO limita lo que se puede escribir —el campo
+// del prefijo es libre—, solo sirve para volver a separar un número guardado
+// en sus dos trozos. Lo que no esté aquí no se parte y se enseña entero, que
+// es preferible a cortarlo por donde no es.
+const KNOWN_PREFIXES = ["+34", "+351", "+33", "+39", "+44", "+49", "+212", "+40", "+31", "+32", "+41"]
+
+function cleanPhone(phone: string): string {
+  return phone.replace(/[\s\-().]/g, "")
+}
+
+// Normaliza a la forma en que se guarda: "+34" + número. Acepta el número con
+// espacios o guiones, con "00" delante en vez de "+", o sin prefijo ninguno
+// (entonces se le pone el de por defecto).
+export function normalizePhone(phone: string, defaultPrefix = DEFAULT_PHONE_PREFIX): string {
+  let p = cleanPhone(phone)
+  if (!p) return ""
+  if (p.startsWith("00")) p = "+" + p.slice(2)
   if (p.startsWith("+")) return p
-  if (p.startsWith("00")) return "+" + p.slice(2)
-  if (p.length === 9) return `+${defaultCountry}${p}` // móvil/fijo español sin prefijo
-  return "+" + p
+  return `${defaultPrefix}${p}`
 }
 
 export function isValidPhone(phone: string): boolean {
-  if (!phone.trim()) return false
-  return /^\+?\d{9,15}$/.test(normalizePhone(phone).replace("+", "")) ||
-    /^\+\d{8,15}$/.test(normalizePhone(phone))
+  return /^\+\d{8,15}$/.test(normalizePhone(phone))
+}
+
+// Junta los dos campos del formulario en el valor que se guarda. Sin número
+// no hay teléfono, aunque el prefijo esté puesto.
+export function joinPhone(prefix: string, national: string): string {
+  const limpio = cleanPhone(national)
+  // Si el número ya viene entero con su prefijo —un guardado antiguo cuyo
+  // prefijo no supimos partir— se respeta tal cual en vez de recomponerlo.
+  if (limpio.startsWith("+")) return limpio
+  const n = onlyDigits(limpio)
+  if (!n) return ""
+  const d = onlyDigits(prefix)
+  return `${d ? `+${d}` : DEFAULT_PHONE_PREFIX}${n}`
+}
+
+// Parte un teléfono guardado en (prefijo, número nacional) para repartirlo
+// entre los dos campos del formulario.
+export function splitPhone(phone: string | null | undefined): { prefix: string; national: string } {
+  const p = normalizePhone(String(phone ?? ""))
+  if (!p) return { prefix: DEFAULT_PHONE_PREFIX, national: "" }
+  // De más largo a más corto, si no "+34" se comería los "+351".
+  const match = [...KNOWN_PREFIXES]
+    .sort((a, b) => b.length - a.length)
+    .find((k) => p.startsWith(k))
+  if (!match) return { prefix: "", national: p }
+  return { prefix: match, national: p.slice(match.length) }
+}
+
+// El número sin prefijo, agrupado como se lee en voz alta: "600 44 45 55".
+// Los españoles van 3-2-2-2; el resto, en bloques de tres.
+export function formatNationalPhone(prefix: string, national: string): string {
+  if (cleanPhone(national).startsWith("+")) return cleanPhone(national)
+  const n = onlyDigits(national)
+  if (!n) return ""
+  if (prefix === DEFAULT_PHONE_PREFIX && n.length === 9) {
+    return `${n.slice(0, 3)} ${n.slice(3, 5)} ${n.slice(5, 7)} ${n.slice(7)}`
+  }
+  return n.replace(/(\d{3})(?=\d)/g, "$1 ")
+}
+
+// Teléfono para mostrar: "+34600444555" -> "(+34) 600 44 45 55".
+export function formatPhone(phone: string | null | undefined): string {
+  if (!phone) return ""
+  const raw = String(phone).trim()
+  if (!raw) return ""
+  const cleaned = cleanPhone(raw)
+
+  let e164: string
+  if (cleaned.startsWith("+")) e164 = cleaned
+  else if (cleaned.startsWith("00")) e164 = "+" + cleaned.slice(2)
+  else if (/^\d{9}$/.test(cleaned)) e164 = DEFAULT_PHONE_PREFIX + cleaned
+  else return raw // no parece un teléfono: se devuelve tal cual
+
+  const { prefix, national } = splitPhone(e164)
+  if (!prefix || !national) return raw
+  return `(${prefix}) ${formatNationalPhone(prefix, national)}`
+}
+
+// La API de WhatsApp quiere el número internacional sin "+": 34600111222.
+export function toWhatsappPhone(phone: string): string {
+  return onlyDigits(normalizePhone(phone))
+}
+
+// Nº de expediente a 4 dígitos: 7 -> "0007". A partir de 9999 se muestra
+// entero, que es mejor que truncarlo.
+export function formatFileNumber(n: number | null | undefined): string {
+  if (n == null) return "—"
+  return String(n).padStart(4, "0")
 }

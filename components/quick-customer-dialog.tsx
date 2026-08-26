@@ -87,12 +87,13 @@ export function QuickCustomerDialog({
   }, [phone, customers])
 
   const phoneValid = phone.trim() !== "" && isValidPhone(phone)
-  const canSubmit = firstName.trim() !== "" && phoneValid && !loading
+  const canSubmit = firstName.trim() !== "" && lastName.trim() !== "" && phoneValid && !loading
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (!firstName.trim()) { setError("El nombre es obligatorio."); return }
-    if (!isValidPhone(phone)) { setError("Teléfono no válido. Ejemplo: 600 111 222 o +34600111222."); return }
+    if (!lastName.trim()) { setError("El primer apellido es obligatorio."); return }
+    if (!isValidPhone(phone)) { setError("Teléfono no válido. Ejemplo: 600 111 222."); return }
 
     const fd = new FormData()
     fd.set("firstName", firstName.trim())
@@ -172,7 +173,7 @@ export function QuickCustomerDialog({
           {phone !== "" && !phoneValid && (
             <p className="text-xs text-destructive flex items-center gap-1.5">
               <AlertCircle className="h-3.5 w-3.5 shrink-0" />
-              Teléfono no válido. Ejemplo: 600 111 222 o +34600111222.
+              Teléfono no válido. Ejemplo: 600 111 222.
             </p>
           )}
 

@@ -2,14 +2,19 @@
 
 import { revalidatePath } from "next/cache"
 import bcrypt from "bcryptjs"
+import type { Prisma } from "@prisma/client"
 import { prisma } from "@/lib/db"
 import { getActiveClinicId } from "@/lib/clinic"
 import { requireSession, requireAdmin } from "@/lib/auth"
 import { validateAppointmentSlot } from "@/lib/availability"
 import { sendReminderForAppointmentId } from "@/lib/whatsapp"
-import { combineDateTime, dayRange } from "@/lib/format"
+import {
+  combineDateTime, dayRange, isValidPhone, isValidPhonePrefix, joinPhone, normalizePhone,
+} from "@/lib/format"
 import { getSession } from "@/lib/session"
-import { WEEKDAY_LABELS, LEAVE_TYPE_META, type LeaveType } from "@/lib/enums"
+import {
+  WEEKDAY_LABELS, LEAVE_TYPE_META, HOME_CARE_FAMILY, GIFT_CARD_FAMILY, type LeaveType,
+} from "@/lib/enums"
 import { dayOfWeekFromDateStr } from "@/lib/schedule"
 import { DEFAULT_REMINDER_ALERT_DAYS } from "@/lib/reminders"
 
@@ -40,13 +45,6 @@ function bool(fd: FormData, key: string): boolean {
 function int(fd: FormData, key: string, fallback = 0): number {
   const n = Number(str(fd, key))
   return Number.isFinite(n) ? n : fallback
-}
-
-function normalizePhone(phone: string): string {
-  const digits = phone.replace(/\s+/g, "")
-  if (!digits) return ""
-  if (digits.startsWith("+")) return digits
-  return `+34${digits}`
 }
 
 /* ------------------------------- CITAS ---------------------------------- */
@@ -204,13 +202,27 @@ export async function sendReminder(appointmentId: string): Promise<ActionResult>
 
 function customerDataFromForm(fd: FormData) {
   const birthDateRaw = optStr(fd, "birthDate")
+  const phone = joinPhone(str(fd, "phonePrefix"), str(fd, "phone"))
+  const phone2 = joinPhone(str(fd, "phone2Prefix"), str(fd, "phone2")) || null
   return {
     firstName: str(fd, "firstName"),
-    lastName: optStr(fd, "lastName"),
+    // Obligatorio, así que nunca es null: si viene vacío lo rechaza
+    // validateCustomer con un mensaje claro, no la base de datos.
+    lastName: str(fd, "lastName"),
     lastName2: optStr(fd, "lastName2"),
-    phone: normalizePhone(str(fd, "phone")),
-    phone2: normalizePhone(optStr(fd, "phone2") ?? "") || null,
+    sex: optStr(fd, "sex"),
+    profession: optStr(fd, "profession"),
+    phone,
+    // Sin teléfono la etiqueta no pinta nada: se limpia para que no quede un
+    // "madre" suelto si se borra el número. El formulario ya bloquea el campo,
+    // esto es el cinturón por si llega un envío sin pasar por él.
+    phoneLabel: phone ? optStr(fd, "phoneLabel") : null,
+    phone2,
+    phone2Label: phone2 ? optStr(fd, "phone2Label") : null,
     email: optStr(fd, "email"),
+    address: optStr(fd, "address"),
+    referralSource: optStr(fd, "referralSource"),
+    allergies: optStr(fd, "allergies"),
     birthDate: birthDateRaw ? new Date(birthDateRaw) : null,
     notes: optStr(fd, "notes"),
     whatsappOptIn: bool(fd, "whatsappOptIn"),
@@ -218,17 +230,48 @@ function customerDataFromForm(fd: FormData) {
   }
 }
 
+// Nombre, primer apellido y teléfono son los campos obligatorios de la ficha. Se
+// comprueban aquí, y no solo con el `required` del formulario, para que los
+// dos caminos de alta —la ficha y el alta rápida del TPV— tengan el mismo
+// rasero y no dependan de lo que valide el navegador.
+function validateCustomer(fd: FormData, data: ReturnType<typeof customerDataFromForm>): string | null {
+  if (!data.firstName) return "El nombre es obligatorio."
+  if (!data.lastName) return "El primer apellido es obligatorio."
+  if (!data.phone) return "El teléfono es obligatorio."
+  if (!isValidPhonePrefix(str(fd, "phonePrefix"))) return "El prefijo del teléfono no es válido. Ejemplo: +34."
+  if (!isValidPhone(data.phone)) return "Teléfono no válido. Ejemplo: 600 111 222."
+  if (data.phone2) {
+    if (!isValidPhonePrefix(str(fd, "phone2Prefix"))) return "El prefijo del teléfono 2 no es válido. Ejemplo: +34."
+    if (!isValidPhone(data.phone2)) return "El segundo teléfono no es válido."
+  }
+  return null
+}
+
+// Siguiente nº de expediente de la clínica. Se calcula dentro de la misma
+// transacción que el alta para que dos altas a la vez no cojan el mismo
+// número; el índice único (clinicId, fileNumber) es la última red de seguridad.
+async function nextFileNumber(tx: Prisma.TransactionClient, clinicId: string): Promise<number> {
+  const last = await tx.customer.aggregate({ where: { clinicId }, _max: { fileNumber: true } })
+  return (last._max.fileNumber ?? 0) + 1
+}
+
 export async function saveCustomer(id: string | null, fd: FormData): Promise<ActionResult> {
   try {
     await requireSession()
     const clinicId = await getActiveClinicId()
     const data = customerDataFromForm(fd)
+    const invalido = validateCustomer(fd, data)
+    if (invalido) return { ok: false, error: invalido }
     if (id) {
       await prisma.customer.update({ where: { id }, data })
       revalidateAll()
       return { ok: true, id }
     }
-    const created = await prisma.customer.create({ data: { ...data, clinicId } })
+    const created = await prisma.$transaction(async (tx) =>
+      tx.customer.create({
+        data: { ...data, clinicId, fileNumber: await nextFileNumber(tx, clinicId) },
+      }),
+    )
     revalidateAll()
     return { ok: true, id: created.id }
   } catch (e) {
@@ -241,7 +284,7 @@ export async function saveCustomer(id: string | null, fd: FormData): Promise<Act
 export type QuickCustomer = {
   id: string
   firstName: string
-  lastName: string | null
+  lastName: string
   lastName2: string | null
   phone: string
   balanceCents: number
@@ -255,12 +298,14 @@ export async function createCustomerQuick(
     await requireSession()
     const clinicId = await getActiveClinicId()
     const data = customerDataFromForm(fd)
-    if (!data.firstName) return { ok: false, error: "El nombre es obligatorio." }
-    if (!data.phone) return { ok: false, error: "El teléfono es obligatorio." }
-    const created = await prisma.customer.create({
-      data: { ...data, clinicId },
-      select: { id: true, firstName: true, lastName: true, lastName2: true, phone: true, balanceCents: true, whatsappOptIn: true },
-    })
+    const invalido = validateCustomer(fd, data)
+    if (invalido) return { ok: false, error: invalido }
+    const created = await prisma.$transaction(async (tx) =>
+      tx.customer.create({
+        data: { ...data, clinicId, fileNumber: await nextFileNumber(tx, clinicId) },
+        select: { id: true, firstName: true, lastName: true, lastName2: true, phone: true, balanceCents: true, whatsappOptIn: true },
+      }),
+    )
     revalidateAll()
     revalidatePath("/sales")
     return { ok: true, id: created.id, customer: created }
@@ -928,7 +973,7 @@ export async function closeCashRegister(
 
 export async function getClientProfile(customerId: string) {
   await requireSession()
-  const [customer, movements, recentSales, appointments] = await Promise.all([
+  const [customer, movements, appointments] = await Promise.all([
     prisma.customer.findUnique({
       where: { id: customerId },
       select: {
@@ -943,15 +988,6 @@ export async function getClientProfile(customerId: string) {
       orderBy: { createdAt: "desc" },
       take: 30,
     }),
-    prisma.sale.findMany({
-      where: { customerId },
-      include: {
-        lines: { select: { description: true, totalCents: true, type: true } },
-        user: { select: { name: true } },
-      },
-      orderBy: { createdAt: "desc" },
-      take: 15,
-    }),
     prisma.appointment.findMany({
       where: { customerId },
       include: {
@@ -962,7 +998,82 @@ export async function getClientProfile(customerId: string) {
       orderBy: { startAt: "desc" },
     }),
   ])
-  return { customer, movements, recentSales, appointments }
+  return { customer, movements, appointments }
+}
+
+export type ConsumptionLine = {
+  family: string
+  description: string
+  quantity: number
+  discountPercent: number
+  totalCents: number
+  /** Solo en líneas de producto: permite ver cada cuánto lo repone. */
+  productId: string | null
+}
+
+export type ConsumptionTicket = {
+  id: string
+  date: string
+  status: string
+  totalCents: number
+  lines: ConsumptionLine[]
+}
+
+// Historial de consumo del cliente: todo lo que se le ha cobrado alguna vez,
+// por tickets y en orden cronológico inverso.
+//
+// Se devuelve entero, sin filtrar por fechas ni paginar: el histórico de un
+// cliente son unos cientos de líneas como mucho, y teniéndolo todo en el
+// cliente los filtros de fecha se aplican sin volver al servidor.
+export async function getCustomerConsumption(customerId: string): Promise<{
+  tickets: ConsumptionTicket[]
+  totalCents: number
+}> {
+  await requireSession()
+  const sales = await prisma.sale.findMany({
+    where: { customerId },
+    select: {
+      id: true,
+      createdAt: true,
+      status: true,
+      totalCents: true,
+      lines: {
+        select: {
+          type: true,
+          description: true,
+          quantity: true,
+          discountPercent: true,
+          totalCents: true,
+          productId: true,
+          service: { select: { family: { select: { name: true } } } },
+        },
+      },
+    },
+    orderBy: { createdAt: "desc" },
+  })
+
+  const tickets: ConsumptionTicket[] = sales.map((s) => ({
+    id: s.id,
+    date: s.createdAt.toISOString(),
+    status: s.status,
+    totalCents: s.totalCents,
+    lines: s.lines.map((l) => ({
+      family:
+        l.type === "PRODUCT" ? HOME_CARE_FAMILY :
+        l.type === "GIFT_CARD" ? GIFT_CARD_FAMILY :
+        l.service?.family?.name ?? "Sin familia",
+      description: l.description,
+      quantity: l.quantity,
+      discountPercent: l.discountPercent,
+      totalCents: l.totalCents,
+      productId: l.productId,
+    })),
+  }))
+
+  return {
+    tickets,
+    totalCents: tickets.reduce((sum, t) => sum + t.totalCents, 0),
+  }
 }
 
 export async function getCustomerReminders(customerId: string) {

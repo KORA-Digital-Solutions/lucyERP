@@ -111,3 +111,40 @@ export const REMINDER_META: Record<string, { label: string; className: string }>
   DELIVERED: { label: "Entregado", className: "text-[#1E6B34]" },
   READ: { label: "Leído", className: "text-[#1E6B34]" },
 }
+
+/* ------------------------------- CLIENTES -------------------------------- */
+
+export const CUSTOMER_SEX = { FEMALE: "FEMALE", MALE: "MALE" } as const
+export type CustomerSex = keyof typeof CUSTOMER_SEX
+
+export const CUSTOMER_SEX_META: Record<CustomerSex, { label: string }> = {
+  FEMALE: { label: "Mujer" },
+  MALE: { label: "Hombre" },
+}
+
+// Cómo nos ha conocido el cliente. Lista cerrada para poder contar de dónde
+// vienen las altas; los casos raros caen en OTHER.
+export const REFERRAL_SOURCE = {
+  OTHER_CLIENT: "OTHER_CLIENT",
+  SOCIAL_MEDIA: "SOCIAL_MEDIA",
+  INTERNET: "INTERNET",
+  ADVERTISING: "ADVERTISING",
+  WALK_BY: "WALK_BY",
+  OTHER: "OTHER",
+} as const
+export type ReferralSource = keyof typeof REFERRAL_SOURCE
+
+export const REFERRAL_SOURCE_META: Record<ReferralSource, { label: string }> = {
+  OTHER_CLIENT: { label: "Por otro cliente" },
+  SOCIAL_MEDIA: { label: "Redes sociales" },
+  INTERNET: { label: "Google / Internet" },
+  ADVERTISING: { label: "Publicidad" },
+  WALK_BY: { label: "Pasaba por la puerta" },
+  OTHER: { label: "Otros" },
+}
+
+// Familia con la que se agrupan las líneas de venta que no son un servicio.
+// Los productos se han clasificado siempre como tratamiento domiciliario en
+// los listados del centro, así que aparecen como una familia más.
+export const HOME_CARE_FAMILY = "Tto. domiciliario"
+export const GIFT_CARD_FAMILY = "Tarjeta regalo"

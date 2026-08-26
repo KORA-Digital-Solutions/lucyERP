@@ -253,20 +253,53 @@ async function main() {
 
   // Clientes
   const [maria, pepita, fernando, ana, carlos] = await Promise.all([
+    // El nº de expediente va explícito porque estas altas van en paralelo y
+    // calcularlo aquí daría números repetidos.
     prisma.customer.create({
-      data: { clinicId: clinic.id, firstName: "María José", lastName: "Soriano", lastName2: "García", birthDate: new Date("1985-03-14"), phone: "+34600111222", whatsappOptIn: true },
+      data: {
+        clinicId: clinic.id, fileNumber: 1,
+        firstName: "María José", lastName: "Soriano", lastName2: "García",
+        sex: "FEMALE", birthDate: new Date("1985-03-14"), profession: "Maestra",
+        phone: "+34600111222", address: "C/ Mayor 12, 3ºB, Albacete",
+        referralSource: "OTHER_CLIENT", whatsappOptIn: true,
+      },
     }),
     prisma.customer.create({
-      data: { clinicId: clinic.id, firstName: "Pepita", lastName: "Pérez", lastName2: "Molina", birthDate: new Date("1992-07-22"), phone: "+34600222333", whatsappOptIn: true },
+      data: {
+        clinicId: clinic.id, fileNumber: 2,
+        firstName: "Pepita", lastName: "Pérez", lastName2: "Molina",
+        sex: "FEMALE", birthDate: new Date("1992-07-22"), profession: "Comercial",
+        phone: "+34600222333", phone2: "+34611222333", phone2Label: "Trabajo",
+        referralSource: "SOCIAL_MEDIA", allergies: "Alergia al níquel",
+        whatsappOptIn: true,
+      },
     }),
     prisma.customer.create({
-      data: { clinicId: clinic.id, firstName: "Fernando", lastName: "López", lastName2: "Navarro", birthDate: new Date("1978-11-05"), phone: "+34600333444", whatsappOptIn: true },
+      data: {
+        clinicId: clinic.id, fileNumber: 3,
+        firstName: "Fernando", lastName: "López", lastName2: "Navarro",
+        sex: "MALE", birthDate: new Date("1978-11-05"), profession: "Fontanero",
+        phone: "+34600333444", referralSource: "WALK_BY", whatsappOptIn: true,
+      },
     }),
     prisma.customer.create({
-      data: { clinicId: clinic.id, firstName: "Ana", lastName: "Martínez", lastName2: "Ruiz", birthDate: new Date("1990-01-30"), phone: "+34600444555", email: "ana@example.com", whatsappOptIn: false },
+      data: {
+        clinicId: clinic.id, fileNumber: 4,
+        firstName: "Ana", lastName: "Martínez", lastName2: "Ruiz",
+        sex: "FEMALE", birthDate: new Date("1990-01-30"), profession: "Enfermera",
+        phone: "+34600444555", phone2: "+34600999888", phone2Label: "Madre",
+        email: "ana@example.com", address: "Avda. de España 45, Albacete",
+        referralSource: "INTERNET", allergies: "Alergia al látex",
+        whatsappOptIn: false,
+      },
     }),
     prisma.customer.create({
-      data: { clinicId: clinic.id, firstName: "Carlos", lastName: "Ruiz", lastName2: "Fernández", birthDate: new Date("1983-09-18"), phone: "+34600555666", whatsappOptIn: true },
+      data: {
+        clinicId: clinic.id, fileNumber: 5,
+        firstName: "Carlos", lastName: "Ruiz", lastName2: "Fernández",
+        sex: "MALE", birthDate: new Date("1983-09-18"), profession: "Informático",
+        phone: "+34600555666", referralSource: "ADVERTISING", whatsappOptIn: true,
+      },
     }),
   ])
 

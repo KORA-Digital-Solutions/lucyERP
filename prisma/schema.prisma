@@ -100,13 +100,27 @@ model Customer {
   id            String    @id @default(cuid())
   clinicId      String
   clinic        Clinic    @relation(fields: [clinicId], references: [id])
+  // Nº de expediente: consecutivo por clínica, se muestra a 4 dígitos (0001).
+  // Cuadra la ficha digital con la carpeta física del archivo del centro.
+  fileNumber    Int
   firstName     String
-  lastName      String?
+  // Nombre, primer apellido y teléfono son los tres campos obligatorios de la
+  // ficha; el segundo apellido no, que no todo el mundo tiene.
+  lastName      String
   lastName2     String?
-  phone         String
-  phone2        String?
-  email         String?
+  sex           String?   // "FEMALE" | "MALE" (ver lib/enums.ts)
   birthDate     DateTime?
+  profession    String?
+  phone         String
+  // Etiqueta de quién es cada teléfono ("madre", "trabajo"…): en menores el
+  // segundo teléfono suele ser el de un familiar y hay que saber a quién llamas.
+  phoneLabel    String?
+  phone2        String?
+  phone2Label   String?
+  email         String?
+  address       String?
+  referralSource String?  // Cómo nos ha conocido (ver lib/enums.ts)
+  allergies     String?
   notes         String?
   whatsappOptIn Boolean   @default(true)
   active        Boolean   @default(true)
@@ -119,6 +133,8 @@ model Customer {
   sales            Sale[]
   balanceMovements CustomerBalanceMovement[]
   reminders        CustomerReminder[]
+
+  @@unique([clinicId, fileNumber])
 }
 
 model ServiceFamily {

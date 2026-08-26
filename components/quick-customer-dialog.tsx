@@ -9,7 +9,10 @@ import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
 import { createCustomerQuick, type QuickCustomer } from "@/lib/actions"
-import { customerLabel, isValidPhone } from "@/lib/format"
+import {
+  customerLabel, DEFAULT_PHONE_PREFIX, EMPTY_PHONE, isValidPhone, isValidPhonePrefix,
+  joinPhone, phoneFields, withNational, type PhoneFields,
+} from "@/lib/format"
 
 export type { QuickCustomer }
 
@@ -59,7 +62,7 @@ export function QuickCustomerDialog({
   const [firstName, setFirstName] = useState("")
   const [lastName, setLastName] = useState("")
   const [lastName2, setLastName2] = useState("")
-  const [phone, setPhone] = useState("")
+  const [phone, setPhone] = useState<PhoneFields>(EMPTY_PHONE)
   const [email, setEmail] = useState("")
   const [whatsappOptIn, setWhatsappOptIn] = useState(true)
   const [loading, setLoading] = useState(false)
@@ -72,7 +75,7 @@ export function QuickCustomerDialog({
     setFirstName(p.firstName)
     setLastName(p.lastName)
     setLastName2(p.lastName2)
-    setPhone(p.phone)
+    setPhone(p.phone ? phoneFields(p.phone) : EMPTY_PHONE)
     setEmail("")
     setWhatsappOptIn(true)
     setError(null)
@@ -80,25 +83,31 @@ export function QuickCustomerDialog({
   }, [open, query])
 
   // Aviso (no bloqueante) si ya hay un cliente con ese teléfono.
+  const phoneJoined = joinPhone(phone.prefix, phone.national)
+
   const duplicate = useMemo(() => {
-    const key = phoneKey(phone)
+    const key = phoneKey(phoneJoined)
     if (key.length < 9) return null
     return customers.find((c) => phoneKey(c.phone) === key) ?? null
-  }, [phone, customers])
+  }, [phoneJoined, customers])
 
-  const phoneValid = phone.trim() !== "" && isValidPhone(phone)
-  const canSubmit = firstName.trim() !== "" && phoneValid && !loading
+  const prefixValid = isValidPhonePrefix(phone.prefix)
+  const phoneValid = prefixValid && phone.national.trim() !== "" && isValidPhone(phoneJoined)
+  const canSubmit = firstName.trim() !== "" && lastName.trim() !== "" && phoneValid && !loading
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (!firstName.trim()) { setError("El nombre es obligatorio."); return }
-    if (!isValidPhone(phone)) { setError("Teléfono no válido. Ejemplo: 600 111 222 o +34600111222."); return }
+    if (!lastName.trim()) { setError("El primer apellido es obligatorio."); return }
+    if (!prefixValid) { setError("El prefijo del teléfono no es válido. Ejemplo: +34."); return }
+    if (!isValidPhone(phoneJoined)) { setError("Teléfono no válido. Ejemplo: 600 111 222."); return }
 
     const fd = new FormData()
     fd.set("firstName", firstName.trim())
     fd.set("lastName", lastName.trim())
     fd.set("lastName2", lastName2.trim())
-    fd.set("phone", phone.trim())
+    fd.set("phonePrefix", phone.prefix)
+    fd.set("phone", phone.national.trim())
     fd.set("email", email.trim())
     fd.set("whatsappOptIn", whatsappOptIn ? "true" : "false")
     fd.set("active", "true")
@@ -154,12 +163,19 @@ export function QuickCustomerDialog({
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-2">
               <Label htmlFor="qc-phone">Teléfono</Label>
-              <Input
-                id="qc-phone" inputMode="tel" value={phone}
-                onChange={(e) => { setPhone(e.target.value); setError(null) }}
-                placeholder="600 111 222"
-                className={phone !== "" && !phoneValid ? "border-destructive focus-visible:ring-destructive" : ""}
-              />
+              <div className="flex gap-2">
+                <Input
+                  aria-label="Prefijo" inputMode="tel" className={`w-16 shrink-0 tabular-nums${prefixValid ? "" : " border-destructive focus-visible:ring-destructive"}`}
+                  placeholder={DEFAULT_PHONE_PREFIX} value={phone.prefix}
+                  onChange={(e) => { setPhone({ ...phone, prefix: e.target.value }); setError(null) }}
+                />
+                <Input
+                  id="qc-phone" inputMode="tel" value={phone.national}
+                  onChange={(e) => { setPhone(withNational(phone, e.target.value)); setError(null) }}
+                  placeholder="600 111 222"
+                  className={`min-w-0 flex-1${phone.national !== "" && !phoneValid ? " border-destructive focus-visible:ring-destructive" : ""}`}
+                />
+              </div>
             </div>
             <div className="space-y-2">
               <Label htmlFor="qc-email">
@@ -169,10 +185,10 @@ export function QuickCustomerDialog({
             </div>
           </div>
 
-          {phone !== "" && !phoneValid && (
+          {phone.national !== "" && !phoneValid && (
             <p className="text-xs text-destructive flex items-center gap-1.5">
               <AlertCircle className="h-3.5 w-3.5 shrink-0" />
-              Teléfono no válido. Ejemplo: 600 111 222 o +34600111222.
+              Teléfono no válido. Ejemplo: 600 111 222.
             </p>
           )}
 

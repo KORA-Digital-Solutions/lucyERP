@@ -1,15 +1,18 @@
 import { prisma } from "@/lib/db"
 import { getActiveClinic } from "@/lib/clinic"
+import { getSession } from "@/lib/session"
 import { ClientsClient, type ClientRow } from "@/components/clients-client"
 
 export const dynamic = "force-dynamic"
 
 export default async function ClientsPage() {
   const clinic = await getActiveClinic()
+  const session = await getSession()
   const inactivityWarningDays = clinic.inactivityWarningDays ?? 180
   const customers = await prisma.customer.findMany({
     where: { clinicId: clinic.id },
-    orderBy: { firstName: "asc" },
+    // Mismo orden que la tabla para que no se recoloque al hidratar.
+    orderBy: [{ lastName: "asc" }, { lastName2: "asc" }, { firstName: "asc" }],
     include: {
       appointments: {
         where: { status: { in: ["DONE", "CONFIRMED", "PENDING"] } },
@@ -34,14 +37,23 @@ export default async function ClientsPage() {
 
     return {
       id: c.id,
+      fileNumber: c.fileNumber,
       firstName: c.firstName,
       lastName: c.lastName,
       lastName2: c.lastName2,
+      sex: c.sex,
+      profession: c.profession,
       phone: c.phone,
+      phoneLabel: c.phoneLabel,
       phone2: c.phone2,
+      phone2Label: c.phone2Label,
       email: c.email,
+      address: c.address,
+      referralSource: c.referralSource,
+      allergies: c.allergies,
       birthDate: c.birthDate ? c.birthDate.toISOString().slice(0, 10) : null,
       notes: c.notes,
+      createdAt: c.createdAt.toISOString(),
       whatsappOptIn: c.whatsappOptIn,
       active: c.active ?? true,
       balanceCents: c.balanceCents,
@@ -53,5 +65,11 @@ export default async function ClientsPage() {
     }
   })
 
-  return <ClientsClient rows={rows} inactivityWarningDays={inactivityWarningDays} />
+  return (
+    <ClientsClient
+      rows={rows}
+      inactivityWarningDays={inactivityWarningDays}
+      isAdmin={session?.role === "ADMIN"}
+    />
+  )
 }

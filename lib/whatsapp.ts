@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/db"
-import { normalizePhone } from "@/lib/format"
+import { normalizePhone, toWhatsappPhone } from "@/lib/format"
 
 // Cliente de WhatsApp Business Cloud API.
 // Si no hay WHATSAPP_ACCESS_TOKEN configurado, funciona en modo SIMULADO:
@@ -56,7 +56,7 @@ export function buildTemplatePayload(appt: AppointmentForReminder) {
 
   return {
     messaging_product: "whatsapp",
-    to: normalizePhone(appt.customer.phone).replace("+", ""),
+    to: toWhatsappPhone(appt.customer.phone),
     type: "template",
     template: {
       name: templateName,

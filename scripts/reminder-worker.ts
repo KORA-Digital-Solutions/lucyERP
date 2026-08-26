@@ -8,12 +8,16 @@
  *
  *   npm run worker:reminders
  *
- * Es autocontenido (no usa los alias "@/...") para ejecutarse con tsx.
+ * Es autocontenido (no usa los alias "@/...") para ejecutarse con tsx. Sí
+ * importa lib/format por ruta relativa: son funciones puras, sin ninguna
+ * dependencia, y duplicarlas aquí ya se demostró mala idea —las reglas del
+ * teléfono cambiaron y esta copia se quedó con las viejas.
  */
 import { readFileSync } from "node:fs"
 import { resolve } from "node:path"
 import cron from "node-cron"
 import { PrismaClient } from "@prisma/client"
+import { normalizePhone, toWhatsappPhone } from "../lib/format"
 
 // --- Carga manual de .env (el worker no pasa por Next) ---------------
 function loadEnv() {
@@ -36,14 +40,6 @@ function loadEnv() {
 loadEnv()
 
 const prisma = new PrismaClient()
-
-function normalizePhone(phone: string, defaultCountry = "34"): string {
-  let p = phone.replace(/[\s\-().]/g, "")
-  if (p.startsWith("+")) return p
-  if (p.startsWith("00")) return "+" + p.slice(2)
-  if (p.length === 9) return `+${defaultCountry}${p}`
-  return "+" + p
-}
 
 const waEnv = {
   version: process.env.WHATSAPP_API_VERSION || "v21.0",
@@ -81,7 +77,7 @@ function buildPayload(appt: ApptWithRelations) {
   const hora = appt.startAt.toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" })
   return {
     messaging_product: "whatsapp",
-    to: normalizePhone(appt.customer.phone).replace("+", ""),
+    to: toWhatsappPhone(appt.customer.phone),
     type: "template",
     template: {
       name: appt.clinic.whatsappTemplateName || "appointment_reminder_es",

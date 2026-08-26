@@ -86,6 +86,32 @@ describe("campos obligatorios del cliente", () => {
         expect(res.ok).toBe(false)
       })
 
+      it("rechaza un número español al que le faltan dígitos", async () => {
+        const res = await accion(form({ ...VALIDO, phone: "60011122" }))
+        expect(res.ok).toBe(false)
+      })
+
+      it("rechaza un prefijo que no puede ser un país", async () => {
+        const res = await accion(form({ ...VALIDO, phonePrefix: "9999" }))
+        expect(res.ok).toBe(false)
+        expect(res.error).toMatch(/prefijo/i)
+      })
+
+      it("usa el prefijo español cuando no se manda ninguno", async () => {
+        // Es el caso del alta rápida del TPV, que solo manda el número.
+        const res = await accion(form(VALIDO))
+        expect(res.ok).toBe(true)
+        const guardado = await prisma.customer.findUnique({ where: { id: res.id! } })
+        expect(guardado?.phone).toBe("+34600111222")
+      })
+
+      it("respeta el prefijo de otro país", async () => {
+        const res = await accion(form({ ...VALIDO, phonePrefix: "+351", phone: "912345678" }))
+        expect(res.ok).toBe(true)
+        const guardado = await prisma.customer.findUnique({ where: { id: res.id! } })
+        expect(guardado?.phone).toBe("+351912345678")
+      })
+
       it("acepta el alta con nombre, primer apellido y teléfono", async () => {
         const res = await accion(form(VALIDO))
         expect(res.ok).toBe(true)

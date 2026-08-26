@@ -8,7 +8,9 @@ import { getActiveClinicId } from "@/lib/clinic"
 import { requireSession, requireAdmin } from "@/lib/auth"
 import { validateAppointmentSlot } from "@/lib/availability"
 import { sendReminderForAppointmentId } from "@/lib/whatsapp"
-import { combineDateTime, dayRange, isValidPhone, normalizePhone } from "@/lib/format"
+import {
+  combineDateTime, dayRange, isValidPhone, isValidPhonePrefix, joinPhone, normalizePhone,
+} from "@/lib/format"
 import { getSession } from "@/lib/session"
 import { WEEKDAY_LABELS, LEAVE_TYPE_META, type LeaveType } from "@/lib/enums"
 import { dayOfWeekFromDateStr } from "@/lib/schedule"
@@ -198,8 +200,8 @@ export async function sendReminder(appointmentId: string): Promise<ActionResult>
 
 function customerDataFromForm(fd: FormData) {
   const birthDateRaw = optStr(fd, "birthDate")
-  const phone = normalizePhone(str(fd, "phone"))
-  const phone2 = normalizePhone(optStr(fd, "phone2") ?? "") || null
+  const phone = joinPhone(str(fd, "phonePrefix"), str(fd, "phone"))
+  const phone2 = joinPhone(str(fd, "phone2Prefix"), str(fd, "phone2")) || null
   return {
     firstName: str(fd, "firstName"),
     // Obligatorio, así que nunca es null: si viene vacío lo rechaza
@@ -230,12 +232,16 @@ function customerDataFromForm(fd: FormData) {
 // comprueban aquí, y no solo con el `required` del formulario, para que los
 // dos caminos de alta —la ficha y el alta rápida del TPV— tengan el mismo
 // rasero y no dependan de lo que valide el navegador.
-function validateCustomer(data: ReturnType<typeof customerDataFromForm>): string | null {
+function validateCustomer(fd: FormData, data: ReturnType<typeof customerDataFromForm>): string | null {
   if (!data.firstName) return "El nombre es obligatorio."
   if (!data.lastName) return "El primer apellido es obligatorio."
   if (!data.phone) return "El teléfono es obligatorio."
+  if (!isValidPhonePrefix(str(fd, "phonePrefix"))) return "El prefijo del teléfono no es válido. Ejemplo: +34."
   if (!isValidPhone(data.phone)) return "Teléfono no válido. Ejemplo: 600 111 222."
-  if (data.phone2 && !isValidPhone(data.phone2)) return "El segundo teléfono no es válido."
+  if (data.phone2) {
+    if (!isValidPhonePrefix(str(fd, "phone2Prefix"))) return "El prefijo del teléfono 2 no es válido. Ejemplo: +34."
+    if (!isValidPhone(data.phone2)) return "El segundo teléfono no es válido."
+  }
   return null
 }
 
@@ -252,7 +258,7 @@ export async function saveCustomer(id: string | null, fd: FormData): Promise<Act
     await requireSession()
     const clinicId = await getActiveClinicId()
     const data = customerDataFromForm(fd)
-    const invalido = validateCustomer(data)
+    const invalido = validateCustomer(fd, data)
     if (invalido) return { ok: false, error: invalido }
     if (id) {
       await prisma.customer.update({ where: { id }, data })
@@ -290,7 +296,7 @@ export async function createCustomerQuick(
     await requireSession()
     const clinicId = await getActiveClinicId()
     const data = customerDataFromForm(fd)
-    const invalido = validateCustomer(data)
+    const invalido = validateCustomer(fd, data)
     if (invalido) return { ok: false, error: invalido }
     const created = await prisma.$transaction(async (tx) =>
       tx.customer.create({

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 import {
   DEFAULT_PHONE_PREFIX, formatFileNumber, formatNationalPhone, formatPhone,
-  joinPhone, splitPhone,
+  isValidPhone, isValidPhonePrefix, joinPhone, splitPhone,
 } from "@/lib/format"
 
 // Los teléfonos se guardan en formato internacional ("+34600444555") porque es
@@ -82,6 +82,51 @@ describe("splitPhone / joinPhone", () => {
     // por si llega un número sin prefijo por otra vía.
     expect(joinPhone("", "600 44 45 55")).toBe("+34600444555")
     expect(joinPhone("", "")).toBe("")
+  })
+})
+
+describe("isValidPhone", () => {
+  it("exige 9 dígitos exactos en un número español", () => {
+    expect(isValidPhone("+34600111222")).toBe(true)
+    expect(isValidPhone("600111222")).toBe(true)
+  })
+
+  it("rechaza el número español incompleto o pasado", () => {
+    // Antes solo se miraba el largo del número entero contra un rango de 8 a
+    // 15, así que colaban desde 6 dígitos hasta 10.
+    for (const corto of ["600111", "6001112", "60011122"]) {
+      expect(isValidPhone(joinPhone("+34", corto))).toBe(false)
+    }
+    expect(isValidPhone(joinPhone("+34", "6001112223"))).toBe(false)
+  })
+
+  it("no le impone la longitud española a los demás países", () => {
+    expect(isValidPhone("+351912345678")).toBe(true)
+    expect(isValidPhone("+12025550143")).toBe(true)
+  })
+})
+
+// El prefijo no se puede comprobar sobre el teléfono ya montado: en
+// "+9999600111222" no hay forma de saber dónde acababa. Por eso tiene su
+// propia validación, que se aplica al campo por separado.
+describe("isValidPhonePrefix", () => {
+  it("acepta los prefijos de 1 a 3 dígitos, con + o sin él", () => {
+    for (const p of ["+34", "34", "+1", "+351", "+212"]) {
+      expect(isValidPhonePrefix(p)).toBe(true)
+    }
+  })
+
+  it("acepta el vacío, que significa el de por defecto", () => {
+    expect(isValidPhonePrefix("")).toBe(true)
+    expect(isValidPhonePrefix("  ")).toBe(true)
+  })
+
+  it("rechaza lo que no puede ser un país", () => {
+    // Antes el campo era texto libre y estos se guardaban tal cual.
+    expect(isValidPhonePrefix("9999")).toBe(false)
+    expect(isValidPhonePrefix("+0")).toBe(false)
+    expect(isValidPhonePrefix("+012")).toBe(false)
+    expect(isValidPhonePrefix("abc")).toBe(false)
   })
 })
 

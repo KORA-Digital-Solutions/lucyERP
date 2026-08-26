@@ -113,8 +113,29 @@ export function normalizePhone(phone: string, defaultPrefix = DEFAULT_PHONE_PREF
   return `${defaultPrefix}${p}`
 }
 
+// Un número español tiene 9 dígitos exactos, ni uno más ni uno menos. De los
+// demás países no sabemos la longitud, así que a esos solo se les exige que el
+// número completo quepa en el rango de E.164 (de 8 a 15 dígitos con prefijo).
+const SPANISH_PHONE_DIGITS = 9
+
 export function isValidPhone(phone: string): boolean {
-  return /^\+\d{8,15}$/.test(normalizePhone(phone))
+  const p = normalizePhone(phone)
+  if (!/^\+\d{8,15}$/.test(p)) return false
+  if (!p.startsWith(DEFAULT_PHONE_PREFIX)) return true
+  return p.length - DEFAULT_PHONE_PREFIX.length === SPANISH_PHONE_DIGITS
+}
+
+// Un prefijo de país es "+" y de 1 a 3 dígitos: +1, +34, +351, +212. Ni más
+// largo ni empezando por cero, porque no existe ninguno así. Vacío se da por
+// bueno: significa "usa el de por defecto".
+//
+// Esto no se puede comprobar sobre el teléfono ya montado —en "+9999600111222"
+// no hay forma de saber dónde acaba el prefijo—, así que el prefijo viaja en
+// su propio campo hasta el servidor.
+export function isValidPhonePrefix(prefix: string): boolean {
+  const p = cleanPhone(prefix)
+  if (!p) return true
+  return /^\+?[1-9]\d{0,2}$/.test(p)
 }
 
 // Junta los dos campos del formulario en el valor que se guarda. Sin número
@@ -171,6 +192,31 @@ export function formatPhone(phone: string | null | undefined): string {
   const { prefix, national } = splitPhone(e164)
   if (!prefix || !national) return raw
   return `(${prefix}) ${formatNationalPhone(prefix, national)}`
+}
+
+// ── El teléfono repartido en los dos campos del formulario ───────────────
+// Vive aquí, y no en un componente, porque lo usan los tres formularios que
+// dan de alta clientes: la ficha, el panel de alta y el alta rápida del TPV.
+
+export type PhoneFields = { prefix: string; national: string }
+
+export const EMPTY_PHONE: PhoneFields = { prefix: "", national: "" }
+
+// Reparte un teléfono guardado entre los dos campos, con el número ya
+// agrupado ("600 44 45 55") para que editar se parezca a leer. Sin teléfono
+// guardado los dos campos van vacíos: un "+34" suelto en un teléfono que no
+// existe parece un dato y no lo es.
+export function phoneFields(stored: string | null | undefined): PhoneFields {
+  if (!stored) return EMPTY_PHONE
+  const { prefix, national } = splitPhone(stored)
+  return { prefix, national: formatNationalPhone(prefix, national) }
+}
+
+// Al escribir el número aparece solo el prefijo por defecto, y al borrarlo
+// entero desaparece con él: prefijo y número van siempre de la mano.
+export function withNational(prev: PhoneFields, national: string): PhoneFields {
+  if (!national.trim()) return { prefix: "", national }
+  return { prefix: prev.prefix || DEFAULT_PHONE_PREFIX, national }
 }
 
 // La API de WhatsApp quiere el número internacional sin "+": 34600111222.

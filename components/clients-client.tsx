@@ -29,8 +29,9 @@ import {
   getCustomerReminders, createCustomerReminder, completeCustomerReminder,
 } from "@/lib/actions"
 import {
-  DEFAULT_PHONE_PREFIX, formatFileNumber, formatNationalPhone, formatPhone,
-  isValidPhone, joinPhone, normalizeSearch, onlyDigits, splitPhone,
+  DEFAULT_PHONE_PREFIX, EMPTY_PHONE, formatFileNumber, formatPhone, isValidPhone,
+  isValidPhonePrefix, joinPhone, normalizeSearch, onlyDigits, phoneFields, withNational,
+  type PhoneFields,
 } from "@/lib/format"
 import {
   STATUS_META, CUSTOMER_SEX_META, REFERRAL_SOURCE_META,
@@ -198,27 +199,6 @@ function DataBlock({
   )
 }
 
-type PhoneFields = { prefix: string; national: string }
-
-// Reparte un teléfono guardado entre los dos campos del formulario, con el
-// número ya agrupado ("600 44 45 55") para que editar se parezca a leer.
-// Sin teléfono guardado los dos campos van vacíos: un "+34" suelto en un
-// teléfono que no existe parece un dato y no lo es.
-function phoneFields(stored: string | null | undefined): PhoneFields {
-  if (!stored) return { prefix: "", national: "" }
-  const { prefix, national } = splitPhone(stored)
-  return { prefix, national: formatNationalPhone(prefix, national) }
-}
-
-const EMPTY_PHONE: PhoneFields = { prefix: "", national: "" }
-
-// Al escribir el número aparece solo el prefijo por defecto, y al borrarlo
-// entero desaparece con él: prefijo y número van siempre de la mano.
-function withNational(prev: PhoneFields, national: string): PhoneFields {
-  if (!national.trim()) return { prefix: "", national }
-  return { prefix: prev.prefix || DEFAULT_PHONE_PREFIX, national }
-}
-
 function ClientDataTab({
   row, isAdmin, onDelete,
 }: {
@@ -244,10 +224,11 @@ function ClientDataTab({
 
   // Una etiqueta ("madre", "trabajo") no dice nada sin un teléfono al que
   // referirse, así que el campo se bloquea hasta que el número es válido.
-  const phoneJoined = joinPhone(phone.prefix, phone.national)
-  const phone2Joined = joinPhone(phone2.prefix, phone2.national)
-  const phoneOk = isValidPhone(phoneJoined)
-  const phone2Ok = phone2.national.trim() !== "" && isValidPhone(phone2Joined)
+  const phonePrefixOk = isValidPhonePrefix(phone.prefix)
+  const phone2PrefixOk = isValidPhonePrefix(phone2.prefix)
+  const phoneOk = phonePrefixOk && isValidPhone(joinPhone(phone.prefix, phone.national))
+  const phone2Ok =
+    phone2PrefixOk && phone2.national.trim() !== "" && isValidPhone(joinPhone(phone2.prefix, phone2.national))
 
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
@@ -260,6 +241,10 @@ function ClientDataTab({
       toast.error("El primer apellido es obligatorio.")
       return
     }
+    if (!phonePrefixOk || !phone2PrefixOk) {
+      toast.error("El prefijo del teléfono no es válido. Ejemplo: +34.")
+      return
+    }
     if (!phoneOk) {
       toast.error("Teléfono no válido. Ejemplo: 600 111 222.")
       return
@@ -268,10 +253,13 @@ function ClientDataTab({
       toast.error("El segundo teléfono no es válido.")
       return
     }
-    // Prefijo y número viajan juntos en el campo `phone`, que es como se
-    // guarda; los inputs de la ficha están fuera del FormData a propósito.
-    fd.set("phone", phoneJoined)
-    fd.set("phone2", phone2Joined)
+    // Prefijo y número viajan por separado y los junta el servidor, que es el
+    // único sitio donde se puede comprobar el prefijo: en "+9999600111222" ya
+    // no hay forma de saber dónde acababa.
+    fd.set("phonePrefix", phone.prefix)
+    fd.set("phone", phone.national)
+    fd.set("phone2Prefix", phone2.prefix)
+    fd.set("phone2", phone2.national)
     fd.set("sex", sex)
     fd.set("referralSource", referral)
     setSaving(true)
@@ -406,7 +394,8 @@ function ClientDataTab({
             <DataRow label="Teléfono" edit={edit} display={phoneDisplay(row.phone, row.phoneLabel)}>
               <div className="flex gap-2">
                 <Input
-                  aria-label="Prefijo" className="h-8 w-16 shrink-0 tabular-nums"
+                  aria-label="Prefijo"
+                  className={cn("h-8 w-16 shrink-0 tabular-nums", !phonePrefixOk && "border-destructive focus-visible:ring-destructive")}
                   placeholder={DEFAULT_PHONE_PREFIX}
                   value={phone.prefix} onChange={(e) => setPhone({ ...phone, prefix: e.target.value })}
                 />
@@ -429,7 +418,8 @@ function ClientDataTab({
             <DataRow label="Teléfono 2" edit={edit} display={phoneDisplay(row.phone2, row.phone2Label)}>
               <div className="flex gap-2">
                 <Input
-                  aria-label="Prefijo del teléfono 2" className="h-8 w-16 shrink-0 tabular-nums"
+                  aria-label="Prefijo del teléfono 2"
+                  className={cn("h-8 w-16 shrink-0 tabular-nums", !phone2PrefixOk && "border-destructive focus-visible:ring-destructive")}
                   placeholder={DEFAULT_PHONE_PREFIX}
                   value={phone2.prefix} onChange={(e) => setPhone2({ ...phone2, prefix: e.target.value })}
                 />
@@ -866,10 +856,11 @@ export function ClientsClient({
   const [newPhone, setNewPhone] = useState<PhoneFields>(EMPTY_PHONE)
   const [newPhone2, setNewPhone2] = useState<PhoneFields>(EMPTY_PHONE)
   // Misma regla que en la ficha: sin teléfono válido no hay etiqueta.
-  const newPhoneJoined = joinPhone(newPhone.prefix, newPhone.national)
-  const newPhone2Joined = joinPhone(newPhone2.prefix, newPhone2.national)
-  const newPhoneOk = isValidPhone(newPhoneJoined)
-  const newPhone2Ok = newPhone2.national.trim() !== "" && isValidPhone(newPhone2Joined)
+  const newPhonePrefixOk = isValidPhonePrefix(newPhone.prefix)
+  const newPhone2PrefixOk = isValidPhonePrefix(newPhone2.prefix)
+  const newPhoneOk = newPhonePrefixOk && isValidPhone(joinPhone(newPhone.prefix, newPhone.national))
+  const newPhone2Ok =
+    newPhone2PrefixOk && newPhone2.national.trim() !== "" && isValidPhone(joinPhone(newPhone2.prefix, newPhone2.national))
   // Se guarda el id y no la fila entera: así, al guardar cambios en la ficha,
   // el router.refresh() trae los datos nuevos y la ficha se repinta sola.
   const [profileId, setProfileId] = useState<string | null>(null)
@@ -925,6 +916,10 @@ export function ClientsClient({
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
     const fd = new FormData(e.currentTarget)
+    if (!newPhonePrefixOk || !newPhone2PrefixOk) {
+      toast.error("El prefijo del teléfono no es válido. Ejemplo: +34.")
+      return
+    }
     if (!newPhoneOk) {
       toast.error("Teléfono no válido. Ejemplo: 600 111 222.")
       return
@@ -933,9 +928,11 @@ export function ClientsClient({
       toast.error("El segundo teléfono no es válido.")
       return
     }
-    // Prefijo y número se juntan aquí, que es como se guarda el teléfono.
-    fd.set("phone", newPhoneJoined)
-    fd.set("phone2", newPhone2Joined)
+    // Los junta el servidor: ver el comentario de la ficha.
+    fd.set("phonePrefix", newPhone.prefix)
+    fd.set("phone", newPhone.national)
+    fd.set("phone2Prefix", newPhone2.prefix)
+    fd.set("phone2", newPhone2.national)
     fd.set("sex", newSex)
     fd.set("referralSource", newReferral)
     setLoading(true)
@@ -1217,13 +1214,14 @@ export function ClientsClient({
                     <Label htmlFor="phone">Teléfono</Label>
                     <div className="flex gap-2">
                       <Input
-                        aria-label="Prefijo" className="w-16 shrink-0 tabular-nums"
+                        aria-label="Prefijo"
+                        className={cn("w-16 shrink-0 tabular-nums", !newPhonePrefixOk && "border-destructive focus-visible:ring-destructive")}
                         placeholder={DEFAULT_PHONE_PREFIX}
                         value={newPhone.prefix}
                         onChange={(e) => setNewPhone({ ...newPhone, prefix: e.target.value })}
                       />
                       <Input
-                        id="phone" placeholder="600 111 222" required
+                        id="phone" inputMode="tel" placeholder="600 111 222" required
                         className={cn("min-w-0 flex-1", newPhone.national !== "" && !newPhoneOk && "border-destructive focus-visible:ring-destructive")}
                         value={newPhone.national}
                         onChange={(e) => setNewPhone(withNational(newPhone, e.target.value))}
@@ -1246,13 +1244,14 @@ export function ClientsClient({
                     <Label htmlFor="phone2">Teléfono 2 <span className="text-muted-foreground font-normal">(opcional)</span></Label>
                     <div className="flex gap-2">
                       <Input
-                        aria-label="Prefijo del teléfono 2" className="w-16 shrink-0 tabular-nums"
+                        aria-label="Prefijo del teléfono 2"
+                        className={cn("w-16 shrink-0 tabular-nums", !newPhone2PrefixOk && "border-destructive focus-visible:ring-destructive")}
                         placeholder={DEFAULT_PHONE_PREFIX}
                         value={newPhone2.prefix}
                         onChange={(e) => setNewPhone2({ ...newPhone2, prefix: e.target.value })}
                       />
                       <Input
-                        id="phone2" placeholder="611 222 333"
+                        id="phone2" inputMode="tel" placeholder="611 222 333"
                         className={cn("min-w-0 flex-1", newPhone2.national !== "" && !newPhone2Ok && "border-destructive focus-visible:ring-destructive")}
                         value={newPhone2.national}
                         onChange={(e) => setNewPhone2(withNational(newPhone2, e.target.value))}

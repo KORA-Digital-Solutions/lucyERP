@@ -538,7 +538,11 @@ model CustomerReminder {
   createdByUserId String
   createdByUser   User      @relation("CustomerReminderCreatedBy", fields: [createdByUserId], references: [id])
   title           String
-  dueDate         DateTime
+  // Sin fecha = recordatorio permanente: un aviso de la ficha que sale siempre
+  // que se atiende a ese cliente ("alérgica al látex") y no vence solo. Con
+  // fecha es una tarea que vence, y entonces alertDaysBefore dice desde cuándo
+  // avisa el dashboard.
+  dueDate         DateTime?
   alertDaysBefore Int       @default(7)
   completedAt     DateTime?
   completedByUserId String?

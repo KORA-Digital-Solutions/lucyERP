@@ -175,7 +175,7 @@ function DayOverrideDialog({
 
   return (
     <Dialog open={!!state} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent>
+      <DialogContent aria-describedby={undefined}>
         <DialogHeader>
           <DialogTitle>Excepción de horario · {date}</DialogTitle>
         </DialogHeader>
@@ -729,7 +729,7 @@ export function AgendaBoard({
               <span className="font-medium text-foreground">{cancelTarget?.customerName}</span>{" "}
               ({cancelTarget?.serviceName}) de las{" "}
               <span className="font-medium text-foreground">{cancelTarget?.startLabel}</span>.
-              La cita dejará el hueco libre y la clienta no recibirá el recordatorio.
+              La cita dejará el hueco libre y el cliente no recibirá el recordatorio.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

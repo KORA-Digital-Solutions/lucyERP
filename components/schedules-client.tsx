@@ -922,7 +922,7 @@ function BulkImportDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="max-w-lg" aria-describedby={undefined}>
         <DialogHeader>
           <DialogTitle>Importar festivos</DialogTitle>
         </DialogHeader>
@@ -1166,7 +1166,7 @@ export function HolidaysTab({ holidays }: { holidays: HolidayRow[] }) {
       </div>
 
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent>
+        <DialogContent aria-describedby={undefined}>
           <DialogHeader>
             <DialogTitle>{editing ? "Editar festivo" : "Nuevo festivo"}</DialogTitle>
           </DialogHeader>

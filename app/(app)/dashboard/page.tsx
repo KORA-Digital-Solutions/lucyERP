@@ -46,7 +46,9 @@ export default async function DashboardPage() {
       select: { totalCents: true, paymentMethod: true, saleType: true },
     }),
     prisma.customerReminder.findMany({
-      where: { clinicId: clinic.id, completedAt: null },
+      // Solo los que tienen fecha: los permanentes no son tareas pendientes,
+      // son avisos de la ficha, y aquí no se irían nunca.
+      where: { clinicId: clinic.id, completedAt: null, dueDate: { not: null } },
       include: { customer: { select: { firstName: true, lastName: true } } },
       orderBy: { dueDate: "asc" },
     }).then((rs) => rs.filter((r) => isReminderActive(r.dueDate, r.alertDaysBefore, now))),
@@ -56,14 +58,17 @@ export default async function DashboardPage() {
     }),
   ])
 
-  const reminderRows: DashboardReminderRow[] = activeReminders.map((r) => ({
-    id: r.id,
-    customerId: r.customerId,
-    customerName: [r.customer.firstName, r.customer.lastName].filter(Boolean).join(" "),
-    title: r.title,
-    dueDate: r.dueDate.toISOString(),
-    overdue: isReminderOverdue(r.dueDate, now),
-  }))
+  // El where ya descarta los permanentes; el flatMap con el guard es para que
+  // TypeScript sepa que a partir de aquí siempre hay fecha.
+  const reminderRows: DashboardReminderRow[] = activeReminders.flatMap((r) =>
+    r.dueDate === null ? [] : [{
+      id: r.id,
+      customerId: r.customerId,
+      customerName: [r.customer.firstName, r.customer.lastName].filter(Boolean).join(" "),
+      title: r.title,
+      dueDate: r.dueDate.toISOString(),
+      overdue: isReminderOverdue(r.dueDate, now),
+    }])
 
   // "Realizada" es el estado siguiente a "confirmada", no uno paralelo: la cita
   // ya ha ocurrido, así que cuenta como confirmada. Si solo se mirase CONFIRMED,

@@ -168,28 +168,28 @@ const GROUPS: ReportGroup[] = [
   {
     id: "clientes",
     title: "Clientes",
-    description: "De dónde viene la facturación y qué clientas se están perdiendo.",
+    description: "De dónde viene la facturación y qué clientes se están perdiendo.",
     icon: Users,
     reports: [
       {
         title: "Nuevas vs. recurrentes",
-        question: "¿Estoy captando clientas nuevas o vivo de las de siempre?",
+        question: "¿Estoy captando clientes nuevos o vivo de los de siempre?",
         availability: "READY",
       },
       {
         title: "Ticket medio y frecuencia",
-        question: "¿Cuánto se deja cada clienta y cada cuánto vuelve?",
+        question: "¿Cuánto se deja cada cliente y cada cuánto vuelve?",
         availability: "READY",
       },
       {
-        title: "Clientas inactivas",
+        title: "Clientes inactivos",
         question: "¿Quién lleva meses sin venir y habría que recuperar?",
         availability: "READY",
         note: "Usa el umbral de inactividad que ya está en Configuración.",
       },
       {
-        title: "Ranking de clientas",
-        question: "¿Quiénes son mis mejores clientas por gasto acumulado?",
+        title: "Ranking de clientes",
+        question: "¿Quiénes son mis mejores clientes por gasto acumulado?",
         availability: "READY",
       },
       {
@@ -265,7 +265,7 @@ export function ReportsClient() {
           <div>
             <h1 className="text-2xl font-semibold tracking-tight">Informes</h1>
             <p className="text-sm text-muted-foreground">
-              Cómo va el centro: ingresos, gastos, clientas y ocupación
+              Cómo va el centro: ingresos, gastos, clientes y ocupación
             </p>
           </div>
         </div>

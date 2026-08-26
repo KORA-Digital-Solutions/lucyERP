@@ -211,7 +211,7 @@ export function ServicesClient({ rows, families }: { rows: ServiceRow[]; familie
         </Card>
 
         <Dialog open={open} onOpenChange={setOpen}>
-          <DialogContent>
+          <DialogContent aria-describedby={undefined}>
             <DialogHeader>
               <DialogTitle>{editing ? "Editar servicio" : "Nuevo servicio"}</DialogTitle>
             </DialogHeader>
@@ -280,7 +280,7 @@ export function ServicesClient({ rows, families }: { rows: ServiceRow[]; familie
         </Dialog>
 
         <Dialog open={familiesOpen} onOpenChange={setFamiliesOpen}>
-          <DialogContent>
+          <DialogContent aria-describedby={undefined}>
             <DialogHeader>
               <DialogTitle>Familias de servicio</DialogTitle>
             </DialogHeader>

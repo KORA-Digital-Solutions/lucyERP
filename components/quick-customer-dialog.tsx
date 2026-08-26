@@ -130,7 +130,7 @@ export function QuickCustomerDialog({
 
   return (
     <Dialog open onOpenChange={(o) => !o && onOpenChange(false)}>
-      <DialogContent style={{ maxWidth: "30rem" }}>
+      <DialogContent style={{ maxWidth: "30rem" }} aria-describedby={undefined}>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <UserPlus className="h-4 w-4" /> Nuevo cliente

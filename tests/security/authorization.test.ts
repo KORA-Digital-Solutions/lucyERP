@@ -32,9 +32,7 @@ const DEBEN_SER_ADMIN = [
 
 /** Rutas públicas a propósito, con su propia autenticación. */
 const RUTAS_PUBLICAS = [
-  "app/api/auth/login/route.ts",     // es el propio login
   "app/api/auth/logout/route.ts",    // cerrar sesión no necesita sesión válida
-  "app/api/auth/me/route.ts",        // lee la sesión y responde null si no hay
   "app/api/auth/switch-mode/route.ts", // valida sesión y contraseña por su cuenta
   "app/api/webhooks/whatsapp/route.ts", // Meta llama sin cookie; valida firma HMAC
 ]
@@ -83,6 +81,57 @@ describe("autorización — server actions", () => {
     })
     expect(mal).toEqual([])
   })
+})
+
+/**
+ * Las acciones de acceso viven aparte porque loginAction es la única acción
+ * pública: es la que crea la sesión, así que no puede exigirla. Cualquier otra
+ * que se añada a ese fichero sí tiene que comprobar permisos.
+ */
+const ACCIONES_PUBLICAS = ["loginAction"]
+
+describe("autorización — acciones de acceso", () => {
+  const fuente = readFileSync(join(RAIZ, "lib", "auth-actions.ts"), "utf8")
+  const acciones = trocearAcciones(fuente)
+
+  it("hay acciones que analizar (el troceado no se ha roto)", () => {
+    expect(acciones.map((a) => a.nombre)).toContain("loginAction")
+  })
+
+  it("toda acción que no sea el propio login comprueba permisos", () => {
+    const sinGuarda = acciones
+      .filter((a) => !ACCIONES_PUBLICAS.includes(a.nombre))
+      .filter((a) => !/require(Session|Admin)\(\)/.test(a.cuerpo))
+      .map((a) => a.nombre)
+    expect(sinGuarda).toEqual([])
+  })
+
+  it("cambiar la contraseña usa el id de la sesión, nunca uno del formulario", () => {
+    const accion = acciones.find((a) => a.nombre === "changePasswordAction")!
+    expect(accion.cuerpo).toMatch(/where:\s*\{\s*id:\s*session\.userId\s*\}/)
+    // formData solo debe aportar las contraseñas, no a quién se le cambian.
+    expect(accion.cuerpo).not.toMatch(/formData\.get\(\s*"userId"/)
+  })
+})
+
+describe("formularios de credenciales", () => {
+  // Un <form> sin method es GET. Si se envía antes de que React hidrate la
+  // página, usuario y contraseña acaban en la barra de direcciones, en el
+  // historial y en los logs. Las server actions se renderizan con
+  // method="post" y encolan esos envíos, así que el formulario tiene que ir
+  // por action={...} y no por un onSubmit que hace fetch.
+  const PAGINAS = [
+    "app/(auth)/login/page.tsx",
+    "app/(auth)/change-password/page.tsx",
+  ]
+
+  for (const pagina of PAGINAS) {
+    it(`${pagina} envía por server action y no por onSubmit`, () => {
+      const src = readFileSync(join(RAIZ, ...pagina.split("/")), "utf8")
+      expect(src).toMatch(/<form\s+action=\{formAction\}/)
+      expect(src).not.toMatch(/<form[^>]*onSubmit/)
+    })
+  }
 })
 
 describe("autorización — rutas API", () => {

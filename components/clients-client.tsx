@@ -6,7 +6,7 @@ import { toast } from "sonner"
 import {
   Plus, Search, Pencil, Trash2, Check, X, UserCheck, UserX,
   AlertTriangle, FileText, Wallet, ArrowUpCircle, ArrowDownCircle,
-  ShoppingCart, Gift, ArrowLeft, Bell, CheckCircle2,
+  ShoppingCart, Gift, ArrowLeft, Bell, CheckCircle2, RotateCcw,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
@@ -27,6 +27,7 @@ import { cn } from "@/lib/utils"
 import {
   saveCustomer, deleteCustomer, getClientProfile, getCustomerConsumption,
   getCustomerReminders, createCustomerReminder, completeCustomerReminder,
+  deleteCustomerReminder, reopenCustomerReminder,
 } from "@/lib/actions"
 import {
   DEFAULT_PHONE_PREFIX, EMPTY_PHONE, formatFileNumber, formatPhone, isValidPhone,
@@ -37,6 +38,7 @@ import {
   STATUS_META, CUSTOMER_SEX_META, REFERRAL_SOURCE_META,
   type AppointmentStatus, type CustomerSex, type ReferralSource,
 } from "@/lib/enums"
+import { isReminderOverdue } from "@/lib/reminders"
 import {
   useTableSort, SortableTableHead, byText, byNumber, byDate, byBoolean,
   type SortRule,
@@ -107,6 +109,77 @@ const CLIENT_SORT_INICIAL: SortRule<ClientSortKey>[] = [{ key: "nombre", dir: "a
 
 function hasInactivityWarning(row: ClientRow, threshold: number): boolean {
   return row.daysSinceLastAppt !== null && row.daysSinceLastAppt > threshold
+}
+
+// Edad cumplida, contando el mes y el día: aproximarla dividiendo por 365.25
+// falla justo en los días alrededor del cumpleaños, que es cuando más canta.
+function getAge(birthDate: string | null): number | null {
+  if (!birthDate) return null
+  const born = new Date(birthDate)
+  if (Number.isNaN(born.getTime())) return null
+  const now = new Date()
+  let age = now.getFullYear() - born.getFullYear()
+  const monthDiff = now.getMonth() - born.getMonth()
+  if (monthDiff < 0 || (monthDiff === 0 && now.getDate() < born.getDate())) age--
+  return age < 0 ? null : age
+}
+
+type StatusFilter = "all" | ActivityStatus | "warning"
+type SexFilter = "all" | CustomerSex | "unknown"
+
+/* Cada filtro es una función suelta para poder aplicarlos por separado: así
+   los contadores de un desplegable se calculan con los DEMÁS filtros puestos
+   pero sin el suyo propio, que si no siempre se contaría a sí mismo. */
+
+function matchesSearch(row: ClientRow, query: string): boolean {
+  const q = normalizeSearch(query)
+  if (!q) return true
+  const nameWords = normalizeSearch(`${row.lastName ?? ""} ${row.lastName2 ?? ""} ${row.firstName}`).split(/\s+/).filter(Boolean)
+  // Los teléfonos se guardan en formato internacional (+34600111222), así que
+  // se comparan solo los dígitos y por inclusión: buscar "600" encuentra el
+  // número aunque esté guardado con el prefijo del país delante.
+  const phoneDigits = [row.phone, row.phone2].filter(Boolean).map((p) => onlyDigits(String(p)))
+  const fileNumber = formatFileNumber(row.fileNumber)
+  return q.split(/\s+/).filter(Boolean).every((t) => {
+    const digits = onlyDigits(t)
+    const byName = nameWords.some((w) => w.startsWith(t))
+    const byPhone = digits.length > 0 && phoneDigits.some((p) => p.includes(digits))
+    // El expediente se busca tal cual ("0042") o sin ceros ("42").
+    const byFileNumber =
+      digits.length > 0 && (fileNumber === digits.padStart(4, "0") || String(row.fileNumber) === String(Number(digits)))
+    return byName || byPhone || byFileNumber
+  })
+}
+
+function matchesStatus(row: ClientRow, filter: StatusFilter, warningDays: number): boolean {
+  if (filter === "all") return true
+  if (filter === "warning") return hasInactivityWarning(row, warningDays)
+  return getActivityStatus(row) === filter
+}
+
+function matchesSex(row: ClientRow, filter: SexFilter): boolean {
+  if (filter === "all") return true
+  if (filter === "unknown") return !row.sex
+  return row.sex === filter
+}
+
+// Sin fecha de nacimiento no hay edad que comparar: en cuanto se acota el
+// rango, esos clientes se quedan fuera.
+function matchesAge(row: ClientRow, min: number | null, max: number | null): boolean {
+  if (min === null && max === null) return true
+  const age = getAge(row.birthDate)
+  if (age === null) return false
+  if (min !== null && age < min) return false
+  if (max !== null && age > max) return false
+  return true
+}
+
+// La casilla de edad va vacía mientras no se escriba nada, y admite basura
+// ("--", "e"): cualquier cosa que no sea un entero >= 0 no filtra.
+function parseAge(value: string): number | null {
+  if (value.trim() === "") return null
+  const n = Number.parseInt(value, 10)
+  return Number.isFinite(n) && n >= 0 ? n : null
 }
 
 const ACTIVITY_BADGE: Record<ActivityStatus, { label: string; className: string; icon: React.ReactNode }> = {
@@ -274,9 +347,7 @@ function ClientDataTab({
     }
   }
 
-  const age = row.birthDate
-    ? Math.floor((Date.now() - new Date(row.birthDate).getTime()) / (365.25 * 24 * 3600 * 1000))
-    : null
+  const age = getAge(row.birthDate)
   const sexLabel = row.sex ? CUSTOMER_SEX_META[row.sex as CustomerSex]?.label ?? row.sex : ""
   const referralLabel = row.referralSource
     ? REFERRAL_SOURCE_META[row.referralSource as ReferralSource]?.label ?? row.referralSource
@@ -722,6 +793,36 @@ function ClientServicesTab({ data }: { data: ConsumptionData | null }) {
 type ProfileData = Awaited<ReturnType<typeof getClientProfile>>
 type ReminderData = Awaited<ReturnType<typeof getCustomerReminders>>
 
+function formatReminderDate(date: Date | string | null): string {
+  if (!date) return "sin fecha"
+  return new Date(date).toLocaleDateString("es-ES", { day: "2-digit", month: "long", year: "numeric" })
+}
+
+// Completar y borrar son lo mismo para permanentes y para los que vencen, así
+// que la botonera es una sola. Completar deja el recordatorio en el histórico
+// de la ficha; borrar lo quita de en medio para siempre.
+function ReminderActions({ onComplete, onDelete, busy }: {
+  onComplete: () => void
+  onDelete: () => void
+  busy: boolean
+}) {
+  return (
+    <div className="flex shrink-0 items-center gap-1">
+      <Button variant="ghost" size="sm" className="gap-1" disabled={busy} onClick={onComplete}>
+        <CheckCircle2 className="h-4 w-4" /> Completar
+      </Button>
+      <Button
+        variant="ghost" size="sm"
+        className="h-8 w-8 p-0 text-muted-foreground hover:text-[#B31412]"
+        title="Borrar recordatorio"
+        onClick={onDelete}
+      >
+        <Trash2 className="h-4 w-4" />
+      </Button>
+    </div>
+  )
+}
+
 /* ─── Pestaña "Citas" ─────────────────────────────────────────────────────
    Historial de agenda del cliente, en el mismo formato de tabla que el
    listado de clientes y que Total Servicios: cabeceras que ordenan y filtros
@@ -1064,10 +1165,14 @@ function ClientProfileView({
   const [reminders, setReminders] = useState<ReminderData>([])
   const [remindersLoading, setRemindersLoading] = useState(true)
   const [newTitle, setNewTitle] = useState("")
+  // Permanente = sin fecha. Arranca desactivado porque el caso corriente es el
+  // "vuelve dentro de 3 meses"; el aviso de por vida es más raro.
+  const [newPermanent, setNewPermanent] = useState(false)
   const [newDueDate, setNewDueDate] = useState("")
   const [newAlertDays, setNewAlertDays] = useState("7")
   const [savingReminder, setSavingReminder] = useState(false)
   const [completingId, setCompletingId] = useState<string | null>(null)
+  const [reminderToDelete, setReminderToDelete] = useState<ReminderData[number] | null>(null)
 
   useEffect(() => {
     getClientProfile(row.id).then((d) => { setData(d); setLoading(false) })
@@ -1087,23 +1192,51 @@ function ClientProfileView({
 
   async function addReminder(e: React.FormEvent) {
     e.preventDefault()
-    if (!newTitle.trim() || !newDueDate) {
-      toast.error("Escribe el recordatorio y la fecha.")
+    if (!newTitle.trim()) {
+      toast.error("Escribe el recordatorio.")
+      return
+    }
+    if (!newPermanent && !newDueDate) {
+      toast.error("Indica la fecha, o márcalo como permanente.")
       return
     }
     const fd = new FormData()
     fd.set("title", newTitle.trim())
-    fd.set("dueDate", newDueDate)
+    fd.set("dueDate", newPermanent ? "" : newDueDate)
     fd.set("alertDaysBefore", newAlertDays)
     setSavingReminder(true)
     const res = await createCustomerReminder(row.id, fd)
     setSavingReminder(false)
     if (res.ok) {
       toast.success("Recordatorio creado.")
-      setNewTitle(""); setNewDueDate(""); setNewAlertDays("7")
+      setNewTitle(""); setNewPermanent(false); setNewDueDate(""); setNewAlertDays("7")
       reloadReminders()
     } else {
       toast.error(res.error ?? "Error al crear el recordatorio.")
+    }
+  }
+
+  async function reopenReminder(id: string) {
+    setCompletingId(id)
+    const res = await reopenCustomerReminder(id)
+    setCompletingId(null)
+    if (res.ok) {
+      toast.success("Recordatorio reabierto.")
+      reloadReminders()
+    } else {
+      toast.error(res.error ?? "Error al reabrir el recordatorio.")
+    }
+  }
+
+  async function confirmDeleteReminder() {
+    if (!reminderToDelete) return
+    const res = await deleteCustomerReminder(reminderToDelete.id)
+    setReminderToDelete(null)
+    if (res.ok) {
+      toast.success("Recordatorio borrado.")
+      reloadReminders()
+    } else {
+      toast.error(res.error ?? "Error al borrar el recordatorio.")
     }
   }
 
@@ -1122,11 +1255,11 @@ function ClientProfileView({
   const movements = data?.movements ?? []
   const appointments = data?.appointments ?? []
   const balance = data?.customer?.balanceCents ?? row.balanceCents
-  const age = row.birthDate
-    ? Math.floor((Date.now() - new Date(row.birthDate).getTime()) / (365.25 * 24 * 3600 * 1000))
-    : null
+  const age = getAge(row.birthDate)
   const fullLastName = [row.lastName, row.lastName2].filter(Boolean).join(" ")
   const pendingReminders = reminders.filter((r) => !r.completedAt)
+  const permanentReminders = pendingReminders.filter((r) => r.dueDate === null)
+  const datedReminders = pendingReminders.filter((r) => r.dueDate !== null)
   const completedReminders = reminders.filter((r) => r.completedAt)
 
   const TABS: { key: ProfileTab; label: string }[] = [
@@ -1217,81 +1350,153 @@ function ClientProfileView({
                     rows={2}
                   />
                 </div>
-                <div className="flex gap-3">
-                  <div className="flex-1 space-y-1.5">
-                    <Label htmlFor="reminder-due">Fecha del recordatorio</Label>
-                    <Input
-                      id="reminder-due"
-                      type="date"
-                      value={newDueDate}
-                      onChange={(e) => setNewDueDate(e.target.value)}
-                    />
-                  </div>
-                  <div className="w-40 space-y-1.5">
-                    <Label htmlFor="reminder-days">Avisar con (días)</Label>
-                    <Input
-                      id="reminder-days"
-                      type="number"
-                      min={0}
-                      value={newAlertDays}
-                      onChange={(e) => setNewAlertDays(e.target.value)}
-                    />
+                <div className="flex items-start gap-2.5 rounded-lg bg-muted/40 px-3 py-2.5">
+                  <Switch
+                    id="reminder-permanent"
+                    className="mt-0.5"
+                    checked={newPermanent}
+                    onCheckedChange={setNewPermanent}
+                  />
+                  <div className="space-y-0.5">
+                    <Label htmlFor="reminder-permanent" className="font-normal">Permanente</Label>
+                    <p className="text-xs text-muted-foreground">
+                      Sin fecha. Salta siempre que se atienda a este cliente, hasta que se complete o se borre.
+                    </p>
                   </div>
                 </div>
+                {!newPermanent && (
+                  <div className="flex gap-3">
+                    <div className="flex-1 space-y-1.5">
+                      <Label htmlFor="reminder-due">Fecha del recordatorio</Label>
+                      <Input
+                        id="reminder-due"
+                        type="date"
+                        value={newDueDate}
+                        onChange={(e) => setNewDueDate(e.target.value)}
+                      />
+                    </div>
+                    <div className="w-40 space-y-1.5">
+                      <Label htmlFor="reminder-days">Avisar con (días)</Label>
+                      <Input
+                        id="reminder-days"
+                        type="number"
+                        min={0}
+                        value={newAlertDays}
+                        onChange={(e) => setNewAlertDays(e.target.value)}
+                      />
+                    </div>
+                  </div>
+                )}
                 <Button type="submit" size="sm" disabled={savingReminder} className="gap-1.5">
                   <Plus className="h-4 w-4" /> Añadir recordatorio
                 </Button>
               </form>
 
-              <div className="space-y-2">
-                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Pendientes</p>
-                {remindersLoading ? (
-                  <p className="text-xs text-muted-foreground">Cargando…</p>
-                ) : pendingReminders.length === 0 ? (
-                  <p className="text-xs text-muted-foreground">Sin recordatorios pendientes.</p>
-                ) : pendingReminders.map((r) => (
-                  <div key={r.id} className="flex items-start justify-between gap-3 rounded-xl border px-4 py-3">
-                    <div className="flex items-start gap-2 min-w-0">
-                      <Bell className="h-4 w-4 shrink-0 mt-0.5 text-blue-500" />
-                      <div className="min-w-0">
-                        <p className="font-medium">{r.title}</p>
-                        <p className="text-xs text-muted-foreground">
-                          Vence el {new Date(r.dueDate).toLocaleDateString("es-ES", { day: "2-digit", month: "long", year: "numeric" })}
-                          {" · "}avisa {r.alertDaysBefore} días antes
-                        </p>
-                      </div>
+              {remindersLoading ? (
+                <p className="text-xs text-muted-foreground">Cargando…</p>
+              ) : pendingReminders.length === 0 ? (
+                <p className="text-xs text-muted-foreground">Sin recordatorios pendientes.</p>
+              ) : (
+                <>
+                  {permanentReminders.length > 0 && (
+                    <div className="space-y-2">
+                      <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                        Permanentes ({permanentReminders.length})
+                      </p>
+                      {permanentReminders.map((r) => (
+                        <div key={r.id} className="flex items-start justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50/50 px-4 py-3">
+                          <div className="flex items-start gap-2 min-w-0">
+                            <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5 text-[#E65100]" />
+                            <div className="min-w-0">
+                              <p className="font-medium">{r.title}</p>
+                              <p className="text-xs text-muted-foreground">Avisa siempre · sin fecha de vencimiento</p>
+                            </div>
+                          </div>
+                          <ReminderActions
+                            onComplete={() => markComplete(r.id)}
+                            onDelete={() => setReminderToDelete(r)}
+                            busy={completingId === r.id}
+                          />
+                        </div>
+                      ))}
                     </div>
-                    <Button
-                      variant="ghost" size="sm" className="shrink-0 gap-1"
-                      disabled={completingId === r.id}
-                      onClick={() => markComplete(r.id)}
-                    >
-                      <CheckCircle2 className="h-4 w-4" /> Completar
-                    </Button>
-                  </div>
-                ))}
-              </div>
+                  )}
+
+                  {datedReminders.length > 0 && (
+                    <div className="space-y-2">
+                      <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                        Con fecha ({datedReminders.length})
+                      </p>
+                      {datedReminders.map((r) => {
+                        const vencido = r.dueDate !== null && isReminderOverdue(new Date(r.dueDate), new Date())
+                        return (
+                          <div key={r.id} className={cn(
+                            "flex items-start justify-between gap-3 rounded-xl border px-4 py-3",
+                            vencido && "border-red-200 bg-red-50/40",
+                          )}>
+                            <div className="flex items-start gap-2 min-w-0">
+                              <Bell className={cn("h-4 w-4 shrink-0 mt-0.5", vencido ? "text-red-600" : "text-blue-500")} />
+                              <div className="min-w-0">
+                                <p className="font-medium">{r.title}</p>
+                                <p className="text-xs text-muted-foreground">
+                                  {vencido ? "Venció el " : "Vence el "}
+                                  {formatReminderDate(r.dueDate)}
+                                  {" · "}avisa {r.alertDaysBefore} días antes
+                                </p>
+                              </div>
+                            </div>
+                            <ReminderActions
+                              onComplete={() => markComplete(r.id)}
+                              onDelete={() => setReminderToDelete(r)}
+                              busy={completingId === r.id}
+                            />
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
+                </>
+              )}
 
               {completedReminders.length > 0 && (
                 <div className="space-y-2">
                   <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Completados</p>
                   {completedReminders.map((r) => (
-                    <div key={r.id} className="flex items-start gap-2 rounded-xl border px-4 py-3 opacity-60">
-                      <CheckCircle2 className="h-4 w-4 shrink-0 mt-0.5 text-green-600" />
-                      <div className="min-w-0">
-                        <p className="font-medium line-through">{r.title}</p>
-                        <p className="text-xs text-muted-foreground">
-                          Vencía el {new Date(r.dueDate).toLocaleDateString("es-ES", { day: "2-digit", month: "long", year: "numeric" })}
-                        </p>
-                        {r.completedAt && (
+                    <div key={r.id} className="flex items-start justify-between gap-3 rounded-xl border px-4 py-3">
+                      <div className="flex items-start gap-2 min-w-0 opacity-60">
+                        <CheckCircle2 className="h-4 w-4 shrink-0 mt-0.5 text-green-600" />
+                        <div className="min-w-0">
+                          <p className="font-medium line-through">{r.title}</p>
                           <p className="text-xs text-muted-foreground">
-                            Completado{r.completedByUser ? ` por ${r.completedByUser.name}${r.completedByUser.lastName ? ` ${r.completedByUser.lastName}` : ""}` : ""}
-                            {" el "}
-                            {new Date(r.completedAt).toLocaleDateString("es-ES", { day: "2-digit", month: "long", year: "numeric" })}
-                            {" a las "}
-                            {new Date(r.completedAt).toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" })}
+                            {r.dueDate ? `Vencía el ${formatReminderDate(r.dueDate)}` : "Permanente"}
                           </p>
-                        )}
+                          {r.completedAt && (
+                            <p className="text-xs text-muted-foreground">
+                              Completado{r.completedByUser ? ` por ${r.completedByUser.name}${r.completedByUser.lastName ? ` ${r.completedByUser.lastName}` : ""}` : ""}
+                              {" el "}
+                              {new Date(r.completedAt).toLocaleDateString("es-ES", { day: "2-digit", month: "long", year: "numeric" })}
+                              {" a las "}
+                              {new Date(r.completedAt).toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" })}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex shrink-0 items-center gap-1">
+                        <Button
+                          variant="ghost" size="sm" className="gap-1 text-muted-foreground"
+                          disabled={completingId === r.id}
+                          onClick={() => reopenReminder(r.id)}
+                        >
+                          <RotateCcw className="h-4 w-4" /> Reabrir
+                        </Button>
+                        <Button
+                          variant="ghost" size="sm"
+                          className="h-8 w-8 p-0 text-muted-foreground hover:text-[#B31412]"
+                          title="Borrar recordatorio"
+                          onClick={() => setReminderToDelete(r)}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
                       </div>
                     </div>
                   ))}
@@ -1355,6 +1560,29 @@ function ClientProfileView({
 
         </div>
       )}
+
+      {/* Borrar es irreversible y no deja rastro en el histórico, al revés que
+          completar, así que se pregunta antes. */}
+      <AlertDialog open={!!reminderToDelete} onOpenChange={(open) => !open && setReminderToDelete(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5 text-[#B31412]" /> ¿Borrar el recordatorio?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              Vas a borrar <span className="font-medium text-foreground">{reminderToDelete?.title}</span>.
+              Desaparece de la ficha y no queda registrado. Si lo que quieres es dejar constancia de
+              que ya está hecho, márcalo como completado en vez de borrarlo.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction className="bg-[#B31412] hover:bg-[#8B0000] text-white" onClick={confirmDeleteReminder}>
+              Sí, borrar
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }
@@ -1372,7 +1600,10 @@ export function ClientsClient({
 }) {
   const router = useRouter()
   const [search, setSearch] = useState("")
-  const [statusFilter, setStatusFilter] = useState<"all" | ActivityStatus | "warning">("all")
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all")
+  const [sexFilter, setSexFilter] = useState<SexFilter>("all")
+  const [ageFrom, setAgeFrom] = useState("")
+  const [ageTo, setAgeTo] = useState("")
   const [panelOpen, setPanelOpen] = useState(false)
   const [loading, setLoading] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<ClientRow | null>(null)
@@ -1398,33 +1629,50 @@ export function ClientsClient({
     router.replace("/clients")
   }, [rows, router])
 
-  const filtered = useMemo(() => {
-    const q = normalizeSearch(search)
-    return rows.filter((r) => {
-      const nameWords = normalizeSearch(`${r.lastName ?? ""} ${r.lastName2 ?? ""} ${r.firstName}`).split(/\s+/).filter(Boolean)
-      // Los teléfonos se guardan en formato internacional (+34600111222), así que
-      // se comparan solo los dígitos y por inclusión: buscar "600" encuentra el
-      // número aunque esté guardado con el prefijo del país delante.
-      const phoneDigits = [r.phone, r.phone2].filter(Boolean).map((p) => onlyDigits(String(p)))
-      const fileNumber = formatFileNumber(r.fileNumber)
-      const tokens = q.split(/\s+/).filter(Boolean)
-      const matchesSearch =
-        !q ||
-        tokens.every((t) => {
-          const digits = onlyDigits(t)
-          const byName = nameWords.some((w) => w.startsWith(t))
-          const byPhone = digits.length > 0 && phoneDigits.some((p) => p.includes(digits))
-          // El expediente se busca tal cual ("0042") o sin ceros ("42").
-          const byFileNumber =
-            digits.length > 0 && (fileNumber === digits.padStart(4, "0") || String(r.fileNumber) === String(Number(digits)))
-          return byName || byPhone || byFileNumber
-        })
-      const matchesStatus =
-        statusFilter === "all" ||
-        (statusFilter === "warning" ? hasInactivityWarning(r, inactivityWarningDays) : getActivityStatus(r) === statusFilter)
-      return matchesSearch && matchesStatus
-    })
-  }, [rows, search, statusFilter, inactivityWarningDays])
+  const ageMin = parseAge(ageFrom)
+  const ageMax = parseAge(ageTo)
+
+  const filtered = useMemo(
+    () => rows.filter((r) =>
+      matchesSearch(r, search) &&
+      matchesStatus(r, statusFilter, inactivityWarningDays) &&
+      matchesSex(r, sexFilter) &&
+      matchesAge(r, ageMin, ageMax)
+    ),
+    [rows, search, statusFilter, sexFilter, ageMin, ageMax, inactivityWarningDays],
+  )
+
+  // Los contadores de cada desplegable se calculan sobre los clientes que pasan
+  // el RESTO de filtros: así dicen cuántos quedarían al elegir esa opción, en
+  // vez de repetir siempre el total de la clínica.
+  const statusCounts = useMemo(() => {
+    const base = rows.filter((r) =>
+      matchesSearch(r, search) && matchesSex(r, sexFilter) && matchesAge(r, ageMin, ageMax))
+    return {
+      all: base.length,
+      active: base.filter((r) => getActivityStatus(r) === "active").length,
+      inactive: base.filter((r) => getActivityStatus(r) === "inactive").length,
+      warning: base.filter((r) => hasInactivityWarning(r, inactivityWarningDays)).length,
+    }
+  }, [rows, search, sexFilter, ageMin, ageMax, inactivityWarningDays])
+
+  const sexCounts = useMemo(() => {
+    const base = rows.filter((r) =>
+      matchesSearch(r, search) && matchesStatus(r, statusFilter, inactivityWarningDays) && matchesAge(r, ageMin, ageMax))
+    return {
+      all: base.length,
+      FEMALE: base.filter((r) => r.sex === "FEMALE").length,
+      MALE: base.filter((r) => r.sex === "MALE").length,
+      unknown: base.filter((r) => !r.sex).length,
+    }
+  }, [rows, search, statusFilter, ageMin, ageMax, inactivityWarningDays])
+
+  const hayFiltro =
+    search !== "" || statusFilter !== "all" || sexFilter !== "all" || ageFrom !== "" || ageTo !== ""
+
+  function limpiarFiltros() {
+    setSearch(""); setStatusFilter("all"); setSexFilter("all"); setAgeFrom(""); setAgeTo("")
+  }
 
   const { sort, sorted, toggleSort } = useTableSort<ClientRow, ClientSortKey>(
     filtered, CLIENT_SORTERS, CLIENT_SORT_INICIAL,
@@ -1485,12 +1733,6 @@ export function ClientsClient({
     }
   }
 
-  const counts = useMemo(() => ({
-    active:   rows.filter((r) => getActivityStatus(r) === "active").length,
-    inactive: rows.filter((r) => getActivityStatus(r) === "inactive").length,
-    warning:  rows.filter((r) => hasInactivityWarning(r, inactivityWarningDays)).length,
-  }), [rows, inactivityWarningDays])
-
   const deleteDialog = (
     <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
       <AlertDialogContent>
@@ -1545,7 +1787,7 @@ export function ClientsClient({
         {/* Table */}
         <div className="min-w-0 flex-1 space-y-4 overflow-auto p-6">
           <div className="flex flex-wrap items-center gap-3">
-            <div className="relative max-w-sm flex-1">
+            <div className="relative min-w-[16rem] max-w-sm flex-1">
               <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <Input
                 className="pl-9"
@@ -1554,17 +1796,75 @@ export function ClientsClient({
                 onChange={(e) => setSearch(e.target.value)}
               />
             </div>
-            <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as typeof statusFilter)}>
-              <SelectTrigger className="w-44">
+            <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as StatusFilter)}>
+              <SelectTrigger className="w-48">
                 <SelectValue placeholder="Estado" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">Todos ({rows.length})</SelectItem>
-                <SelectItem value="active">Activos ({counts.active})</SelectItem>
-                <SelectItem value="inactive">Inactivos ({counts.inactive})</SelectItem>
-                <SelectItem value="warning">Con aviso ({counts.warning})</SelectItem>
+                <SelectItem value="all">Todos los estados ({statusCounts.all})</SelectItem>
+                <SelectItem value="active">Activos ({statusCounts.active})</SelectItem>
+                <SelectItem value="inactive">Inactivos ({statusCounts.inactive})</SelectItem>
+                <SelectItem value="warning">Con aviso ({statusCounts.warning})</SelectItem>
               </SelectContent>
             </Select>
+            <Select value={sexFilter} onValueChange={(v) => setSexFilter(v as SexFilter)}>
+              <SelectTrigger className="w-48">
+                <SelectValue placeholder="Sexo" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todos los sexos ({sexCounts.all})</SelectItem>
+                <SelectItem value="FEMALE">Mujeres ({sexCounts.FEMALE})</SelectItem>
+                <SelectItem value="MALE">Hombres ({sexCounts.MALE})</SelectItem>
+                <SelectItem value="unknown">Sin especificar ({sexCounts.unknown})</SelectItem>
+              </SelectContent>
+            </Select>
+            {/* Rango de edad abierto por los dos lados: rellenar solo "Desde"
+                busca "de X en adelante", y solo "Hasta", "hasta X". */}
+            <div className="flex items-center gap-2">
+              <Label htmlFor="edad-desde" className="text-xs font-normal text-muted-foreground">Edad</Label>
+              <Input
+                id="edad-desde"
+                type="number"
+                min={0}
+                max={120}
+                inputMode="numeric"
+                placeholder="Desde"
+                className="w-24"
+                value={ageFrom}
+                onChange={(e) => setAgeFrom(e.target.value)}
+              />
+              <span className="text-xs text-muted-foreground">a</span>
+              <Input
+                id="edad-hasta"
+                type="number"
+                min={0}
+                max={120}
+                inputMode="numeric"
+                placeholder="Hasta"
+                className="w-24"
+                value={ageTo}
+                onChange={(e) => setAgeTo(e.target.value)}
+              />
+            </div>
+          </div>
+
+          {/* Cuántos clientes está viendo ahora mismo: con filtros puestos, el
+              número de la cabecera deja de valer y hay que verlo de un vistazo. */}
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border bg-muted/20 px-4 py-3">
+            <span className="flex items-baseline gap-2">
+              <span className="text-2xl font-bold tabular-nums">{sorted.length}</span>
+              <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                {sorted.length === 1 ? "cliente" : "clientes"}{hayFiltro ? " con estos filtros" : ""}
+              </span>
+            </span>
+            {hayFiltro && (
+              <span className="text-xs text-muted-foreground">de {rows.length} en total</span>
+            )}
+            {hayFiltro && (
+              <Button variant="ghost" size="sm" onClick={limpiarFiltros} className="ml-auto gap-1.5">
+                <X className="h-3.5 w-3.5" /> Quitar filtros
+              </Button>
+            )}
           </div>
 
           <Card className="overflow-hidden p-0">
@@ -1586,6 +1886,7 @@ export function ClientsClient({
                 {sorted.map((r) => {
                   const status = getActivityStatus(r)
                   const badge = ACTIVITY_BADGE[status]
+                  const age = getAge(r.birthDate)
                   return (
                     <TableRow
                       key={r.id}
@@ -1611,6 +1912,7 @@ export function ClientsClient({
                         {r.birthDate
                           ? new Date(r.birthDate).toLocaleDateString("es-ES", { day: "2-digit", month: "short", year: "numeric" })
                           : "—"}
+                        {age !== null && <span className="ml-1 text-xs opacity-60">({age} años)</span>}
                       </TableCell>
                       <TableCell>
                         {r.whatsappOptIn ? (

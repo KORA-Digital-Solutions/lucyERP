@@ -4,6 +4,7 @@ import { useState, useMemo, useRef, useEffect } from "react"
 import {
   ArrowLeft, Plus, Search, CreditCard, Banknote, AlertCircle,
   Trash2, Gift, ShoppingCart, X, Clock, Wallet, Scissors, Package, Eye, CalendarDays, Receipt, UserPlus,
+  Bell, CheckCircle2, AlertTriangle,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -11,9 +12,13 @@ import { Badge } from "@/components/ui/badge"
 import { Card, CardContent } from "@/components/ui/card"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { createSale, payDebt, type SaleLineInput } from "@/lib/actions"
+import {
+  createSale, payDebt, getCustomerReminderAlerts, completeCustomerReminder,
+  type SaleLineInput,
+} from "@/lib/actions"
 import { QuickCustomerDialog } from "@/components/quick-customer-dialog"
 import { customerLabel } from "@/lib/format"
+import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 
 /* ─── Types ─────────────────────────────────────────────────────────────── */
@@ -41,6 +46,8 @@ interface Props {
   currentUserId: string | null
   cashOpen: boolean
 }
+
+type ReminderAlert = Awaited<ReturnType<typeof getCustomerReminderAlerts>>[number]
 
 type LineType  = "SERVICE" | "PRODUCT" | "GIFT_CARD"
 
@@ -392,6 +399,17 @@ function POSView({ sales, customers, services, products, workers, currentUserId,
 
   const [customer, setCustomer] = useState<Customer | null>(null)
   const [giftRecipient, setGiftRecipient] = useState<Customer | null>(null)
+  // Recordatorios del cliente: saltan solos al elegirlo y se pueden volver a
+  // abrir desde el aviso que queda bajo el selector.
+  const [alerts, setAlerts] = useState<ReminderAlert[]>([])
+  const [alertsOpen, setAlertsOpen] = useState(false)
+  // Una vez por cliente y por venta: si cierras el aviso y vuelves a elegir al
+  // mismo cliente en el mismo ticket, no vuelve a saltar. Al terminar la venta
+  // se sale del TPV y el componente se desmonta, así que empieza de cero.
+  const shownAlertsFor = useRef<Set<string>>(new Set())
+  // La carga es asíncrona: si da tiempo a cambiar de cliente antes de que
+  // conteste, la respuesta vieja no debe pisar los avisos del nuevo.
+  const alertsRequestFor = useRef<string | null>(null)
   const [lines, setLines] = useState<DraftLine[]>([])
   const [lineKey, setLineKey] = useState(0)
   const [paymentMethod, setPaymentMethod] = useState<"CASH" | "CARD" | "DEBT">("CASH")
@@ -544,6 +562,43 @@ function POSView({ sales, customers, services, products, workers, currentUserId,
     onBack()
   }
 
+  async function selectCustomer(c: Customer) {
+    setCustomer(c)
+    setErrors([])
+    setAlerts([])
+    alertsRequestFor.current = c.id
+    try {
+      const found = await getCustomerReminderAlerts(c.id)
+      if (alertsRequestFor.current !== c.id) return
+      setAlerts(found)
+      if (found.length > 0 && !shownAlertsFor.current.has(c.id)) {
+        shownAlertsFor.current.add(c.id)
+        setAlertsOpen(true)
+      }
+    } catch {
+      toast.error("No se han podido cargar los recordatorios de este cliente.")
+    }
+  }
+
+  function clearCustomer() {
+    setCustomer(null)
+    setAlerts([])
+    setAlertsOpen(false)
+    alertsRequestFor.current = null
+  }
+
+  async function completeAlert(id: string) {
+    const res = await completeCustomerReminder(id)
+    if (!res.ok) {
+      toast.error(res.error ?? "Error al completar el recordatorio.")
+      return
+    }
+    toast.success("Recordatorio completado.")
+    const quedan = alerts.filter((a) => a.id !== id)
+    setAlerts(quedan)
+    if (quedan.length === 0) setAlertsOpen(false)
+  }
+
   function addLine(line: DraftLine) {
     setLines((prev) => [...prev, { ...line, key: lineKey }])
     setLineKey((k) => k + 1)
@@ -573,11 +628,23 @@ function POSView({ sales, customers, services, products, workers, currentUserId,
             label="Cliente"
             customers={allCustomers}
             selected={customer}
-            onSelect={(c) => { setCustomer(c); setErrors([]) }}
-            onClear={() => setCustomer(null)}
+            onSelect={selectCustomer}
+            onClear={clearCustomer}
             onCreated={(c) => setCreatedCustomers((prev) => [c, ...prev])}
             debtByCustomerId={debtByCustomer}
           />
+          {customer && alerts.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setAlertsOpen(true)}
+              className="-mt-3 flex items-center gap-1.5 self-start text-xs font-medium text-[#E65100] hover:underline"
+            >
+              <Bell className="h-3.5 w-3.5 shrink-0" />
+              {alerts.length === 1
+                ? "1 recordatorio de este cliente"
+                : `${alerts.length} recordatorios de este cliente`}
+            </button>
+          )}
           {!customer && (
             <p className="text-xs text-destructive flex items-center gap-1.5 -mt-3">
               <AlertCircle className="h-3.5 w-3.5 shrink-0" />
@@ -915,6 +982,14 @@ function POSView({ sales, customers, services, products, workers, currentUserId,
         </div>
       </div>
 
+      <ReminderAlertsDialog
+        open={alertsOpen}
+        onOpenChange={setAlertsOpen}
+        customerName={customer ? customerLabel(customer) : ""}
+        alerts={alerts}
+        onComplete={completeAlert}
+      />
+
       {showCancel && (
         <Dialog open onOpenChange={() => setShowCancel(false)}>
           <DialogContent style={{ maxWidth: "26rem" }}>
@@ -928,6 +1003,94 @@ function POSView({ sales, customers, services, products, workers, currentUserId,
         </Dialog>
       )}
     </div>
+  )
+}
+
+/* ─── Recordatorios del cliente ──────────────────────────────────────────── */
+
+/* Salta al elegir cliente en el TPV, que es el momento en el que la clienta
+   está delante y todavía se le puede decir. Solo trae lo que avisa hoy: los
+   permanentes siempre y los que vencen, cuando toca (ver lib/reminders.ts).
+
+   Desde aquí solo se leen y se completan. Crear y borrar se hacen en la ficha:
+   en mitad de un cobro no es sitio para ponerse a redactar. */
+function ReminderAlertsDialog({ open, onOpenChange, customerName, alerts, onComplete }: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  customerName: string
+  alerts: ReminderAlert[]
+  onComplete: (id: string) => Promise<void>
+}) {
+  const [completing, setCompleting] = useState<string | null>(null)
+
+  async function complete(id: string) {
+    setCompleting(id)
+    await onComplete(id)
+    setCompleting(null)
+  }
+
+  // Al completar el último, el TPV cierra el diálogo; mientras tanto no se
+  // pinta un modal vacío.
+  if (alerts.length === 0) return null
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent style={{ maxWidth: "30rem" }}>
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Bell className="h-5 w-5 text-[#E65100] shrink-0" />
+            {alerts.length === 1 ? "Recordatorio" : `Recordatorios (${alerts.length})`}
+          </DialogTitle>
+        </DialogHeader>
+
+        <p className="-mt-1 text-sm text-muted-foreground">{customerName}</p>
+
+        <div className="space-y-2 max-h-[50vh] overflow-y-auto">
+          {alerts.map((a) => {
+            const permanente = a.dueDate === null
+            return (
+              <div
+                key={a.id}
+                className={cn(
+                  "rounded-xl border px-4 py-3",
+                  permanente ? "border-amber-200 bg-amber-50/60" : a.overdue ? "border-red-200 bg-red-50/40" : "border-border",
+                )}
+              >
+                <div className="flex items-start gap-2">
+                  {permanente
+                    ? <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5 text-[#E65100]" />
+                    : <Bell className={cn("h-4 w-4 shrink-0 mt-0.5", a.overdue ? "text-red-600" : "text-blue-500")} />}
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium">{a.title}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {permanente
+                        ? "Aviso permanente"
+                        : `${a.overdue ? "Venció el" : "Vence el"} ${new Date(a.dueDate!).toLocaleDateString("es-ES", { day: "2-digit", month: "long", year: "numeric" })}`}
+                    </p>
+                  </div>
+                </div>
+                <div className="mt-2 flex justify-end">
+                  <Button
+                    variant="ghost" size="sm" className="gap-1.5 h-7 text-xs"
+                    disabled={completing === a.id}
+                    onClick={() => complete(a.id)}
+                  >
+                    <CheckCircle2 className="h-3.5 w-3.5" />
+                    {/* En un permanente "completar" quiere decir que deja de
+                        avisar para siempre, así que se dice con esas palabras. */}
+                    {permanente ? "Ya no aplica" : "Completar"}
+                  </Button>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+
+        <DialogFooter>
+          <Button onClick={() => onOpenChange(false)}>Entendido</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }
 

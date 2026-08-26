@@ -16,7 +16,7 @@ import {
   WEEKDAY_LABELS, LEAVE_TYPE_META, HOME_CARE_FAMILY, GIFT_CARD_FAMILY, type LeaveType,
 } from "@/lib/enums"
 import { dayOfWeekFromDateStr } from "@/lib/schedule"
-import { DEFAULT_REMINDER_ALERT_DAYS } from "@/lib/reminders"
+import { DEFAULT_REMINDER_ALERT_DAYS, isReminderActive, isReminderOverdue } from "@/lib/reminders"
 
 export type ActionResult = { ok: boolean; error?: string; id?: string }
 
@@ -1095,9 +1095,10 @@ export async function createCustomerReminder(customerId: string, fd: FormData): 
     if (!session) return { ok: false, error: "No autenticado." }
 
     const title = str(fd, "title")
+    // Sin fecha se guarda como permanente: es un aviso de la ficha, no una
+    // tarea que venza. Ver lib/reminders.ts.
     const dueDateStr = str(fd, "dueDate")
     if (!title) return { ok: false, error: "Escribe el recordatorio." }
-    if (!dueDateStr) return { ok: false, error: "Indica la fecha del recordatorio." }
 
     const alertDaysBefore = int(fd, "alertDaysBefore", DEFAULT_REMINDER_ALERT_DAYS)
     const clinicId = await getActiveClinicId()
@@ -1108,13 +1109,63 @@ export async function createCustomerReminder(customerId: string, fd: FormData): 
         customerId,
         createdByUserId: session.userId,
         title,
-        dueDate: dayRange(dueDateStr).start,
+        dueDate: dueDateStr ? dayRange(dueDateStr).start : null,
         alertDaysBefore,
       },
     })
     revalidatePath("/dashboard")
     revalidatePath("/clients")
     return { ok: true, id: created.id }
+  } catch (e) {
+    return { ok: false, error: errMsg(e) }
+  }
+}
+
+// Solo los que avisan al atender al cliente: los permanentes siempre, y los
+// que tienen fecha únicamente cuando ya están dentro de su ventana de aviso o
+// vencidos. El de dentro de tres meses no tiene por qué salir cada vez que se
+// le cobra algo.
+export async function getCustomerReminderAlerts(customerId: string) {
+  await requireSession()
+  const pendientes = await prisma.customerReminder.findMany({
+    where: { customerId, completedAt: null },
+    orderBy: [{ dueDate: "asc" }],
+  })
+  const now = new Date()
+  return pendientes
+    .filter((r) => isReminderActive(r.dueDate, r.alertDaysBefore, now))
+    .map((r) => ({
+      id: r.id,
+      title: r.title,
+      dueDate: r.dueDate ? r.dueDate.toISOString() : null,
+      overdue: isReminderOverdue(r.dueDate, now),
+    }))
+}
+
+export async function deleteCustomerReminder(id: string): Promise<ActionResult> {
+  try {
+    await requireSession()
+    await prisma.customerReminder.delete({ where: { id } })
+    revalidatePath("/dashboard")
+    revalidatePath("/clients")
+    return { ok: true }
+  } catch (e) {
+    return { ok: false, error: errMsg(e) }
+  }
+}
+
+// Para el "lo he completado sin querer": vuelve a pendiente y se olvida de
+// quién lo había completado, que si no queda un rastro que ya no es verdad.
+export async function reopenCustomerReminder(id: string): Promise<ActionResult> {
+  try {
+    await requireSession()
+    await prisma.customerReminder.update({
+      where: { id },
+      data: { completedAt: null, completedByUserId: null },
+    })
+    revalidatePath("/dashboard")
+    revalidatePath("/clients")
+    return { ok: true }
   } catch (e) {
     return { ok: false, error: errMsg(e) }
   }

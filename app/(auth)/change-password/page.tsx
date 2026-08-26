@@ -1,42 +1,13 @@
 "use client"
 
-import { useState } from "react"
-import { useRouter } from "next/navigation"
+import { useActionState } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { changeOwnPassword } from "@/lib/actions"
-import { getSession } from "@/lib/session"
+import { changePasswordAction } from "@/lib/auth-actions"
 
 export default function ChangePasswordPage() {
-  const router = useRouter()
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState("")
-
-  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault()
-    setError("")
-    const fd = new FormData(e.currentTarget)
-    const newPw = fd.get("newPassword") as string
-    const confirm = fd.get("confirmPassword") as string
-
-    if (newPw !== confirm) {
-      setError("Las contraseñas no coinciden.")
-      return
-    }
-
-    setLoading(true)
-    const res = await fetch("/api/auth/me")
-    const { userId } = await res.json()
-    const result = await changeOwnPassword(userId, newPw)
-    setLoading(false)
-
-    if (result.ok) {
-      window.location.href = "/agenda"
-    } else {
-      setError(result.error ?? "Error al cambiar la contraseña.")
-    }
-  }
+  const [estado, formAction, enviando] = useActionState(changePasswordAction, {})
 
   return (
     <div className="flex min-h-screen items-center justify-center p-8">
@@ -54,7 +25,7 @@ export default function ChangePasswordPage() {
           </p>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form action={formAction} className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="newPassword">Nueva contraseña</Label>
             <Input
@@ -64,7 +35,7 @@ export default function ChangePasswordPage() {
               placeholder="Mínimo 6 caracteres"
               required
               minLength={6}
-              disabled={loading}
+              disabled={enviando}
               autoComplete="new-password"
             />
           </div>
@@ -77,15 +48,17 @@ export default function ChangePasswordPage() {
               placeholder="Repite la contraseña"
               required
               minLength={6}
-              disabled={loading}
+              disabled={enviando}
               autoComplete="new-password"
             />
           </div>
 
-          {error && <p className="text-sm text-destructive">{error}</p>}
+          {estado.error && (
+            <p className="text-sm text-destructive" aria-live="polite">{estado.error}</p>
+          )}
 
-          <Button type="submit" className="w-full" disabled={loading}>
-            {loading ? "Guardando…" : "Establecer contraseña"}
+          <Button type="submit" className="w-full" disabled={enviando}>
+            {enviando ? "Guardando…" : "Establecer contraseña"}
           </Button>
         </form>
       </div>

@@ -1,44 +1,31 @@
 "use client"
 
-import React, { useState } from "react"
-import { useRouter } from "next/navigation"
+import React, { useActionState, useEffect, useState } from "react"
 import { Eye, EyeOff } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { loginAction } from "@/lib/auth-actions"
 
 export default function LoginPage() {
-  const router = useRouter()
-  const [isLoading, setIsLoading] = useState(false)
-  const [error, setError] = useState("")
+  const [estado, formAction, enviando] = useActionState(loginAction, {})
   const [showPassword, setShowPassword] = useState(false)
+  // React vacía los campos del formulario al terminar una server action. La
+  // contraseña interesa que se borre; el usuario no, o hay que reescribirlo
+  // entero cada vez que se falla. Al ser un campo controlado, sobrevive.
+  const [usuario, setUsuario] = useState("")
 
-  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault()
-    setError("")
-    setIsLoading(true)
-
-    const fd = new FormData(e.currentTarget)
-    const res = await fetch("/api/auth/login", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        email: fd.get("email"),
-        password: fd.get("password"),
-      }),
-    })
-
-    setIsLoading(false)
-
-    if (res.ok) {
-      const data = await res.json()
-      router.push(data.mustChangePassword ? "/change-password" : "/dashboard")
-      router.refresh()
-    } else {
-      const data = await res.json()
-      setError(data.error ?? "Error al iniciar sesión.")
+  // Limpieza de urls antiguas: hasta ahora este formulario no declaraba
+  // method, y un <form> sin method es GET, así que si se enviaba antes de que
+  // React hidratara la página se acababa en /login?email=...&password=... Eso
+  // ya no puede pasar (la server action se renderiza con method="post"), pero
+  // esas urls siguen en el historial y en el autocompletado del navegador.
+  // Al abrir la página se reescribe la entrada actual para quitarlas de ahí.
+  useEffect(() => {
+    if (window.location.search) {
+      window.history.replaceState(null, "", window.location.pathname)
     }
-  }
+  }, [])
 
   return (
     <div className="grid min-h-screen lg:grid-cols-2">
@@ -83,7 +70,7 @@ export default function LoginPage() {
             </p>
           </div>
 
-          <form onSubmit={handleSubmit} className="space-y-4">
+          <form action={formAction} className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="email">Usuario</Label>
               <Input
@@ -91,8 +78,10 @@ export default function LoginPage() {
                 name="email"
                 type="text"
                 placeholder="usuario"
+                value={usuario}
+                onChange={(e) => setUsuario(e.target.value)}
                 required
-                disabled={isLoading}
+                disabled={enviando}
                 autoComplete="username"
               />
             </div>
@@ -106,7 +95,7 @@ export default function LoginPage() {
                   type={showPassword ? "text" : "password"}
                   placeholder="••••••••"
                   required
-                  disabled={isLoading}
+                  disabled={enviando}
                   autoComplete="current-password"
                   className="pr-10"
                 />
@@ -121,12 +110,12 @@ export default function LoginPage() {
               </div>
             </div>
 
-            {error && (
-              <p className="text-sm text-destructive">{error}</p>
+            {estado.error && (
+              <p className="text-sm text-destructive" aria-live="polite">{estado.error}</p>
             )}
 
-            <Button type="submit" className="w-full" disabled={isLoading}>
-              {isLoading ? "Iniciando sesión…" : "Iniciar sesión"}
+            <Button type="submit" className="w-full" disabled={enviando}>
+              {enviando ? "Iniciando sesión…" : "Iniciar sesión"}
             </Button>
           </form>
         </div>

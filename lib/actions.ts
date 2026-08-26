@@ -8,7 +8,7 @@ import { requireSession, requireAdmin } from "@/lib/auth"
 import { validateAppointmentSlot } from "@/lib/availability"
 import { sendReminderForAppointmentId } from "@/lib/whatsapp"
 import { combineDateTime, dayRange } from "@/lib/format"
-import { getSession, createSession, setSessionCookie } from "@/lib/session"
+import { getSession } from "@/lib/session"
 import { WEEKDAY_LABELS, LEAVE_TYPE_META, type LeaveType } from "@/lib/enums"
 import { dayOfWeekFromDateStr } from "@/lib/schedule"
 import { DEFAULT_REMINDER_ALERT_DAYS } from "@/lib/reminders"
@@ -403,23 +403,13 @@ export async function setUserPassword(id: string, password: string): Promise<Act
   }
 }
 
-export async function changeOwnPassword(userId: string, newPassword: string): Promise<ActionResult> {
-  try {
-    await requireSession()
-    if (newPassword.length < 6) return { ok: false, error: "La contraseña debe tener al menos 6 caracteres." }
-    const hash = await bcrypt.hash(newPassword, 12)
-    await prisma.user.update({ where: { id: userId }, data: { passwordHash: hash, mustChangePassword: false } })
-    // Re-issue session cookie with mustChangePassword: false
-    const current = await getSession()
-    if (current) {
-      const token = await createSession({ ...current, mustChangePassword: false })
-      await setSessionCookie(token)
-    }
-    return { ok: true }
-  } catch (e) {
-    return { ok: false, error: errMsg(e) }
-  }
-}
+// changeOwnPassword() se ha eliminado: recibía el userId a cambiar como
+// parámetro y solo comprobaba requireSession(), así que cualquier sesión
+// válida podía reescribir la contraseña de cualquier otra cuenta —incluida la
+// de administradora— llamando a la acción con otro id. Toda función exportada
+// desde un fichero "use server" es un endpoint accesible, aunque ninguna
+// pantalla la use. Su sustituta es changePasswordAction() en lib/auth-actions.ts,
+// que saca el userId de la sesión y nunca del formulario.
 
 export async function toggleWorkerActive(id: string, active: boolean): Promise<ActionResult> {
   try {

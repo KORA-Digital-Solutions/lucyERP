@@ -121,7 +121,9 @@ describe("autorización — rutas API", () => {
 describe("configuración", () => {
   it("SESSION_SECRET no tiene fallback silencioso en producción", () => {
     const src = readFileSync(join(RAIZ, "lib", "session.ts"), "utf8")
-    expect(src).toMatch(/NODE_ENV.*production/s)
+    // Sin el flag /s, que no compila con el target ES6 del tsconfig. No hace
+    // falta: NODE_ENV y "production" van en la misma línea.
+    expect(src).toMatch(/NODE_ENV[^\r\n]*production/)
     expect(src).toMatch(/throw new Error/)
   })
 

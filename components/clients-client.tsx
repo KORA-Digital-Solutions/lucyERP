@@ -1007,7 +1007,7 @@ export function ClientsClient({
   }
 
   return (
-    <div className="flex h-screen flex-col">
+    <div className="flex h-screen flex-col overflow-hidden">
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-card p-6">
         <div>
@@ -1021,7 +1021,7 @@ export function ClientsClient({
 
       <div className="flex flex-1 overflow-hidden">
         {/* Table */}
-        <div className="flex-1 space-y-4 overflow-auto p-6">
+        <div className="min-w-0 flex-1 space-y-4 overflow-auto p-6">
           <div className="flex flex-wrap items-center gap-3">
             <div className="relative max-w-sm flex-1">
               <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -1052,10 +1052,10 @@ export function ClientsClient({
                   <SortableTableHead sortKey="expediente" sort={sort} onToggle={toggleSort}>Expediente</SortableTableHead>
                   <SortableTableHead sortKey="nombre" sort={sort} onToggle={toggleSort}>Apellidos, Nombre</SortableTableHead>
                   <SortableTableHead sortKey="telefono" sort={sort} onToggle={toggleSort}>Teléfono</SortableTableHead>
-                  <SortableTableHead sortKey="nacimiento" sort={sort} onToggle={toggleSort}>F. nacimiento</SortableTableHead>
+                  <SortableTableHead sortKey="nacimiento" sort={sort} onToggle={toggleSort}>Nacimiento</SortableTableHead>
                   <SortableTableHead sortKey="whatsapp" sort={sort} onToggle={toggleSort}>WhatsApp</SortableTableHead>
                   <SortableTableHead sortKey="ultimaCita" sort={sort} onToggle={toggleSort}>Última cita</SortableTableHead>
-                  <SortableTableHead sortKey="saldo" sort={sort} onToggle={toggleSort}>Saldo a favor</SortableTableHead>
+                  <SortableTableHead sortKey="saldo" sort={sort} onToggle={toggleSort}>Saldo</SortableTableHead>
                   <SortableTableHead sortKey="deuda" sort={sort} onToggle={toggleSort}>Deuda</SortableTableHead>
                   <SortableTableHead sortKey="estado" sort={sort} onToggle={toggleSort}>Estado</SortableTableHead>
                 </TableRow>
@@ -1135,9 +1135,9 @@ export function ClientsClient({
           </Card>
         </div>
 
-        {/* Mobile backdrop */}
+        {/* Fondo oscurecido del panel de alta */}
         {panelOpen && (
-          <div className="fixed inset-0 z-40 bg-black/30 lg:hidden" onClick={closePanel} aria-hidden="true" />
+          <div className="fixed inset-0 z-40 bg-black/30" onClick={closePanel} aria-hidden="true" />
         )}
 
         {/* Panel de alta. La edición vive en la ficha del cliente. */}
@@ -1146,7 +1146,6 @@ export function ClientsClient({
             className={cn(
               "flex w-full flex-col border-l bg-card shadow-xl",
               "fixed inset-y-0 right-0 z-50 max-w-xl",
-              "lg:static lg:z-auto lg:w-[520px] lg:max-w-none lg:shadow-none",
             )}
           >
             <div className="flex items-center justify-between border-b px-5 py-4">

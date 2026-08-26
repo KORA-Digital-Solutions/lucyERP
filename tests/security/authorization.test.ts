@@ -16,7 +16,7 @@ import { describe, expect, it } from "vitest"
 
 const RAIZ = join(__dirname, "..", "..")
 
-/** Acciones que gestionan usuarios, configuración o borran clientas. */
+/** Acciones que gestionan usuarios, configuración o borran clientes. */
 const DEBEN_SER_ADMIN = [
   "saveWorker", "deleteWorker", "setUserPassword", "toggleWorkerActive",
   "saveService", "toggleServiceActive", "saveServiceFamily", "toggleServiceFamilyActive",

@@ -1014,7 +1014,7 @@ function POSView({ sales, customers, services, products, workers, currentUserId,
 
 /* ─── Recordatorios del cliente ──────────────────────────────────────────── */
 
-/* Salta al elegir cliente en el TPV, que es el momento en el que la clienta
+/* Salta al elegir cliente en el TPV, que es el momento en el que el cliente
    está delante y todavía se le puede decir. Solo trae lo que avisa hoy: los
    permanentes siempre y los que vencen, cuando toca (ver lib/reminders.ts).
 

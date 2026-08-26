@@ -1004,7 +1004,7 @@ function ClientAppointmentsTab({ appointments }: { appointments: AppointmentRow[
    La media entre compras se enseña, pero solo con tres o más: con dos, la
    "media" es un número inventado. Y el aviso de a quién le toca reponer no
    vive aquí, sino en el módulo de informes, porque para eso hay que cruzar
-   todas las clientas de una vez y no ir abriendo fichas. */
+   todos los clientes de una vez y no ir abriendo fichas. */
 
 type HomeCareRow = {
   product: string

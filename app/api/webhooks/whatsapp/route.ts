@@ -8,7 +8,7 @@ import { getActiveClinicId } from "@/lib/clinic"
  * deja pasar. Su autenticación es la firma HMAC del cuerpo, no la sesión.
  *
  * Sin ella, cualquiera podría enviar eventos falsos y confirmar o CANCELAR las
- * citas de cualquier clienta. Si WHATSAPP_APP_SECRET no está configurada se
+ * citas de cualquier cliente. Si WHATSAPP_APP_SECRET no está configurada se
  * rechaza todo: mejor un webhook inactivo que uno abierto.
  */
 function firmaValida(cuerpoCrudo: string, cabecera: string | null): boolean {

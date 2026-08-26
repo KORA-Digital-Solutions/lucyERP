@@ -11,7 +11,7 @@ import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { Badge } from "@/components/ui/badge"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { saveWorker, toggleWorkerActive, setUserPassword, deleteWorker } from "@/lib/actions"
@@ -204,7 +204,7 @@ export function WorkersClient({
 
         {/* Diálogo editar/crear usuario */}
         <Dialog open={open} onOpenChange={setOpen}>
-          <DialogContent>
+          <DialogContent aria-describedby={undefined}>
             <DialogHeader>
               <DialogTitle>{editing ? "Editar usuario" : "Nuevo usuario"}</DialogTitle>
             </DialogHeader>
@@ -269,11 +269,11 @@ export function WorkersClient({
           <DialogContent>
             <DialogHeader>
               <DialogTitle>Asignar contraseña temporal</DialogTitle>
+              <DialogDescription>
+                Asigna una contraseña temporal a <strong>{pwTarget?.name}{pwTarget?.lastName ? ` ${pwTarget.lastName}` : ""}</strong>. Se le pedirá que la cambie en el siguiente acceso.
+              </DialogDescription>
             </DialogHeader>
             <div className="space-y-4">
-              <p className="text-sm text-muted-foreground">
-                Asigna una contraseña temporal a <strong>{pwTarget?.name}{pwTarget?.lastName ? ` ${pwTarget.lastName}` : ""}</strong>. Se le pedirá que la cambie en el siguiente acceso.
-              </p>
               <div className="space-y-2">
                 <Label htmlFor="tempPw">Contraseña temporal</Label>
                 <Input

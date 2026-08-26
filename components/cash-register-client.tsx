@@ -203,7 +203,7 @@ export function CashRegisterClient({ todayRegister, history, suggestedOpeningCen
 
         {/* OPEN DIALOG */}
         <Dialog open={showOpen} onOpenChange={setShowOpen}>
-          <DialogContent style={{ maxWidth: "26rem" }}>
+          <DialogContent style={{ maxWidth: "26rem" }} aria-describedby={undefined}>
             <DialogHeader>
               <DialogTitle>Abrir caja</DialogTitle>
             </DialogHeader>
@@ -232,7 +232,7 @@ export function CashRegisterClient({ todayRegister, history, suggestedOpeningCen
 
         {/* CLOSE DIALOG */}
         <Dialog open={showClose} onOpenChange={setShowClose}>
-          <DialogContent style={{ maxWidth: "34rem" }}>
+          <DialogContent style={{ maxWidth: "34rem" }} aria-describedby={undefined}>
             <DialogHeader>
               <DialogTitle>Cerrar caja</DialogTitle>
             </DialogHeader>

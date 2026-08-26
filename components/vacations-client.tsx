@@ -71,7 +71,7 @@ function BalanceDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent aria-describedby={undefined}>
         <DialogHeader>
           <DialogTitle>Saldo anual {year} — {row?.workerName}</DialogTitle>
         </DialogHeader>

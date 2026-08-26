@@ -98,7 +98,7 @@ function OrderPanel({ products, onClose, onDone }: OrderPanelProps) {
 
   return (
     <Dialog open onOpenChange={onClose}>
-      <DialogContent className="w-[90vw] max-w-4xl" style={{ maxWidth: "56rem" }}>
+      <DialogContent className="w-[90vw] max-w-4xl" style={{ maxWidth: "56rem" }} aria-describedby={undefined}>
         <DialogHeader>
           <DialogTitle>Registrar pedido</DialogTitle>
         </DialogHeader>
@@ -206,7 +206,7 @@ function ConsumeDialog({ product, type, onClose, onDone }: ConsumeDialogProps) {
 
   return (
     <Dialog open onOpenChange={onClose}>
-      <DialogContent>
+      <DialogContent aria-describedby={undefined}>
         <DialogHeader>
           <DialogTitle>{type === "ENTRY" ? "Entrada de stock" : "Consumo interno"} — {product.name}</DialogTitle>
         </DialogHeader>
@@ -517,7 +517,7 @@ export function StockClient({ products, suppliers }: { products: ProductRow[]; s
 
         {/* Diálogo producto */}
         <Dialog open={productOpen} onOpenChange={setProductOpen}>
-          <DialogContent>
+          <DialogContent aria-describedby={undefined}>
             <DialogHeader>
               <DialogTitle>{editingProduct ? "Editar producto" : "Nuevo producto"}</DialogTitle>
             </DialogHeader>
@@ -573,7 +573,7 @@ export function StockClient({ products, suppliers }: { products: ProductRow[]; s
 
         {/* Diálogo proveedor */}
         <Dialog open={supplierOpen} onOpenChange={setSupplierOpen}>
-          <DialogContent>
+          <DialogContent aria-describedby={undefined}>
             <DialogHeader>
               <DialogTitle>{editingSupplier ? "Editar proveedor" : "Nuevo proveedor"}</DialogTitle>
             </DialogHeader>

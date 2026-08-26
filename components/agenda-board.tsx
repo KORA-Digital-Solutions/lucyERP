@@ -175,7 +175,7 @@ function DayOverrideDialog({
 
   return (
     <Dialog open={!!state} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent>
+      <DialogContent aria-describedby={undefined}>
         <DialogHeader>
           <DialogTitle>Excepción de horario · {date}</DialogTitle>
         </DialogHeader>

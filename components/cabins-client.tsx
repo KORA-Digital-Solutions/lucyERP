@@ -112,7 +112,7 @@ export function CabinsClient({ rows }: { rows: CabinRow[] }) {
         </Card>
 
         <Dialog open={open} onOpenChange={setOpen}>
-          <DialogContent>
+          <DialogContent aria-describedby={undefined}>
             <DialogHeader>
               <DialogTitle>{editing ? "Editar cabina" : "Nueva cabina"}</DialogTitle>
             </DialogHeader>

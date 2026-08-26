@@ -10,7 +10,9 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent } from "@/components/ui/card"
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
+} from "@/components/ui/dialog"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import {
   createSale, payDebt, getCustomerReminderAlerts, completeCustomerReminder,
@@ -311,7 +313,7 @@ export function SalesClient({ sales, customers, services, products, workers, cur
         {/* Detail */}
         {detailSale && (
           <Dialog open onOpenChange={() => setDetailSale(null)}>
-            <DialogContent style={{ maxWidth: "42rem" }}>
+            <DialogContent style={{ maxWidth: "42rem" }} aria-describedby={undefined}>
               <DialogHeader><DialogTitle>Detalle de venta</DialogTitle></DialogHeader>
               <div className="space-y-4 text-sm">
                 <div className="grid grid-cols-2 gap-2 text-muted-foreground">
@@ -365,10 +367,12 @@ export function SalesClient({ sales, customers, services, products, workers, cur
         {showNoCashDialog && (
           <Dialog open onOpenChange={() => setShowNoCashDialog(false)}>
             <DialogContent style={{ maxWidth: "26rem" }}>
-              <DialogHeader><DialogTitle>Caja no abierta</DialogTitle></DialogHeader>
-              <p className="text-sm text-muted-foreground">
-                Para registrar una nueva venta primero debes abrir la caja del día.
-              </p>
+              <DialogHeader>
+                <DialogTitle>Caja no abierta</DialogTitle>
+                <DialogDescription>
+                  Para registrar una nueva venta primero debes abrir la caja del día.
+                </DialogDescription>
+              </DialogHeader>
               <DialogFooter>
                 <Button variant="outline" onClick={() => setShowNoCashDialog(false)}>Cancelar</Button>
                 <Button onClick={() => { window.location.href = "/cash-register" }}>Abrir caja</Button>
@@ -993,8 +997,10 @@ function POSView({ sales, customers, services, products, workers, currentUserId,
       {showCancel && (
         <Dialog open onOpenChange={() => setShowCancel(false)}>
           <DialogContent style={{ maxWidth: "26rem" }}>
-            <DialogHeader><DialogTitle>¿Cancelar la venta?</DialogTitle></DialogHeader>
-            <p className="text-sm text-muted-foreground">Se perderán las líneas añadidas.</p>
+            <DialogHeader>
+              <DialogTitle>¿Cancelar la venta?</DialogTitle>
+              <DialogDescription>Se perderán las líneas añadidas.</DialogDescription>
+            </DialogHeader>
             <DialogFooter>
               <Button variant="outline" onClick={() => setShowCancel(false)}>Seguir editando</Button>
               <Button variant="destructive" onClick={onBack}>Cancelar venta</Button>
@@ -1041,9 +1047,8 @@ function ReminderAlertsDialog({ open, onOpenChange, customerName, alerts, onComp
             <Bell className="h-5 w-5 text-[#E65100] shrink-0" />
             {alerts.length === 1 ? "Recordatorio" : `Recordatorios (${alerts.length})`}
           </DialogTitle>
+          <DialogDescription>{customerName}</DialogDescription>
         </DialogHeader>
-
-        <p className="-mt-1 text-sm text-muted-foreground">{customerName}</p>
 
         <div className="space-y-2 max-h-[50vh] overflow-y-auto">
           {alerts.map((a) => {

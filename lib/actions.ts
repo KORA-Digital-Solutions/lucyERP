@@ -12,7 +12,9 @@ import {
   combineDateTime, dayRange, isValidPhone, isValidPhonePrefix, joinPhone, normalizePhone,
 } from "@/lib/format"
 import { getSession } from "@/lib/session"
-import { WEEKDAY_LABELS, LEAVE_TYPE_META, type LeaveType } from "@/lib/enums"
+import {
+  WEEKDAY_LABELS, LEAVE_TYPE_META, HOME_CARE_FAMILY, GIFT_CARD_FAMILY, type LeaveType,
+} from "@/lib/enums"
 import { dayOfWeekFromDateStr } from "@/lib/schedule"
 import { DEFAULT_REMINDER_ALERT_DAYS } from "@/lib/reminders"
 
@@ -971,7 +973,7 @@ export async function closeCashRegister(
 
 export async function getClientProfile(customerId: string) {
   await requireSession()
-  const [customer, movements, recentSales, appointments] = await Promise.all([
+  const [customer, movements, appointments] = await Promise.all([
     prisma.customer.findUnique({
       where: { id: customerId },
       select: {
@@ -986,15 +988,6 @@ export async function getClientProfile(customerId: string) {
       orderBy: { createdAt: "desc" },
       take: 30,
     }),
-    prisma.sale.findMany({
-      where: { customerId },
-      include: {
-        lines: { select: { description: true, totalCents: true, type: true } },
-        user: { select: { name: true } },
-      },
-      orderBy: { createdAt: "desc" },
-      take: 15,
-    }),
     prisma.appointment.findMany({
       where: { customerId },
       include: {
@@ -1005,7 +998,82 @@ export async function getClientProfile(customerId: string) {
       orderBy: { startAt: "desc" },
     }),
   ])
-  return { customer, movements, recentSales, appointments }
+  return { customer, movements, appointments }
+}
+
+export type ConsumptionLine = {
+  family: string
+  description: string
+  quantity: number
+  discountPercent: number
+  totalCents: number
+  /** Solo en líneas de producto: permite ver cada cuánto lo repone. */
+  productId: string | null
+}
+
+export type ConsumptionTicket = {
+  id: string
+  date: string
+  status: string
+  totalCents: number
+  lines: ConsumptionLine[]
+}
+
+// Historial de consumo del cliente: todo lo que se le ha cobrado alguna vez,
+// por tickets y en orden cronológico inverso.
+//
+// Se devuelve entero, sin filtrar por fechas ni paginar: el histórico de un
+// cliente son unos cientos de líneas como mucho, y teniéndolo todo en el
+// cliente los filtros de fecha se aplican sin volver al servidor.
+export async function getCustomerConsumption(customerId: string): Promise<{
+  tickets: ConsumptionTicket[]
+  totalCents: number
+}> {
+  await requireSession()
+  const sales = await prisma.sale.findMany({
+    where: { customerId },
+    select: {
+      id: true,
+      createdAt: true,
+      status: true,
+      totalCents: true,
+      lines: {
+        select: {
+          type: true,
+          description: true,
+          quantity: true,
+          discountPercent: true,
+          totalCents: true,
+          productId: true,
+          service: { select: { family: { select: { name: true } } } },
+        },
+      },
+    },
+    orderBy: { createdAt: "desc" },
+  })
+
+  const tickets: ConsumptionTicket[] = sales.map((s) => ({
+    id: s.id,
+    date: s.createdAt.toISOString(),
+    status: s.status,
+    totalCents: s.totalCents,
+    lines: s.lines.map((l) => ({
+      family:
+        l.type === "PRODUCT" ? HOME_CARE_FAMILY :
+        l.type === "GIFT_CARD" ? GIFT_CARD_FAMILY :
+        l.service?.family?.name ?? "Sin familia",
+      description: l.description,
+      quantity: l.quantity,
+      discountPercent: l.discountPercent,
+      totalCents: l.totalCents,
+      productId: l.productId,
+    })),
+  }))
+
+  return {
+    tickets,
+    totalCents: tickets.reduce((sum, t) => sum + t.totalCents, 0),
+  }
 }
 
 export async function getCustomerReminders(customerId: string) {

@@ -25,7 +25,7 @@ import {
 } from "@/components/ui/alert-dialog"
 import { cn } from "@/lib/utils"
 import {
-  saveCustomer, deleteCustomer, getClientProfile,
+  saveCustomer, deleteCustomer, getClientProfile, getCustomerConsumption,
   getCustomerReminders, createCustomerReminder, completeCustomerReminder,
 } from "@/lib/actions"
 import {
@@ -500,12 +500,553 @@ function ClientDataTab({
   )
 }
 
+/* ─── Pestaña "Total Servicios" ───────────────────────────────────────────
+   Todo lo que se le ha cobrado alguna vez al cliente, en una tabla de solo
+   lectura con el mismo comportamiento que el listado de clientes: cabeceras
+   que ordenan y filtros encima.
+
+   Una línea por concepto cobrado, no por ticket, que es como se leen los
+   listados de servicios realizados de toda la vida: fecha, familia,
+   descripción, descuento y total. */
+
+type ConsumptionData = Awaited<ReturnType<typeof getCustomerConsumption>>
+
+type ServiceRow = {
+  key: string
+  date: string
+  family: string
+  description: string
+  quantity: number
+  discountPercent: number
+  totalCents: number
+  ticketStatus: string
+}
+
+const SERVICE_SORTERS = {
+  fecha: byDate<ServiceRow>((r) => r.date),
+  familia: byText<ServiceRow>((r) => r.family),
+  descripcion: byText<ServiceRow>((r) => r.description),
+  uds: byNumber<ServiceRow>((r) => r.quantity),
+  dto: byNumber<ServiceRow>((r) => r.discountPercent),
+  total: byNumber<ServiceRow>((r) => r.totalCents),
+}
+
+type ServiceSortKey = keyof typeof SERVICE_SORTERS
+
+// Lo más reciente primero, que es lo que se mira al abrir la ficha.
+const SERVICE_SORT_INICIAL: SortRule<ServiceSortKey>[] = [{ key: "fecha", dir: "desc" }]
+
+const TODAS_FAMILIAS = "__todas__"
+
+function ClientServicesTab({ data }: { data: ConsumptionData | null }) {
+  const [search, setSearch] = useState("")
+  const [family, setFamily] = useState(TODAS_FAMILIAS)
+  const [from, setFrom] = useState("")
+  const [to, setTo] = useState("")
+
+  // Una fila por línea de venta.
+  const rows = useMemo<ServiceRow[]>(() => {
+    const out: ServiceRow[] = []
+    for (const t of data?.tickets ?? []) {
+      t.lines.forEach((l, i) => {
+        out.push({
+          key: `${t.id}-${i}`,
+          date: t.date,
+          family: l.family,
+          description: l.description,
+          quantity: l.quantity,
+          discountPercent: l.discountPercent,
+          totalCents: l.totalCents,
+          ticketStatus: t.status,
+        })
+      })
+    }
+    return out
+  }, [data])
+
+  // Las familias del desplegable salen de lo que este cliente ha consumido, no
+  // del catálogo entero: no tiene sentido ofrecerle filtrar por algo que nunca
+  // se ha hecho.
+  const familyCounts = useMemo(() => {
+    const acc = new Map<string, number>()
+    for (const r of rows) acc.set(r.family, (acc.get(r.family) ?? 0) + 1)
+    return [...acc.entries()].sort((a, b) => a[0].localeCompare(b[0], "es"))
+  }, [rows])
+
+  const filtered = useMemo(() => {
+    const q = normalizeSearch(search)
+    return rows.filter((r) => {
+      const day = r.date.slice(0, 10)
+      if (from && day < from) return false
+      if (to && day > to) return false
+      if (family !== TODAS_FAMILIAS && r.family !== family) return false
+      if (q && !normalizeSearch(`${r.description} ${r.family}`).includes(q)) return false
+      return true
+    })
+  }, [rows, search, family, from, to])
+
+  const { sort, sorted, toggleSort } = useTableSort<ServiceRow, ServiceSortKey>(
+    filtered, SERVICE_SORTERS, SERVICE_SORT_INICIAL,
+  )
+
+  const filteredTotal = useMemo(
+    () => filtered.reduce((sum, r) => sum + r.totalCents, 0),
+    [filtered],
+  )
+  const hayFiltro = search !== "" || family !== TODAS_FAMILIAS || from !== "" || to !== ""
+
+  function limpiarFiltros() {
+    setSearch(""); setFamily(TODAS_FAMILIAS); setFrom(""); setTo("")
+  }
+
+  if (!data) return <p className="text-sm text-muted-foreground">Cargando…</p>
+
+  if (rows.length === 0) {
+    return (
+      <div className="max-w-xl rounded-xl border border-dashed p-10 text-center text-muted-foreground">
+        <ShoppingCart className="mx-auto mb-3 h-8 w-8 opacity-30" />
+        <p className="font-medium">Sin servicios registrados</p>
+        <p className="mt-1 text-sm">Aquí aparecerá todo lo que se le cobre a este cliente.</p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="max-w-[1400px] space-y-3">
+
+      {/* Filtros */}
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="relative min-w-[14rem] max-w-xs flex-1">
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            className="h-9 pl-9"
+            placeholder="Buscar servicio o producto…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        </div>
+        <Select value={family} onValueChange={setFamily}>
+          <SelectTrigger className="w-56"><SelectValue placeholder="Familia" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value={TODAS_FAMILIAS}>Todas las familias ({rows.length})</SelectItem>
+            {familyCounts.map(([f, n]) => (
+              <SelectItem key={f} value={f}>{f} ({n})</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <div className="flex items-center gap-2">
+          <Label htmlFor="serv-desde" className="text-xs font-normal text-muted-foreground">Desde</Label>
+          <Input id="serv-desde" type="date" className="h-9 w-[9.5rem]" value={from} onChange={(e) => setFrom(e.target.value)} />
+          <Label htmlFor="serv-hasta" className="text-xs font-normal text-muted-foreground">Hasta</Label>
+          <Input id="serv-hasta" type="date" className="h-9 w-[9.5rem]" value={to} onChange={(e) => setTo(e.target.value)} />
+        </div>
+        {hayFiltro && (
+          <Button variant="ghost" size="sm" onClick={limpiarFiltros} className="gap-1.5">
+            <X className="h-3.5 w-3.5" /> Quitar filtros
+          </Button>
+        )}
+      </div>
+
+      <Card className="overflow-hidden p-0">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <SortableTableHead sortKey="fecha" sort={sort} onToggle={toggleSort}>Fecha</SortableTableHead>
+              <SortableTableHead sortKey="familia" sort={sort} onToggle={toggleSort}>Familia</SortableTableHead>
+              <SortableTableHead sortKey="descripcion" sort={sort} onToggle={toggleSort}>Descripción</SortableTableHead>
+              <SortableTableHead sortKey="uds" sort={sort} onToggle={toggleSort} className="text-right">Uds</SortableTableHead>
+              <SortableTableHead sortKey="dto" sort={sort} onToggle={toggleSort} className="text-right">Dto</SortableTableHead>
+              <SortableTableHead sortKey="total" sort={sort} onToggle={toggleSort} className="text-right">Total</SortableTableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {sorted.map((r) => (
+              <TableRow key={r.key}>
+                <TableCell className="whitespace-nowrap text-muted-foreground">
+                  {new Date(r.date).toLocaleDateString("es-ES", { day: "2-digit", month: "short", year: "numeric" })}
+                  {r.ticketStatus === "DEBT" && (
+                    <span className="ml-2 text-xs text-[#B31412]">sin cobrar</span>
+                  )}
+                </TableCell>
+                <TableCell className="whitespace-nowrap">{r.family}</TableCell>
+                <TableCell>{r.description}</TableCell>
+                {/* Las unidades van siempre, aunque sea 1: si solo se pintan
+                    cuando hay varias, la columna se queda vacía y parece rota.
+                    El descuento sí se oculta a 0, que es lo pedido. */}
+                <TableCell className="text-right tabular-nums text-muted-foreground">
+                  {r.quantity}
+                </TableCell>
+                {/* El descuento solo se enseña cuando lo hay, como en los
+                    listados de servicios realizados de siempre. */}
+                <TableCell className="text-right tabular-nums text-muted-foreground">
+                  {r.discountPercent > 0 ? `${r.discountPercent}%` : ""}
+                </TableCell>
+                <TableCell className="text-right font-medium tabular-nums">{fmtEur(r.totalCents)}</TableCell>
+              </TableRow>
+            ))}
+            {sorted.length === 0 && (
+              <TableRow>
+                <TableCell colSpan={6} className="py-8 text-center text-muted-foreground">
+                  Sin resultados con estos filtros.
+                </TableCell>
+              </TableRow>
+            )}
+          </TableBody>
+        </Table>
+      </Card>
+
+      {/* Total de lo que se está viendo. Cuando hay filtros se recuerda además
+          el total de todo, para no perder la referencia. */}
+      <div className="flex flex-wrap items-baseline justify-end gap-x-6 gap-y-1 rounded-xl border bg-muted/20 px-4 py-3">
+        <span className="mr-auto text-xs text-muted-foreground">
+          {sorted.length} {sorted.length === 1 ? "línea" : "líneas"}
+        </span>
+        {hayFiltro && (
+          <span className="text-xs text-muted-foreground">
+            de {fmtEur(data?.totalCents ?? 0)} en total
+          </span>
+        )}
+        <span className="flex items-baseline gap-2">
+          <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+            {hayFiltro ? "Total filtrado" : "Total"}
+          </span>
+          <span className="text-2xl font-bold tabular-nums">{fmtEur(filteredTotal)}</span>
+        </span>
+      </div>
+    </div>
+  )
+}
+
 /* ─── Profile fullscreen view ────────────────────────────────────────────── */
 
 type ProfileData = Awaited<ReturnType<typeof getClientProfile>>
 type ReminderData = Awaited<ReturnType<typeof getCustomerReminders>>
 
-type ProfileTab = "datos" | "citas" | "recordatorios" | "finanzas"
+/* ─── Pestaña "Citas" ─────────────────────────────────────────────────────
+   Historial de agenda del cliente, en el mismo formato de tabla que el
+   listado de clientes y que Total Servicios: cabeceras que ordenan y filtros
+   encima. Aquí se ve cuándo vino y con quién —incluidas las canceladas y las
+   que no se presentó—, que es una pregunta distinta de qué se le cobró. */
+
+type AppointmentRow = ProfileData["appointments"][number]
+
+const APPOINTMENT_SORTERS = {
+  fecha: byNumber<AppointmentRow>((r) => new Date(r.startAt).getTime()),
+  servicio: byText<AppointmentRow>((r) => r.service.name),
+  empleada: byText<AppointmentRow>((r) => r.worker.name),
+  cabina: byText<AppointmentRow>((r) => r.cabin.name),
+  duracion: byNumber<AppointmentRow>((r) => r.durationMinutes),
+  estado: byText<AppointmentRow>((r) => STATUS_META[r.status as AppointmentStatus]?.label ?? r.status),
+}
+
+type AppointmentSortKey = keyof typeof APPOINTMENT_SORTERS
+
+// La más reciente primero, que es lo que se mira al abrir la ficha.
+const APPOINTMENT_SORT_INICIAL: SortRule<AppointmentSortKey>[] = [{ key: "fecha", dir: "desc" }]
+
+const TODOS_ESTADOS = "__todos__"
+
+function ClientAppointmentsTab({ appointments }: { appointments: AppointmentRow[] }) {
+  const [search, setSearch] = useState("")
+  const [status, setStatus] = useState(TODOS_ESTADOS)
+  const [from, setFrom] = useState("")
+  const [to, setTo] = useState("")
+
+  // Los estados del desplegable salen de las citas que tiene este cliente, no
+  // del catálogo entero: no tiene sentido ofrecer filtrar por "No asistió" si
+  // nunca ha faltado.
+  const statusCounts = useMemo(() => {
+    const acc = new Map<string, number>()
+    for (const a of appointments) acc.set(a.status, (acc.get(a.status) ?? 0) + 1)
+    return [...acc.entries()].sort((x, y) => y[1] - x[1])
+  }, [appointments])
+
+  const filtered = useMemo(() => {
+    const q = normalizeSearch(search)
+    return appointments.filter((a) => {
+      const day = new Date(a.startAt).toISOString().slice(0, 10)
+      if (from && day < from) return false
+      if (to && day > to) return false
+      if (status !== TODOS_ESTADOS && a.status !== status) return false
+      if (q && !normalizeSearch(`${a.service.name} ${a.worker.name} ${a.cabin.name}`).includes(q)) return false
+      return true
+    })
+  }, [appointments, search, status, from, to])
+
+  const { sort, sorted, toggleSort } = useTableSort<AppointmentRow, AppointmentSortKey>(
+    filtered, APPOINTMENT_SORTERS, APPOINTMENT_SORT_INICIAL,
+  )
+
+  const hayFiltro = search !== "" || status !== TODOS_ESTADOS || from !== "" || to !== ""
+
+  function limpiarFiltros() {
+    setSearch(""); setStatus(TODOS_ESTADOS); setFrom(""); setTo("")
+  }
+
+  if (appointments.length === 0) {
+    return (
+      <div className="max-w-xl rounded-xl border border-dashed p-10 text-center text-muted-foreground">
+        <FileText className="mx-auto mb-3 h-8 w-8 opacity-30" />
+        <p className="font-medium">Sin citas registradas</p>
+        <p className="mt-1 text-sm">Aquí aparecerán todas las citas de este cliente.</p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="max-w-[1400px] space-y-3">
+
+      {/* Filtros */}
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="relative min-w-[14rem] max-w-xs flex-1">
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            className="h-9 pl-9"
+            placeholder="Buscar servicio, empleada o cabina…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        </div>
+        <Select value={status} onValueChange={setStatus}>
+          <SelectTrigger className="w-56"><SelectValue placeholder="Estado" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value={TODOS_ESTADOS}>Todos los estados ({appointments.length})</SelectItem>
+            {statusCounts.map(([st, n]) => (
+              <SelectItem key={st} value={st}>
+                {STATUS_META[st as AppointmentStatus]?.label ?? st} ({n})
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <div className="flex items-center gap-2">
+          <Label htmlFor="cita-desde" className="text-xs font-normal text-muted-foreground">Desde</Label>
+          <Input id="cita-desde" type="date" className="h-9 w-[9.5rem]" value={from} onChange={(e) => setFrom(e.target.value)} />
+          <Label htmlFor="cita-hasta" className="text-xs font-normal text-muted-foreground">Hasta</Label>
+          <Input id="cita-hasta" type="date" className="h-9 w-[9.5rem]" value={to} onChange={(e) => setTo(e.target.value)} />
+        </div>
+        {hayFiltro && (
+          <Button variant="ghost" size="sm" onClick={limpiarFiltros} className="gap-1.5">
+            <X className="h-3.5 w-3.5" /> Quitar filtros
+          </Button>
+        )}
+      </div>
+
+      <Card className="overflow-hidden p-0">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <SortableTableHead sortKey="fecha" sort={sort} onToggle={toggleSort}>Fecha</SortableTableHead>
+              <SortableTableHead sortKey="servicio" sort={sort} onToggle={toggleSort}>Servicio</SortableTableHead>
+              <SortableTableHead sortKey="empleada" sort={sort} onToggle={toggleSort}>Empleada</SortableTableHead>
+              <SortableTableHead sortKey="cabina" sort={sort} onToggle={toggleSort}>Cabina</SortableTableHead>
+              <SortableTableHead sortKey="duracion" sort={sort} onToggle={toggleSort} className="text-right">Duración</SortableTableHead>
+              <SortableTableHead sortKey="estado" sort={sort} onToggle={toggleSort}>Estado</SortableTableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {sorted.map((a) => {
+              const inicio = new Date(a.startAt)
+              const meta = STATUS_META[a.status as AppointmentStatus]
+              return (
+                <TableRow key={a.id}>
+                  <TableCell className="whitespace-nowrap">
+                    {/* Sin `capitalize`: en español los meses van en
+                        minúscula, y así cuadra con Total Servicios. */}
+                    {inicio.toLocaleDateString("es-ES", { day: "2-digit", month: "short", year: "numeric" })}
+                    <span className="ml-2 tabular-nums text-muted-foreground">
+                      {inicio.toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" })}
+                    </span>
+                  </TableCell>
+                  <TableCell className="font-medium">{a.service.name}</TableCell>
+                  <TableCell className="text-muted-foreground">{a.worker.name}</TableCell>
+                  <TableCell className="text-muted-foreground">{a.cabin.name}</TableCell>
+                  <TableCell className="whitespace-nowrap text-right tabular-nums text-muted-foreground">
+                    {a.durationMinutes} min
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant="outline" className={cn("gap-1", meta?.className)}>
+                      {meta?.label ?? a.status}
+                    </Badge>
+                  </TableCell>
+                </TableRow>
+              )
+            })}
+            {sorted.length === 0 && (
+              <TableRow>
+                <TableCell colSpan={6} className="py-8 text-center text-muted-foreground">
+                  Sin resultados con estos filtros.
+                </TableCell>
+              </TableRow>
+            )}
+          </TableBody>
+        </Table>
+      </Card>
+
+      <div className="flex items-baseline justify-between gap-4 rounded-xl border bg-muted/20 px-4 py-2.5">
+        <span className="text-xs text-muted-foreground">
+          {sorted.length} {sorted.length === 1 ? "cita" : "citas"}
+          {hayFiltro && ` de ${appointments.length}`}
+        </span>
+      </div>
+    </div>
+  )
+}
+
+/* ─── Pestaña "Tto. Domiciliario" ─────────────────────────────────────────
+   Los productos que se lleva el cliente a casa, agrupados por producto.
+
+   No es Total Servicios filtrado: allí hay una fila por línea de venta y aquí
+   una fila por producto, con lo que de verdad se pregunta en el mostrador
+   —cuántos se ha llevado y cuándo fue la última vez—. El producto es un
+   consumible que se repone; un servicio no.
+
+   La media entre compras se enseña, pero solo con tres o más: con dos, la
+   "media" es un número inventado. Y el aviso de a quién le toca reponer no
+   vive aquí, sino en el módulo de informes, porque para eso hay que cruzar
+   todas las clientas de una vez y no ir abriendo fichas. */
+
+type HomeCareRow = {
+  product: string
+  /** Ocasiones de compra. No tiene columna, pero de aquí sale "Cada". */
+  times: number
+  units: number
+  totalCents: number
+  lastDate: string
+  /** Días entre compras, solo si hay histórico suficiente. */
+  everyDays: number | null
+}
+
+const HOME_CARE_SORTERS = {
+  producto: byText<HomeCareRow>((r) => r.product),
+  uds: byNumber<HomeCareRow>((r) => r.units),
+  total: byNumber<HomeCareRow>((r) => r.totalCents),
+  ultima: byNumber<HomeCareRow>((r) => new Date(r.lastDate).getTime()),
+  cada: byNumber<HomeCareRow>((r) => r.everyDays),
+}
+
+type HomeCareSortKey = keyof typeof HOME_CARE_SORTERS
+
+const HOME_CARE_SORT_INICIAL: SortRule<HomeCareSortKey>[] = [{ key: "ultima", dir: "desc" }]
+
+function weeksSince(iso: string): number {
+  return Math.floor((Date.now() - new Date(iso).getTime()) / (7 * 86_400_000))
+}
+
+function ClientHomeCareTab({ data }: { data: ConsumptionData | null }) {
+  const rows = useMemo<HomeCareRow[]>(() => {
+    // Fechas de cada compra por producto, para poder sacar la última y el
+    // ritmo. Los tickets vienen del más reciente al más antiguo.
+    const compras = new Map<string, { dates: string[]; units: number; totalCents: number }>()
+    for (const t of data?.tickets ?? []) {
+      for (const l of t.lines) {
+        if (!l.productId) continue
+        const prev = compras.get(l.description) ?? { dates: [], units: 0, totalCents: 0 }
+        prev.dates.push(t.date)
+        prev.units += l.quantity || 1
+        prev.totalCents += l.totalCents
+        compras.set(l.description, prev)
+      }
+    }
+
+    return [...compras.entries()].map(([product, c]) => {
+      const ms = c.dates.map((d) => new Date(d).getTime())
+      const primera = Math.min(...ms)
+      const ultima = Math.max(...ms)
+      // Media entre compras: el tiempo total repartido entre los huecos que
+      // hay, que son una menos que las compras. Se guarda en días y ya se
+      // decide al pintarlo si se enseña en días o en semanas; redondear a
+      // semanas aquí convertía en "~0 sem" a quien repone cada pocos días.
+      const dias = Math.round((ultima - primera) / (c.dates.length - 1) / 86_400_000)
+      const everyDays = c.dates.length >= 3 && dias >= 1 ? dias : null
+      return {
+        product,
+        times: c.dates.length,
+        units: c.units,
+        totalCents: c.totalCents,
+        lastDate: new Date(ultima).toISOString(),
+        everyDays,
+      }
+    })
+  }, [data])
+
+  const { sort, sorted, toggleSort } = useTableSort<HomeCareRow, HomeCareSortKey>(
+    rows, HOME_CARE_SORTERS, HOME_CARE_SORT_INICIAL,
+  )
+
+  const totalCents = useMemo(() => rows.reduce((sum, r) => sum + r.totalCents, 0), [rows])
+
+  if (!data) return <p className="text-sm text-muted-foreground">Cargando…</p>
+
+  if (rows.length === 0) {
+    return (
+      <div className="max-w-xl rounded-xl border border-dashed p-10 text-center text-muted-foreground">
+        <ShoppingCart className="mx-auto mb-3 h-8 w-8 opacity-30" />
+        <p className="font-medium">Sin tratamiento domiciliario</p>
+        <p className="mt-1 text-sm">Aquí aparecerán los productos que se lleve a casa.</p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="max-w-[1400px] space-y-3">
+      <Card className="overflow-hidden p-0">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <SortableTableHead sortKey="producto" sort={sort} onToggle={toggleSort}>Producto</SortableTableHead>
+              <SortableTableHead sortKey="uds" sort={sort} onToggle={toggleSort} className="text-right">Uds</SortableTableHead>
+              <SortableTableHead sortKey="total" sort={sort} onToggle={toggleSort} className="text-right">Total</SortableTableHead>
+              <SortableTableHead sortKey="ultima" sort={sort} onToggle={toggleSort}>Última compra</SortableTableHead>
+              <SortableTableHead sortKey="cada" sort={sort} onToggle={toggleSort}>Tiempo entre compras</SortableTableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {sorted.map((r) => {
+              const semanas = weeksSince(r.lastDate)
+              return (
+                <TableRow key={r.product}>
+                  <TableCell className="font-medium">{r.product}</TableCell>
+                  <TableCell className="text-right tabular-nums text-muted-foreground">{r.units}</TableCell>
+                  <TableCell className="text-right font-medium tabular-nums">{fmtEur(r.totalCents)}</TableCell>
+                  <TableCell className="whitespace-nowrap">
+                    {new Date(r.lastDate).toLocaleDateString("es-ES", { day: "2-digit", month: "short", year: "numeric" })}
+                    <span className="ml-2 text-xs text-muted-foreground">
+                      {semanas === 0 ? "esta semana" : `hace ${semanas} sem`}
+                    </span>
+                  </TableCell>
+                  <TableCell className="whitespace-nowrap text-muted-foreground">
+                    {r.everyDays === null
+                      ? <span className="text-muted-foreground/50">—</span>
+                      : r.everyDays < 14
+                        ? `~${r.everyDays} ${r.everyDays === 1 ? "día" : "días"}`
+                        : `~${Math.round(r.everyDays / 7)} sem`}
+                  </TableCell>
+                </TableRow>
+              )
+            })}
+          </TableBody>
+        </Table>
+      </Card>
+
+      <div className="flex flex-wrap items-baseline justify-end gap-x-6 gap-y-1 rounded-xl border bg-muted/20 px-4 py-3">
+        <span className="mr-auto text-xs text-muted-foreground">
+          {rows.length} {rows.length === 1 ? "producto" : "productos"}
+        </span>
+        <span className="flex items-baseline gap-2">
+          <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Total</span>
+          <span className="text-2xl font-bold tabular-nums">{fmtEur(totalCents)}</span>
+        </span>
+      </div>
+
+      <p className="text-xs text-muted-foreground">
+        El tiempo medio entre compras solo se calcula a partir de la tercera: con dos
+        compras no significa nada.
+      </p>
+    </div>
+  )
+}
+
+type ProfileTab = "datos" | "citas" | "servicios" | "domiciliario" | "recordatorios" | "finanzas"
 
 
 function ClientProfileView({
@@ -517,6 +1058,7 @@ function ClientProfileView({
   onDelete: () => void
 }) {
   const [data, setData] = useState<ProfileData | null>(null)
+  const [consumption, setConsumption] = useState<ConsumptionData | null>(null)
   const [loading, setLoading] = useState(true)
   const [tab, setTab] = useState<ProfileTab>("datos")
   const [reminders, setReminders] = useState<ReminderData>([])
@@ -529,6 +1071,11 @@ function ClientProfileView({
 
   useEffect(() => {
     getClientProfile(row.id).then((d) => { setData(d); setLoading(false) })
+  }, [row.id])
+
+  useEffect(() => {
+    setConsumption(null)
+    getCustomerConsumption(row.id).then(setConsumption)
   }, [row.id])
 
   function reloadReminders() {
@@ -573,7 +1120,6 @@ function ClientProfileView({
   }
 
   const movements = data?.movements ?? []
-  const sales = data?.recentSales ?? []
   const appointments = data?.appointments ?? []
   const balance = data?.customer?.balanceCents ?? row.balanceCents
   const age = row.birthDate
@@ -585,8 +1131,10 @@ function ClientProfileView({
 
   const TABS: { key: ProfileTab; label: string }[] = [
     { key: "datos",         label: "Datos de Cliente" },
-    { key: "citas",         label: `Citas${appointments.length ? ` (${appointments.length})` : ""}` },
     { key: "recordatorios", label: `Recordatorios${pendingReminders.length ? ` (${pendingReminders.length})` : ""}` },
+    { key: "citas",         label: `Citas${appointments.length ? ` (${appointments.length})` : ""}` },
+    { key: "servicios",     label: "Total Servicios" },
+    { key: "domiciliario",  label: "Tto. Domiciliario" },
     { key: "finanzas",      label: "Finanzas" },
   ]
 
@@ -646,32 +1194,13 @@ function ClientProfileView({
           )}
 
           {/* ── Citas ── */}
-          {tab === "citas" && (
-            <div className="max-w-2xl space-y-2 text-sm">
-              {appointments.length === 0 ? (
-                <p className="text-muted-foreground">Sin citas registradas.</p>
-              ) : appointments.map((a) => {
-                const date = new Date(a.startAt).toLocaleDateString("es-ES", { weekday: "short", day: "2-digit", month: "short", year: "numeric" })
-                const time = new Date(a.startAt).toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" })
-                return (
-                  <div key={a.id} className="flex items-center justify-between rounded-xl border px-4 py-3">
-                    <div className="flex items-center gap-4">
-                      <div className="text-xs text-muted-foreground min-w-[140px] capitalize">
-                        {date} · {time}
-                      </div>
-                      <div>
-                        <p className="font-medium">{a.service.name}</p>
-                        <p className="text-xs text-muted-foreground">{a.worker.name} · {a.cabin.name} · {a.durationMinutes} min</p>
-                      </div>
-                    </div>
-                    <span className={cn("text-xs font-medium", STATUS_META[a.status as AppointmentStatus]?.text ?? "")}>
-                      {STATUS_META[a.status as AppointmentStatus]?.label ?? a.status}
-                    </span>
-                  </div>
-                )
-              })}
-            </div>
-          )}
+          {tab === "citas" && <ClientAppointmentsTab appointments={appointments} />}
+
+          {/* ── Total Servicios ── */}
+          {tab === "servicios" && <ClientServicesTab data={consumption} />}
+
+          {/* ── Tto. Domiciliario ── */}
+          {tab === "domiciliario" && <ClientHomeCareTab data={consumption} />}
 
           {/* ── Recordatorios ── */}
           {tab === "recordatorios" && (
@@ -773,54 +1302,50 @@ function ClientProfileView({
 
           {/* ── Finanzas ── */}
           {tab === "finanzas" && (
-            <div className="max-w-4xl grid grid-cols-2 gap-6 text-sm">
-              <div className="space-y-3">
-                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Movimientos de saldo</p>
+            <div className="max-w-2xl space-y-4 text-sm">
+              <div className={cn(
+                "rounded-xl border p-4",
+                row.debtCents > 0 ? "border-red-200 bg-red-50/60" :
+                balance > 0 ? "border-green-200 bg-green-50/60" : "border-border bg-muted/20"
+              )}>
+                <p className="mb-2 flex items-center gap-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  <Wallet className="h-3.5 w-3.5" /> Saldo y deuda
+                </p>
+                {balance === 0 && row.debtCents === 0 ? (
+                  <p className="text-3xl font-bold tabular-nums text-muted-foreground">+{fmtEur(0)}</p>
+                ) : (
+                  <div className="space-y-0.5">
+                    {balance > 0 && (
+                      <p className="text-2xl font-bold tabular-nums text-green-700">
+                        +{fmtEur(balance)}<span className="ml-1.5 text-xs font-normal text-muted-foreground">saldo a favor</span>
+                      </p>
+                    )}
+                    {row.debtCents > 0 && (
+                      <p className="text-2xl font-bold tabular-nums text-red-600">
+                        −{fmtEur(row.debtCents)}<span className="ml-1.5 text-xs font-normal text-muted-foreground">deuda pendiente</span>
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              <div className="space-y-2">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Movimientos de saldo</p>
                 {movements.length === 0 ? (
                   <p className="text-xs text-muted-foreground">Sin movimientos.</p>
                 ) : movements.map((m) => {
                   const meta = MOV_META[m.type] ?? { label: m.type, sign: "", cls: "" }
-                  const date = new Date(m.createdAt).toLocaleDateString("es-ES", { day: "2-digit", month: "short" })
+                  const date = new Date(m.createdAt).toLocaleDateString("es-ES", { day: "2-digit", month: "short", year: "numeric" })
                   return (
                     <div key={m.id} className="flex items-center justify-between rounded-lg border px-3 py-2 text-xs">
-                      <div className="flex-1 min-w-0">
+                      <div className="min-w-0 flex-1">
                         <span className={cn("font-medium", meta.cls)}>{meta.label}</span>
-                        <span className="text-muted-foreground ml-2">{date}</span>
-                        {m.notes && <span className="text-muted-foreground ml-1">· {m.notes}</span>}
+                        <span className="ml-2 text-muted-foreground">{date}</span>
+                        {m.notes && <span className="ml-1 text-muted-foreground">· {m.notes}</span>}
                       </div>
-                      <span className={cn("font-semibold tabular-nums ml-3 shrink-0", meta.cls)}>
+                      <span className={cn("ml-3 shrink-0 font-semibold tabular-nums", meta.cls)}>
                         {meta.sign}{fmtEur(Math.abs(m.amountCents))}
                       </span>
-                    </div>
-                  )
-                })}
-              </div>
-              <div className="space-y-3">
-                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Últimas ventas</p>
-                {sales.length === 0 ? (
-                  <p className="text-xs text-muted-foreground">Sin ventas registradas.</p>
-                ) : sales.map((s) => {
-                  const date = new Date(s.createdAt).toLocaleDateString("es-ES", { day: "2-digit", month: "short", year: "numeric" })
-                  const statusCls = s.status === "PAID" ? "text-green-700" : "text-red-600"
-                  const statusLabel = s.status === "PAID" ? "Pagado" : "Debido"
-                  return (
-                    <div key={s.id} className="rounded-xl border p-3 space-y-1">
-                      <div className="flex justify-between items-center">
-                        <span className="text-muted-foreground text-xs">{date} · {s.user.name}</span>
-                        <span className={cn("text-xs font-medium", statusCls)}>{statusLabel}</span>
-                      </div>
-                      <div className="space-y-0.5">
-                        {s.lines.map((l, i) => (
-                          <div key={i} className="flex justify-between text-xs">
-                            <span className="truncate text-muted-foreground">{l.description}</span>
-                            <span className="tabular-nums ml-2 shrink-0">{fmtEur(l.totalCents)}</span>
-                          </div>
-                        ))}
-                      </div>
-                      <div className="flex justify-between border-t pt-1 font-medium text-xs">
-                        <span>Total</span>
-                        <span className="tabular-nums">{fmtEur(s.totalCents)}</span>
-                      </div>
                     </div>
                   )
                 })}

@@ -5,7 +5,7 @@ import {
   ArrowLeft, Plus, Search, CreditCard, Banknote, AlertCircle,
   Trash2, Gift, ShoppingCart, X, Clock, Wallet, Scissors, Package, Eye, CalendarDays, Receipt, UserPlus,
   FileText,
-  Bell, CheckCircle2, Pin,
+  Bell, CheckCircle2, Pin, CalendarClock,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -17,8 +17,10 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import {
   createSale, payDebt, getCustomerReminderAlerts, completeCustomerReminder,
-  type SaleLineInput,
+  getBillableAppointments, forgetOperator,
+  type SaleLineInput, type BillableAppointment,
 } from "@/lib/actions"
+import { PinDialog } from "@/components/pin-dialog"
 import { QuickCustomerDialog } from "@/components/quick-customer-dialog"
 import { ClientProfileDialog } from "@/components/client-profile-dialog"
 import { QuickReminderDialog } from "@/components/quick-reminder-dialog"
@@ -33,7 +35,14 @@ import { cn } from "@/lib/utils"
 
 type Customer = { id: string; firstName: string; lastName: string | null; lastName2: string | null; phone: string; balanceCents: number }
 type Worker   = { id: string; name: string; lastName: string | null; color: string | null }
-type Service  = { id: string; name: string; priceCents: number; pricingType: string; pricePerMinuteCents: number | null; durationMinutes: number }
+/** Se ha pedido el catálogo entero, en vez de una familia concreta. */
+const TODAS_LAS_FAMILIAS = "__todas__"
+
+type Service  = {
+  id: string; name: string; priceCents: number; pricingType: string
+  pricePerMinuteCents: number | null; durationMinutes: number
+  familyId: string; familyName: string; familySortOrder: number
+}
 type Product  = { id: string; name: string; priceCents: number; stock: number }
 type SaleLine = {
   id: string; type: string; description: string; quantity: number
@@ -58,6 +67,8 @@ interface Props {
   workers: Worker[]
   currentUserId: string | null
   cashOpen: boolean
+  /** Hay PINes repartidos, así que cobrar exige identificarse. */
+  pinRequired: boolean
 }
 
 type ReminderAlert = Awaited<ReturnType<typeof getCustomerReminderAlerts>>[number]
@@ -70,6 +81,8 @@ type DraftLine = {
   discountPercent: number; durationMinutes: number | null
   /** Solo tarjetas regalo: qué se plantea regalar. */
   notes: string | null
+  /** La cita que cobra esta línea, si viene de la agenda. */
+  appointmentId: string | null
 }
 
 /* ─── Helpers ────────────────────────────────────────────────────────────── */
@@ -116,7 +129,7 @@ function localDateStr(d: Date) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
 }
 
-export function SalesClient({ sales, customers, services, products, workers, currentUserId, cashOpen }: Props) {
+export function SalesClient({ sales, customers, services, products, workers, currentUserId, cashOpen, pinRequired }: Props) {
   const [mode, setMode] = useState<"list" | "pos">("list")
   const [showNoCashDialog, setShowNoCashDialog] = useState(false)
   const [detailSale, setDetailSale] = useState<Sale | null>(null)
@@ -174,7 +187,7 @@ export function SalesClient({ sales, customers, services, products, workers, cur
   }, [sales, clientSearch, workerFilter, paymentFilter, dateFrom, dateTo])
 
   if (mode === "pos") {
-    return <POSView sales={sales} customers={customers} services={services} products={products} workers={workers} currentUserId={currentUserId} onBack={() => setMode("list")} />
+    return <POSView sales={sales} customers={customers} services={services} products={products} workers={workers} currentUserId={currentUserId} pinRequired={pinRequired} onBack={() => setMode("list")} />
   }
 
   return (
@@ -410,9 +423,9 @@ export function SalesClient({ sales, customers, services, products, workers, cur
    POS — pantalla completa
 ═══════════════════════════════════════════════════════════════════════════ */
 
-function POSView({ sales, customers, services, products, workers, currentUserId, onBack }: {
+function POSView({ sales, customers, services, products, workers, currentUserId, pinRequired, onBack }: {
   sales: Sale[]; customers: Customer[]; services: Service[]; products: Product[]
-  workers: Worker[]; currentUserId: string | null; onBack: () => void
+  workers: Worker[]; currentUserId: string | null; pinRequired: boolean; onBack: () => void
 }) {
   // Clientes dados de alta sin salir del TPV: se añaden a la lista en memoria
   // para poder seleccionarlos al momento (el servidor ya los tiene guardados).
@@ -435,6 +448,11 @@ function POSView({ sales, customers, services, products, workers, currentUserId,
   // La carga es asíncrona: si da tiempo a cambiar de cliente antes de que
   // conteste, la respuesta vieja no debe pisar los avisos del nuevo.
   const alertsRequestFor = useRef<string | null>(null)
+  // Citas hechas y sin cobrar del cliente elegido. Mismo cuidado que con los
+  // recordatorios: si se cambia de cliente antes de que conteste, la respuesta
+  // vieja no puede pisar a la nueva.
+  const [billable, setBillable] = useState<BillableAppointment[]>([])
+  const billableRequestFor = useRef<string | null>(null)
   const [lines, setLines] = useState<DraftLine[]>([])
   const [lineKey, setLineKey] = useState(0)
   const [paymentMethod, setPaymentMethod] = useState<"CASH" | "CARD" | "DEBT">("CASH")
@@ -445,6 +463,7 @@ function POSView({ sales, customers, services, products, workers, currentUserId,
   const [loading, setLoading] = useState(false)
   const [errors, setErrors] = useState<string[]>([])
   const [showCancel, setShowCancel] = useState(false)
+  const [pinOpen, setPinOpen] = useState(false)
   const [selectedDebtIds, setSelectedDebtIds] = useState<Set<string>>(new Set())
   // Ficha del cliente sobre el TPV: se consulta el historial sin perder el
   // ticket que se está montando.
@@ -543,6 +562,16 @@ function POSView({ sales, customers, services, products, workers, currentUserId,
     const errs = validate()
     if (errs.length) { setErrors(errs); return }
     setErrors([])
+    // Cada venta pide el PIN. No se hereda la identificación de la venta
+    // anterior: aquí no hay recepción, cada una viene a cobrar lo suyo, y una
+    // identificación que sobreviva al ticket acaba apuntando el cobro a quien
+    // pasó antes por el ordenador.
+    if (pinRequired) { setPinOpen(true); return }
+    await registrar()
+  }
+
+  async function registrar() {
+    setErrors([])
     setLoading(true)
 
     // Sólo se crea una venta nueva si hay líneas en el ticket
@@ -559,6 +588,7 @@ function POSView({ sales, customers, services, products, workers, currentUserId,
         totalCents: lineTotal(l),
         workerId: l.workerId,
         notes: l.notes,
+        appointmentId: l.appointmentId,
       }))
 
       const res = await createSale(
@@ -573,6 +603,9 @@ function POSView({ sales, customers, services, products, workers, currentUserId,
 
       if (!res.ok) {
         setLoading(false)
+        // La ventana de identidad puede haber caducado entre el clic y el
+        // envío: se pide el PIN otra vez en vez de soltar un error seco.
+        if (res.needsPin) { setPinOpen(true); return }
         setErrors([res.error ?? "Error inesperado"])
         return
       }
@@ -585,11 +618,16 @@ function POSView({ sales, customers, services, products, workers, currentUserId,
         const debtRes = await payDebt(debtId, debtPayMethod)
         if (!debtRes.ok) {
           setLoading(false)
+          if (debtRes.needsPin) { setPinOpen(true); return }
           setErrors([`Error al cobrar deuda: ${debtRes.error ?? "Error inesperado"}`])
           return
         }
       }
     }
+
+    // La identificación muere con la venta: la siguiente que llegue teclea su
+    // PIN, no hereda el de la anterior.
+    if (pinRequired) await forgetOperator()
 
     setLoading(false)
     onBack()
@@ -647,6 +685,35 @@ function POSView({ sales, customers, services, products, workers, currentUserId,
     } catch {
       toast.error("No se han podido cargar los recordatorios de este cliente.")
     }
+  }
+
+  useEffect(() => {
+    const id = customer?.id ?? null
+    billableRequestFor.current = id
+    setBillable([])
+    if (!id) return
+    getBillableAppointments(id).then((rows) => {
+      if (billableRequestFor.current !== id) return
+      setBillable(rows)
+    })
+  }, [customer])
+
+  // Las que ya están en el ticket salen de la lista: si siguieran, se
+  // añadirían dos veces y la venta se caería al registrar.
+  const citasEnTicket = useMemo(
+    () => new Set(lines.map((l) => l.appointmentId).filter(Boolean)),
+    [lines],
+  )
+  const citasPendientes = billable.filter((c) => !citasEnTicket.has(c.id))
+
+  function addAppointmentLine(c: BillableAppointment) {
+    addLine({
+      key: 0, type: "SERVICE", itemId: c.serviceId, description: c.serviceName,
+      // La profesional sale de la cita, que es quien de verdad atendió.
+      workerId: c.workerId, quantity: 1, unitPriceCents: c.priceCents,
+      discountPercent: 0, durationMinutes: c.durationMinutes, notes: null,
+      appointmentId: c.id,
+    })
   }
 
   function addLine(line: DraftLine) {
@@ -775,6 +842,44 @@ function POSView({ sales, customers, services, products, workers, currentUserId,
                   </div>
                 )}
               </div>
+            </div>
+          )}
+
+          {/* Citas hechas y sin cobrar: el camino corto para montar el ticket.
+              El de teclearlo a mano sigue estando justo debajo, para lo que se
+              vende sin cita. */}
+          {citasPendientes.length > 0 && (
+            <div>
+              <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">
+                Citas pendientes de cobrar ({citasPendientes.length})
+              </h3>
+              <div className="overflow-hidden rounded-xl border border-primary/30 bg-primary/5">
+                {citasPendientes.map((c) => (
+                  <button
+                    key={c.id}
+                    type="button"
+                    onClick={() => addAppointmentLine(c)}
+                    className="flex w-full items-center gap-3 border-b px-4 py-2.5 text-left transition-colors last:border-0 hover:bg-primary/10"
+                  >
+                    <CalendarClock className="h-4 w-4 shrink-0 text-primary" />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium">{c.serviceName}</p>
+                      <p className="truncate text-xs text-muted-foreground">
+                        {new Date(c.startAt).toLocaleDateString("es-ES", { day: "2-digit", month: "short" })}
+                        {" · "}
+                        {new Date(c.startAt).toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" })}
+                        {" · "}{c.workerName}
+                        {" · "}{c.durationMinutes} min
+                      </p>
+                    </div>
+                    <span className="shrink-0 text-sm font-semibold tabular-nums">{fmtEur(c.priceCents)}</span>
+                    <Plus className="h-4 w-4 shrink-0 text-primary" />
+                  </button>
+                ))}
+              </div>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Al cobrarlas quedan marcadas como hechas en la agenda.
+              </p>
             </div>
           )}
 
@@ -1035,6 +1140,13 @@ function POSView({ sales, customers, services, products, workers, currentUserId,
 
           {/* Actions */}
           <div className="space-y-2 mt-auto pt-2">
+            {/* A nombre de quién va a quedar la venta. Solo aparece si el
+                centro usa PIN; si no, no hay nada que elegir. */}
+            {pinRequired && (
+              <p className="text-center text-xs text-muted-foreground">
+                Se pedirá tu PIN al registrar. La venta quedará a tu nombre.
+              </p>
+            )}
             <Button className="w-full h-12 text-base font-semibold" onClick={handleSubmit}
               disabled={loading || !customer || (lines.length === 0 && selectedDebtIds.size === 0) || (paymentMethod === "CASH" && tenderedInput !== "" && tenderedCents < chargeCents)}>
               {loading ? "Registrando…" : `Registrar · ${fmtEur(chargeCents > 0 ? chargeCents : totalCents)}`}
@@ -1066,6 +1178,17 @@ function POSView({ sales, customers, services, products, workers, currentUserId,
         customerName={customer ? customerLabel(customer) : ""}
         alerts={alerts}
         onComplete={completeAlert}
+      />
+
+      <PinDialog
+        open={pinOpen}
+        onOpenChange={setPinOpen}
+        onIdentified={() => {
+          setPinOpen(false)
+          // Identificarse era el último paso que faltaba: se sigue con el
+          // cobro sin obligar a volver a pulsar "Registrar".
+          void registrar()
+        }}
       />
 
       {showCancel && (
@@ -1332,6 +1455,9 @@ function AddLinePanel({ services, products, workers, currentUserId, customers, g
 }) {
   const [tab, setTab] = useState<AddLineTab>("SERVICE")
   const [query, setQuery] = useState("")
+  // null = todavía no se ha elegido, y el desplegable enseña las familias.
+  // TODAS_LAS_FAMILIAS = se ha pedido el catálogo entero a propósito.
+  const [familyId, setFamilyId] = useState<string | null>(null)
   const [giftAmount, setGiftAmount] = useState("")
   // Quien vende la tarjeta. Arranca en quien tiene la sesión abierta, que es
   // lo normal, pero se puede cambiar: en el mostrador cobra una y vende otra.
@@ -1358,11 +1484,40 @@ function AddLinePanel({ services, products, workers, currentUserId, customers, g
     setGiftWorkerId((prev) => prev ?? defaultWorkerId)
   }, [defaultWorkerId])
 
+  // Las familias que tienen algo que ofrecer, en el orden del catálogo: una
+  // familia vacía en el desplegable es un callejón sin salida.
+  const families = useMemo(() => {
+    const acc = new Map<string, { id: string; name: string; sortOrder: number; count: number }>()
+    for (const s of services) {
+      const prev = acc.get(s.familyId)
+      if (prev) prev.count++
+      else acc.set(s.familyId, { id: s.familyId, name: s.familyName, sortOrder: s.familySortOrder, count: 1 })
+    }
+    return [...acc.values()].sort(
+      (a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name, "es"),
+    )
+  }, [services])
+
+  const activeFamily = familyId && familyId !== TODAS_LAS_FAMILIAS
+    ? families.find((f) => f.id === familyId) ?? null
+    : null
+
   const tabItems = useMemo(() => {
     const q = normalize(query)
-    if (tab === "SERVICE") return services.filter((s) => !q || normalize(s.name).includes(q))
+    if (tab === "SERVICE") {
+      return services.filter((s) =>
+        (!familyId || familyId === TODAS_LAS_FAMILIAS || s.familyId === familyId) &&
+        (!q || normalize(s.name).includes(q)),
+      )
+    }
     return products.filter((p) => !q || normalize(p.name).includes(q))
-  }, [tab, query, services, products])
+  }, [tab, query, services, products, familyId])
+
+  // Sin familia elegida y sin teclear, el desplegable enseña las familias: es
+  // la entrada para quien no se sabe el nombre del servicio de memoria. En
+  // cuanto se teclea, se busca en el catálogo entero — quien se lo sabe no
+  // tiene por qué pasar por la familia.
+  const mostrarFamilias = tab === "SERVICE" && !familyId && query.trim() === ""
 
   function addGiftCard() {
     const cents = Math.round(Number(giftAmount) * 100)
@@ -1372,7 +1527,7 @@ function AddLinePanel({ services, products, workers, currentUserId, customers, g
       key: 0, type: "GIFT_CARD", itemId: "gift_card",
       description: recipientName ? `Tarjeta regalo — ${recipientName}` : "Tarjeta regalo",
       workerId: giftWorkerId, quantity: 1, unitPriceCents: cents, discountPercent: 0,
-      durationMinutes: null, notes: giftNote.trim() || null,
+      durationMinutes: null, notes: giftNote.trim() || null, appointmentId: null,
     })
     setGiftAmount("")
     setGiftNote("")
@@ -1396,7 +1551,7 @@ function AddLinePanel({ services, products, workers, currentUserId, customers, g
             return (
               <button key={t.id} type="button"
                 disabled={disabled}
-                onClick={() => { if (disabled) return; setTab(t.id); setQuery(""); setOpen(false) }}
+                onClick={() => { if (disabled) return; setTab(t.id); setQuery(""); setFamilyId(null); setOpen(false) }}
                 className={cn(
                   "flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
                   disabled
@@ -1482,17 +1637,68 @@ function AddLinePanel({ services, products, workers, currentUserId, customers, g
           </div>
         ) : (
           <div ref={ref} className="relative">
+            {/* Dónde estás dentro del catálogo. Sin esto, al filtrar por una
+                familia parece que faltan servicios. */}
+            {tab === "SERVICE" && familyId && (
+              <div className="mb-2 flex items-center gap-2 text-xs">
+                <span className="text-muted-foreground">Buscando en</span>
+                <button
+                  type="button"
+                  onClick={() => { setFamilyId(null); setQuery(""); setOpen(true) }}
+                  className="inline-flex items-center gap-1 rounded-full border bg-muted px-2.5 py-1 font-medium hover:bg-muted/70"
+                  title="Volver a las familias"
+                >
+                  {activeFamily ? activeFamily.name : "Todos los servicios"}
+                  <X className="h-3 w-3" />
+                </button>
+              </div>
+            )}
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
               <Input
                 className="pl-9 h-11"
-                placeholder={tab === "SERVICE" ? "Buscar servicio…" : "Buscar producto…"}
+                placeholder={
+                  tab === "PRODUCT" ? "Buscar producto…"
+                    : activeFamily ? `Buscar en ${activeFamily.name}…`
+                    : "Buscar servicio por nombre…"
+                }
                 value={query}
                 onChange={(e) => { setQuery(e.target.value); setOpen(true) }}
                 onFocus={() => setOpen(true)}
               />
             </div>
-            {open && tabItems.length > 0 && (
+
+            {/* Nivel 1: las familias. */}
+            {open && mostrarFamilias && families.length > 0 && (
+              <div className="absolute z-40 w-full mt-1 bg-background border rounded-xl shadow-lg overflow-hidden max-h-56 overflow-y-auto">
+                <p className="px-4 pt-2.5 pb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Familias
+                </p>
+                {families.map((f) => (
+                  <button key={f.id} type="button"
+                    className="w-full flex items-center justify-between px-4 py-2.5 hover:bg-muted/60 text-left transition-colors text-sm"
+                    onClick={() => setFamilyId(f.id)}>
+                    <span className="font-medium truncate">{f.name}</span>
+                    <span className="text-muted-foreground ml-3 shrink-0">
+                      {f.count} {f.count === 1 ? "servicio" : "servicios"}
+                    </span>
+                  </button>
+                ))}
+                <button type="button"
+                  className="w-full border-t px-4 py-2.5 text-left text-sm text-muted-foreground hover:bg-muted/60 transition-colors"
+                  onClick={() => setFamilyId(TODAS_LAS_FAMILIAS)}>
+                  Ver todos los servicios ({services.length})
+                </button>
+              </div>
+            )}
+            {open && !mostrarFamilias && tabItems.length === 0 && (
+              <div className="absolute z-40 w-full mt-1 rounded-xl border bg-background p-4 text-sm text-muted-foreground shadow-lg">
+                {activeFamily
+                  ? <>Nada en {activeFamily.name} con ese nombre. <button type="button" className="underline" onClick={() => setFamilyId(TODAS_LAS_FAMILIAS)}>Buscar en todas</button>.</>
+                  : "Sin resultados."}
+              </div>
+            )}
+            {open && !mostrarFamilias && tabItems.length > 0 && (
               <div className="absolute z-40 w-full mt-1 bg-background border rounded-xl shadow-lg overflow-hidden max-h-56 overflow-y-auto">
                 {tabItems.slice(0, 10).map((item) => {
                   const isService = tab === "SERVICE"
@@ -1505,7 +1711,7 @@ function AddLinePanel({ services, products, workers, currentUserId, customers, g
                         if (isService) {
                           onAdd({
                             key: 0, type: "SERVICE", itemId: s.id, description: s.name,
-                            workerId: defaultWorkerId, notes: null,
+                            workerId: defaultWorkerId, notes: null, appointmentId: null,
                             quantity: 1, unitPriceCents: s.priceCents, discountPercent: 0,
                             durationMinutes: s.pricingType === "PER_MINUTE" ? s.durationMinutes : null,
                           })
@@ -1513,12 +1719,20 @@ function AddLinePanel({ services, products, workers, currentUserId, customers, g
                           onAdd({
                             key: 0, type: "PRODUCT", itemId: p.id, description: p.name,
                             workerId: defaultWorkerId, quantity: 1, unitPriceCents: p.priceCents, discountPercent: 0,
-                            durationMinutes: null, notes: null,
+                            durationMinutes: null, notes: null, appointmentId: null,
                           })
                         }
                         setQuery(""); setOpen(false)
                       }}>
-                      <span className="font-medium truncate">{item.name}</span>
+                      <span className="min-w-0 truncate">
+                        <span className="font-medium">{item.name}</span>
+                        {/* La familia va en cada fila cuando se busca por
+                            nombre: si no, el resultado sale sin contexto y no
+                            se sabe de dónde ha salido. */}
+                        {isService && !activeFamily && (
+                          <span className="block text-xs text-muted-foreground">{s.familyName}</span>
+                        )}
+                      </span>
                       <span className="text-muted-foreground tabular-nums ml-3 shrink-0">
                         {isService
                           ? (s.pricingType === "PER_MINUTE" && s.pricePerMinuteCents ? `${fmtEur(s.pricePerMinuteCents)}/min` : fmtEur(s.priceCents))
@@ -1528,6 +1742,11 @@ function AddLinePanel({ services, products, workers, currentUserId, customers, g
                     </button>
                   )
                 })}
+                {tabItems.length > 10 && (
+                  <p className="border-t px-4 py-2 text-xs text-muted-foreground">
+                    Y {tabItems.length - 10} más. Sigue escribiendo para afinar.
+                  </p>
+                )}
               </div>
             )}
           </div>

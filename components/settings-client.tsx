@@ -14,6 +14,7 @@ import { updateClinic } from "@/lib/actions"
 
 interface ClinicData {
   name: string
+  slogan: string | null
   taxId: string | null
   address: string | null
   phone: string | null
@@ -77,6 +78,16 @@ export function SettingsClient({
               <div className="space-y-2 sm:col-span-2">
                 <Label htmlFor="name">Nombre comercial</Label>
                 <Input id="name" name="name" defaultValue={clinic.name} required />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="slogan">Eslogan</Label>
+                {/* Se lee en la pantalla del PIN, que es lo primero que se ve
+                    al encender el ordenador por la mañana. */}
+                <Input id="slogan" name="slogan" defaultValue={clinic.slogan ?? ""}
+                  maxLength={80} placeholder="Sencillamente… lo que tu piel necesita" />
+                <p className="text-xs text-muted-foreground">
+                  Aparece bajo el nombre del centro en la pantalla de acceso.
+                </p>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="taxId">NIF / CIF</Label>

@@ -24,6 +24,7 @@ const SESION = vi.hoisted(() => ({
 vi.mock("@/lib/auth", () => ({
   requireSession: async () => SESION,
   requireAdmin: async () => SESION,
+  requireCounter: async () => SESION,
   AuthError: class AuthError extends Error {},
   authErrorResponse: () => new Response(null, { status: 401 }),
 }))

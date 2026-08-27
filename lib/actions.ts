@@ -5,7 +5,16 @@ import bcrypt from "bcryptjs"
 import type { Prisma } from "@prisma/client"
 import { prisma } from "@/lib/db"
 import { getActiveClinicId } from "@/lib/clinic"
-import { requireSession, requireAdmin } from "@/lib/auth"
+import {
+  requireSession, requireAdmin, requireCounter, requireOperator, PinRequiredError,
+} from "@/lib/auth"
+import {
+  PIN_LENGTH, apuntarFalloDePin, bloqueoRestanteMs, esPinBienFormado, generarPin,
+  hashearPin, mensajeDeBloqueo, nombreCompleto, olvidarFallosDePin, usuariaDelPin,
+} from "@/lib/pin"
+import {
+  clearOperatorCookie, createOperatorToken, setOperatorCookie,
+} from "@/lib/operator"
 import { validateAppointmentSlot } from "@/lib/availability"
 import { sendReminderForAppointmentId } from "@/lib/whatsapp"
 import {
@@ -18,7 +27,19 @@ import {
 import { dayOfWeekFromDateStr } from "@/lib/schedule"
 import { DEFAULT_REMINDER_ALERT_DAYS, isReminderActive, isReminderOverdue } from "@/lib/reminders"
 
-export type ActionResult = { ok: boolean; error?: string; id?: string }
+export type ActionResult = {
+  ok: boolean
+  error?: string
+  id?: string
+  /** Falta identificarse: la pantalla debe pedir el PIN y reintentar. */
+  needsPin?: boolean
+}
+
+/** Traduce el "falta el PIN" para que la pantalla sepa qué hacer con él. */
+function fallo(e: unknown): ActionResult {
+  if (e instanceof PinRequiredError) return { ok: false, error: e.message, needsPin: true }
+  return { ok: false, error: errMsg(e) }
+}
 
 function revalidateAll() {
   revalidatePath("/agenda")
@@ -51,7 +72,7 @@ function int(fd: FormData, key: string, fallback = 0): number {
 
 export async function createAppointment(fd: FormData): Promise<ActionResult> {
   try {
-    await requireSession()
+    await requireCounter()
     const clinicId = await getActiveClinicId()
     const serviceId = str(fd, "serviceId")
     const service = await prisma.service.findUniqueOrThrow({ where: { id: serviceId } })
@@ -92,7 +113,7 @@ export async function createAppointment(fd: FormData): Promise<ActionResult> {
 
 export async function updateAppointment(id: string, fd: FormData): Promise<ActionResult> {
   try {
-    await requireSession()
+    await requireCounter()
     const clinicId = await getActiveClinicId()
     const serviceId = str(fd, "serviceId")
     const service = await prisma.service.findUniqueOrThrow({ where: { id: serviceId } })
@@ -160,7 +181,7 @@ export async function updateAppointment(id: string, fd: FormData): Promise<Actio
 
 export async function setAppointmentStatus(id: string, status: string, reason?: string): Promise<ActionResult> {
   try {
-    await requireSession()
+    await requireCounter()
     const data: Record<string, unknown> = { status }
     if (status === "CANCELLED") {
       data.cancelledAt = new Date()
@@ -176,7 +197,7 @@ export async function setAppointmentStatus(id: string, status: string, reason?: 
 
 export async function deleteAppointment(id: string): Promise<ActionResult> {
   try {
-    await requireSession()
+    await requireCounter()
     await prisma.whatsappMessage.deleteMany({ where: { appointmentId: id } })
     await prisma.appointment.delete({ where: { id } })
     revalidateAll()
@@ -188,7 +209,7 @@ export async function deleteAppointment(id: string): Promise<ActionResult> {
 
 export async function sendReminder(appointmentId: string): Promise<ActionResult> {
   try {
-    await requireSession()
+    await requireCounter()
     const result = await sendReminderForAppointmentId(appointmentId)
     revalidateAll()
     if (!result.ok) return { ok: false, error: result.errorMessage || "Fallo al enviar." }
@@ -257,7 +278,7 @@ async function nextFileNumber(tx: Prisma.TransactionClient, clinicId: string): P
 
 export async function saveCustomer(id: string | null, fd: FormData): Promise<ActionResult> {
   try {
-    await requireSession()
+    await requireCounter()
     const clinicId = await getActiveClinicId()
     const data = customerDataFromForm(fd)
     const invalido = validateCustomer(fd, data)
@@ -295,7 +316,7 @@ export async function createCustomerQuick(
   fd: FormData,
 ): Promise<ActionResult & { customer?: QuickCustomer }> {
   try {
-    await requireSession()
+    await requireCounter()
     const clinicId = await getActiveClinicId()
     const data = customerDataFromForm(fd)
     const invalido = validateCustomer(fd, data)
@@ -455,6 +476,104 @@ export async function setUserPassword(id: string, password: string): Promise<Act
 // desde un fichero "use server" es un endpoint accesible, aunque ninguna
 // pantalla la use. Su sustituta es changePasswordAction() en lib/auth-actions.ts,
 // que saca el userId de la sesión y nunca del formulario.
+
+/* ------------------------- PIN DE MOSTRADOR ------------------------------ */
+
+/**
+ * Da un PIN nuevo a una trabajadora y lo devuelve EN CLARO una sola vez, para
+ * poder dictárselo. No se guarda en claro en ningún sitio, así que si se
+ * pierde no se recupera: se genera otro.
+ *
+ * Lo elige el sistema y no la administradora a propósito: los PIN escritos a
+ * mano acaban siendo el año de nacimiento o el número del portal, y eso el
+ * sistema no lo puede impedir. Nace marcado para cambiar, porque para llegar a
+ * su dueña ha tenido que decirse en voz alta.
+ */
+export async function generateUserPin(id: string): Promise<ActionResult & { pin?: string }> {
+  try {
+    await requireAdmin()
+    const clinicId = await getActiveClinicId()
+
+    const usuaria = await prisma.user.findFirstOrThrow({
+      where: { id, clinicId },
+      select: { active: true },
+    })
+    if (!usuaria.active) return { ok: false, error: "Activa a la usuaria antes de darle un PIN." }
+
+    // Dos personas con el mismo PIN significa cobrar a nombre de quien no
+    // toca, así que se reintenta hasta dar con uno libre. Con un millón de
+    // combinaciones y un puñado de empleadas, la primera vale casi siempre.
+    let pin = ""
+    for (let intento = 0; intento < 20; intento++) {
+      const candidato = generarPin()
+      const dueña = await usuariaDelPin(candidato)
+      if (!dueña || dueña.id === id) { pin = candidato; break }
+    }
+    if (!pin) return { ok: false, error: "No se ha podido generar un PIN libre. Vuelve a intentarlo." }
+
+    await prisma.user.update({
+      where: { id },
+      data: { pinHash: await hashearPin(pin), mustChangePin: true },
+    })
+    revalidateAll()
+    return { ok: true, pin }
+  } catch (e) {
+    return { ok: false, error: errMsg(e) }
+  }
+}
+
+export async function clearUserPin(id: string): Promise<ActionResult> {
+  try {
+    await requireAdmin()
+    await prisma.user.update({ where: { id }, data: { pinHash: null, mustChangePin: false } })
+    revalidateAll()
+    return { ok: true }
+  } catch (e) {
+    return { ok: false, error: errMsg(e) }
+  }
+}
+
+/**
+ * Identifica a quien está en el mostrador y abre la ventana durante la que sus
+ * acciones quedan a su nombre. Ver lib/operator.ts.
+ */
+export async function identifyByPin(pin: string): Promise<ActionResult & { name?: string }> {
+  try {
+    const session = await requireCounter()
+
+    const espera = bloqueoRestanteMs()
+    if (espera > 0) return { ok: false, error: mensajeDeBloqueo(espera) }
+
+    if (!esPinBienFormado(pin)) return { ok: false, error: `El PIN son ${PIN_LENGTH} dígitos.` }
+
+    const u = await usuariaDelPin(pin)
+    if (!u) {
+      apuntarFalloDePin()
+      return { ok: false, error: "PIN no reconocido." }
+    }
+    olvidarFallosDePin()
+
+    const name = nombreCompleto(u)
+    await setOperatorCookie(await createOperatorToken({ userId: u.id, name, clinicId: session.clinicId }))
+    return { ok: true, name }
+  } catch (e) {
+    return fallo(e)
+  }
+}
+
+/**
+ * Deja de estar identificada. Se llama al terminar cada cobro: la identidad
+ * dura lo que dura la venta, no lo que dura la ventana.
+ */
+export async function forgetOperator(): Promise<ActionResult> {
+  try {
+    await requireSession()
+    await clearOperatorCookie()
+    return { ok: true }
+  } catch (e) {
+    return { ok: false, error: errMsg(e) }
+  }
+}
 
 export async function toggleWorkerActive(id: string, active: boolean): Promise<ActionResult> {
   try {
@@ -666,6 +785,7 @@ export async function updateClinic(fd: FormData): Promise<ActionResult> {
       where: { id: clinicId },
       data: {
         name: str(fd, "name"),
+        slogan: optStr(fd, "slogan"),
         taxId: optStr(fd, "taxId"),
         address: optStr(fd, "address"),
         phone: optStr(fd, "phone"),
@@ -690,7 +810,7 @@ export async function updateClinic(fd: FormData): Promise<ActionResult> {
 
 export async function saveSupplier(id: string | null, fd: FormData): Promise<ActionResult> {
   try {
-    await requireSession()
+    await requireCounter()
     const clinicId = await getActiveClinicId()
     const data = {
       name: str(fd, "name"),
@@ -713,7 +833,7 @@ export async function saveSupplier(id: string | null, fd: FormData): Promise<Act
 
 export async function deleteSupplier(id: string): Promise<ActionResult> {
   try {
-    await requireSession()
+    await requireCounter()
     const count = await prisma.product.count({ where: { supplierId: id } })
     if (count > 0) return { ok: false, error: "No se puede borrar: tiene productos asignados." }
     await prisma.supplier.delete({ where: { id } })
@@ -728,7 +848,7 @@ export async function deleteSupplier(id: string): Promise<ActionResult> {
 
 export async function saveProduct(id: string | null, fd: FormData): Promise<ActionResult> {
   try {
-    await requireSession()
+    await requireCounter()
     const clinicId = await getActiveClinicId()
     const data = {
       name: str(fd, "name"),
@@ -756,7 +876,7 @@ export async function registerOrder(
   notes: string | null,
 ): Promise<ActionResult> {
   try {
-    await requireSession()
+    await requireCounter()
     const session = await getSession()
     if (!session) return { ok: false, error: "No autenticado." }
     if (lines.length === 0) return { ok: false, error: "Añade al menos un producto." }
@@ -787,7 +907,7 @@ export async function addStockMovement(
   notes: string | null,
 ): Promise<ActionResult> {
   try {
-    await requireSession()
+    await requireCounter()
     const session = await getSession()
     if (!session) return { ok: false, error: "No autenticado." }
 
@@ -829,6 +949,82 @@ export type SaleLineInput = {
   workerId?: string | null
   /** Solo tarjetas regalo: qué se plantea regalar. */
   notes?: string | null
+  /** La cita que se está cobrando, si la línea sale de la agenda. */
+  appointmentId?: string | null
+}
+
+/* --------------- CITAS PENDIENTES DE COBRAR (TPV ← agenda) --------------- */
+
+export type BillableAppointment = {
+  id: string
+  startAt: string
+  serviceId: string
+  serviceName: string
+  familyName: string
+  durationMinutes: number
+  priceCents: number
+  workerId: string
+  workerName: string
+  alreadyDone: boolean
+}
+
+/**
+ * Lo que este cliente tiene hecho y sin cobrar, para montar el ticket desde la
+ * agenda en vez de teclearlo. La cita ya sabe el servicio, la duración y la
+ * profesional que atendió: repetirlo a mano es a la vez trabajo y una fuente
+ * de errores.
+ */
+export async function getBillableAppointments(customerId: string): Promise<BillableAppointment[]> {
+  await requireSession()
+  const clinicId = await getActiveClinicId()
+
+  // Del último mes hasta el final de hoy. Lo de la semana que viene no se cobra
+  // hoy, y lo que lleva medio año sin cobrar ya no se rescata por aquí: se mete
+  // a mano, como cualquier venta suelta.
+  const desde = new Date()
+  desde.setDate(desde.getDate() - 30)
+  desde.setHours(0, 0, 0, 0)
+  const hasta = new Date()
+  hasta.setHours(23, 59, 59, 999)
+
+  const citas = await prisma.appointment.findMany({
+    where: {
+      clinicId,
+      customerId,
+      startAt: { gte: desde, lte: hasta },
+      // Lo cancelado y las ausencias no se cobran.
+      status: { notIn: ["CANCELLED", "NO_SHOW"] },
+      // Y lo ya cobrado no vuelve a ofrecerse.
+      saleLines: { none: {} },
+    },
+    include: {
+      service: {
+        select: {
+          id: true, name: true, priceCents: true, pricingType: true,
+          pricePerMinuteCents: true, family: { select: { name: true } },
+        },
+      },
+      worker: { select: { name: true, lastName: true } },
+    },
+    orderBy: { startAt: "desc" },
+  })
+
+  return citas.map((c) => ({
+    id: c.id,
+    startAt: c.startAt.toISOString(),
+    serviceId: c.serviceId,
+    serviceName: c.service.name,
+    familyName: c.service.family.name,
+    durationMinutes: c.durationMinutes,
+    // Manda la tarifa de hoy, no la del día en que se pidió la cita. En el
+    // ticket sigue siendo editable, como cualquier otra línea.
+    priceCents: c.service.pricingType === "PER_MINUTE" && c.service.pricePerMinuteCents
+      ? c.service.pricePerMinuteCents * c.durationMinutes
+      : c.service.priceCents,
+    workerId: c.workerId,
+    workerName: [c.worker.name, c.worker.lastName].filter(Boolean).join(" "),
+    alreadyDone: c.status === "DONE",
+  }))
 }
 
 export async function createSale(
@@ -841,14 +1037,14 @@ export async function createSale(
   balanceAppliedCents: number = 0,
 ): Promise<ActionResult> {
   try {
-    await requireSession()
-    const session = await getSession()
-    if (!session) return { ok: false, error: "No autenticado." }
-    // El usuario de la sesión puede haber desaparecido (BD resembrada, usuario
-    // desactivado…). Sin esta comprobación la venta revienta con un error de
-    // clave foránea de Prisma que no dice nada al usuario.
-    const sessionUser = await prisma.user.findFirst({ where: { id: session.userId, active: true }, select: { id: true } })
-    if (!sessionUser) return { ok: false, error: "Tu sesión ya no es válida. Cierra sesión y vuelve a entrar." }
+    // Quien cobra es quien se ha identificado con su PIN, no quien abrió el
+    // navegador por la mañana: el mostrador es un puesto compartido.
+    const operator = await requireOperator()
+    // Puede haber desaparecido (BD resembrada, usuario desactivado…). Sin esta
+    // comprobación la venta revienta con un error de clave foránea de Prisma
+    // que no le dice nada a nadie.
+    const cobra = await prisma.user.findFirst({ where: { id: operator.userId, active: true }, select: { id: true } })
+    if (!cobra) return { ok: false, error: "Ese usuario ya no está activo. Identifícate de nuevo." }
     const clinicId = await getActiveClinicId()
 
     if (lines.length === 0) return { ok: false, error: "La venta debe tener al menos una línea." }
@@ -857,6 +1053,20 @@ export async function createSale(
     const sinProfesional = lines.find((l) => !l.workerId)
     if (sinProfesional) {
       return { ok: false, error: `Asigna un profesional a "${sinProfesional.description}".` }
+    }
+
+    // Una cita se cobra una sola vez. El índice único de SaleLine.appointmentId
+    // ya lo impide pase lo que pase, pero su error no le dice nada a nadie:
+    // esto es para poder explicarlo. Suele pasar con dos pestañas abiertas.
+    const citasDelTicket = [...new Set(lines.map((l) => l.appointmentId).filter((x): x is string => !!x))]
+    if (citasDelTicket.length > 0) {
+      const yaCobrada = await prisma.saleLine.findFirst({
+        where: { appointmentId: { in: citasDelTicket } },
+        select: { appointmentId: true },
+      })
+      if (yaCobrada) {
+        return { ok: false, error: "Una de las citas del ticket ya se cobró en otra venta. Vuelve a cargar la pantalla." }
+      }
     }
 
     const subtotalCents = lines.reduce((s, l) => s + l.unitPriceCents * l.quantity, 0)
@@ -901,7 +1111,7 @@ export async function createSale(
         data: {
           clinicId,
           customerId: customerId || null,
-          userId: session.userId,
+          userId: operator.userId,
           saleType,
           status,
           paymentMethod,
@@ -923,16 +1133,26 @@ export async function createSale(
               totalCents: l.totalCents,
               workerId: l.workerId ?? null,
               notes: l.notes ?? null,
+              appointmentId: l.appointmentId ?? null,
             })),
           },
         },
       })
 
+      // Cobrar una cita la da por hecha. Hasta ahora las citas se quedaban en
+      // PENDING para siempre porque nadie volvía a la agenda a marcarlas.
+      if (citasDelTicket.length > 0) {
+        await tx.appointment.updateMany({
+          where: { id: { in: citasDelTicket }, clinicId },
+          data: { status: "DONE" },
+        })
+      }
+
       // Descontar stock de productos vendidos
       const productLines = lines.filter((l) => l.type === "PRODUCT" && l.productId)
       for (const pl of productLines) {
         await tx.stockMovement.create({
-          data: { productId: pl.productId!, userId: session.userId, type: "SALE", quantity: pl.quantity, saleId: s.id, notes: null },
+          data: { productId: pl.productId!, userId: operator.userId, type: "SALE", quantity: pl.quantity, saleId: s.id, notes: null },
         })
         await tx.product.update({
           where: { id: pl.productId! },
@@ -948,7 +1168,7 @@ export async function createSale(
           await tx.customerBalanceMovement.create({
             // La nota explica qué se le regala; sin ella queda la descripción
             // de siempre ("Tarjeta regalo — Fulanita"), que es lo que había.
-            data: { clinicId, customerId: recipientId, userId: session.userId, type: "GIFT_CARD_IN", amountCents: gc.totalCents, saleId: s.id, notes: gc.notes?.trim() || gc.description },
+            data: { clinicId, customerId: recipientId, userId: operator.userId, type: "GIFT_CARD_IN", amountCents: gc.totalCents, saleId: s.id, notes: gc.notes?.trim() || gc.description },
           })
           await tx.customer.update({ where: { id: recipientId }, data: { balanceCents: { increment: gc.totalCents } } })
         }
@@ -958,7 +1178,7 @@ export async function createSale(
       // La deuda NO toca el saldo: vive en el estado de la venta (status = DEBT).
       if (customerId && saleType !== "GIFT_CARD" && balanceUsed > 0) {
         await tx.customerBalanceMovement.create({
-          data: { clinicId, customerId, userId: session.userId, type: "BALANCE_USED", amountCents: -balanceUsed, saleId: s.id, notes: null },
+          data: { clinicId, customerId, userId: operator.userId, type: "BALANCE_USED", amountCents: -balanceUsed, saleId: s.id, notes: null },
         })
         await tx.customer.update({ where: { id: customerId }, data: { balanceCents: { decrement: balanceUsed } } })
       }
@@ -983,19 +1203,20 @@ export async function createSale(
     revalidatePath("/sales")
     revalidatePath("/dashboard")
     revalidatePath("/clients")
+    revalidatePath("/agenda")
+    revalidatePath("/appointments")
     revalidatePath("/stock")
     revalidatePath("/cash-register")
     return { ok: true, id: sale.id }
   } catch (e) {
-    return { ok: false, error: errMsg(e) }
+    return fallo(e)
   }
 }
 
 export async function payDebt(saleId: string, paymentMethod: "CARD" | "CASH"): Promise<ActionResult> {
   try {
-    await requireSession()
-    const session = await getSession()
-    if (!session) return { ok: false, error: "No autenticado." }
+    // Cobrar una deuda es cobrar: queda a nombre de quien la cobra.
+    const operator = await requireOperator()
     const clinicId = await getActiveClinicId()
 
     await prisma.$transaction(async (tx) => {
@@ -1024,7 +1245,7 @@ export async function payDebt(saleId: string, paymentMethod: "CARD" | "CASH"): P
     revalidatePath("/cash-register")
     return { ok: true }
   } catch (e) {
-    return { ok: false, error: errMsg(e) }
+    return fallo(e)
   }
 }
 
@@ -1032,7 +1253,7 @@ export async function payDebt(saleId: string, paymentMethod: "CARD" | "CASH"): P
 
 export async function openCashRegister(openingCashCents: number): Promise<ActionResult> {
   try {
-    await requireSession()
+    await requireCounter()
     const session = await getSession()
     if (!session) return { ok: false, error: "No autenticado." }
     const clinicId = await getActiveClinicId()
@@ -1062,9 +1283,8 @@ export async function closeCashRegister(
   denominationNotes: string | null,
 ): Promise<ActionResult> {
   try {
-    await requireSession()
-    const session = await getSession()
-    if (!session) return { ok: false, error: "No autenticado." }
+    // El cierre lleva nombre: quien cuadra la caja responde del descuadre.
+    const operator = await requireOperator()
 
     const reg = await prisma.cashRegister.findUniqueOrThrow({ where: { id: registerId } })
     const expectedCash = reg.openingCashCents + reg.totalCashCents
@@ -1078,7 +1298,7 @@ export async function closeCashRegister(
         closingKeptCents,
         differenceCents,
         denominationNotes,
-        closedByUserId: session.userId,
+        closedByUserId: operator.userId,
         closedAt: new Date(),
       },
     })
@@ -1086,7 +1306,7 @@ export async function closeCashRegister(
     revalidatePath("/dashboard")
     return { ok: true }
   } catch (e) {
-    return { ok: false, error: errMsg(e) }
+    return fallo(e)
   }
 }
 
@@ -1285,7 +1505,7 @@ export async function getCustomerReminders(customerId: string) {
 
 export async function createCustomerReminder(customerId: string, fd: FormData): Promise<ActionResult> {
   try {
-    await requireSession()
+    await requireCounter()
     const session = await getSession()
     if (!session) return { ok: false, error: "No autenticado." }
 
@@ -1339,7 +1559,7 @@ export async function getCustomerReminderAlerts(customerId: string) {
 
 export async function deleteCustomerReminder(id: string): Promise<ActionResult> {
   try {
-    await requireSession()
+    await requireCounter()
     await prisma.customerReminder.delete({ where: { id } })
     revalidatePath("/dashboard")
     revalidatePath("/clients")
@@ -1353,7 +1573,7 @@ export async function deleteCustomerReminder(id: string): Promise<ActionResult> 
 // quién lo había completado, que si no queda un rastro que ya no es verdad.
 export async function reopenCustomerReminder(id: string): Promise<ActionResult> {
   try {
-    await requireSession()
+    await requireCounter()
     await prisma.customerReminder.update({
       where: { id },
       data: { completedAt: null, completedByUserId: null },
@@ -1368,7 +1588,7 @@ export async function reopenCustomerReminder(id: string): Promise<ActionResult> 
 
 export async function completeCustomerReminder(id: string): Promise<ActionResult> {
   try {
-    await requireSession()
+    await requireCounter()
     const session = await getSession()
     if (!session) return { ok: false, error: "No autenticado." }
 

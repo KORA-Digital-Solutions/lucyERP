@@ -25,10 +25,16 @@ vi.mock("@/lib/auth", () => {
     userId: "test-admin", email: "admin@test.local", name: "Test",
     lastName: null, role: "ADMIN", clinicId: "test-clinic", mustChangePassword: false,
   }
+  class AuthError extends Error {}
   return {
     requireSession: async () => s,
     requireAdmin: async () => s,
-    AuthError: class AuthError extends Error {},
+    requireCounter: async () => s,
+    // La venta se atribuye a quien se identifica en el mostrador; aquí no hay
+    // teclado de PIN, así que se da por identificada a la del ticket.
+    requireOperator: async () => ({ userId: sesion.userId, name: "Cobra" }),
+    AuthError,
+    PinRequiredError: class PinRequiredError extends AuthError {},
     authErrorResponse: () => new Response(null, { status: 401 }),
   }
 })

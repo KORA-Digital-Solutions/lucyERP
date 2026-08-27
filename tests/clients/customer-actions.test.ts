@@ -22,6 +22,7 @@ vi.mock("@/lib/auth", () => {
   return {
     requireSession: async () => sesion,
     requireAdmin: async () => sesion,
+    requireCounter: async () => sesion,
     AuthError: class AuthError extends Error {},
     authErrorResponse: () => new Response(null, { status: 401 }),
   }

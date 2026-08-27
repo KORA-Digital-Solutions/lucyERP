@@ -22,7 +22,7 @@ const PUBLIC = ["/login", "/api/auth", "/api/webhooks/"]
 // Páginas de la gestión del centro. Desde el mostrador no existen: se entra
 // con contraseña de administradora por la otra puerta. Deben coincidir con
 // GRUPOS_GESTION en components/app-sidebar.tsx: si el menú lo oculta, esto lo bloquea.
-const MANAGEMENT_ONLY_PAGES = ["/workers", "/services", "/cabins", "/settings", "/horarios", "/appointments", "/reports"]
+const MANAGEMENT_ONLY_PAGES = ["/workers", "/services", "/cabins", "/settings", "/horarios", "/appointments", "/reports", "/products"]
 
 // Rutas API de la gestión. Se listan aparte porque "/api/workers" no empieza
 // por "/workers": sin esta lista quedaban abiertas a cualquier sesión.

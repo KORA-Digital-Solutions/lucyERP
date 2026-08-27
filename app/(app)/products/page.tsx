@@ -1,11 +1,10 @@
 import { prisma } from "@/lib/db"
 import { getActiveClinic } from "@/lib/clinic"
-import { StockClient } from "@/components/stock-client"
-import type { ProductRow, SupplierRow } from "@/components/products-client"
+import { ProductsClient, type ProductRow, type SupplierRow } from "@/components/products-client"
 
 export const dynamic = "force-dynamic"
 
-export default async function StockPage() {
+export default async function ProductsPage() {
   const clinic = await getActiveClinic()
 
   const [products, suppliers] = await Promise.all([
@@ -14,8 +13,10 @@ export default async function StockPage() {
       include: { supplier: true },
       orderBy: { name: "asc" },
     }),
+    // Aquí salen también los proveedores dados de baja: es la pantalla donde se
+    // vuelven a activar, y si no se ven no hay forma de recuperarlos.
     prisma.supplier.findMany({
-      where: { clinicId: clinic.id, active: true },
+      where: { clinicId: clinic.id },
       orderBy: { name: "asc" },
     }),
   ])
@@ -42,5 +43,5 @@ export default async function StockPage() {
     active: s.active,
   }))
 
-  return <StockClient products={productRows} suppliers={supplierRows} />
+  return <ProductsClient products={productRows} suppliers={supplierRows} />
 }

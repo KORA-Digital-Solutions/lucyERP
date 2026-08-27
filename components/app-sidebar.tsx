@@ -82,6 +82,7 @@ const GRUPOS_GESTION: { titulo: string; items: NavItem[] }[] = [
     titulo: "El centro",
     items: [
       { icon: Briefcase, label: "Servicios",     href: "/services" },
+      { icon: Package,   label: "Productos",     href: "/products" },
       { icon: DoorOpen,  label: "Cabinas",       href: "/cabins" },
       { icon: Settings,  label: "Configuración", href: "/settings" },
     ],

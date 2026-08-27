@@ -80,6 +80,7 @@ model User {
   leaves               WorkerLeave[]
   customerReminders    CustomerReminder[] @relation("CustomerReminderCreatedBy")
   customerRemindersCompleted CustomerReminder[] @relation("CustomerReminderCompletedBy")
+  saleLines            SaleLine[]
 }
 
 model Cabin {
@@ -304,6 +305,14 @@ model SaleLine {
   discountPercent Int      @default(0)
   durationMinutes Int?
   totalCents      Int
+  // Quien realiza el servicio o vende la tarjeta regalo. Es distinto de
+  // Sale.userId, que es quien cobra: en el mostrador cobra una y atiende otra.
+  workerId        String?
+  worker          User?    @relation(fields: [workerId], references: [id])
+  // Solo lo usan las tarjetas regalo, para apuntar qué se le regala. La tarjeta
+  // es saldo suelto, no va atada a un servicio, así que lo que se plantea
+  // regalar no cabe en ningún otro campo.
+  notes           String?
 
   @@index([saleId])
 }

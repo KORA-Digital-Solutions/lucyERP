@@ -18,6 +18,7 @@ import {
   INACTIVITY_MINUTES, MAX_SESSION_HOURS, SESSION_COOKIE_OPTIONS,
   type SessionPayload,
 } from "@/lib/session"
+import { OPERATOR_WINDOW_SECONDS } from "@/lib/operator"
 
 const base: SessionPayload = {
   userId: "u1", email: null, name: "Una", lastName: null,
@@ -53,6 +54,14 @@ describe("sesión deslizante", () => {
   it("una sesión recién abierta no ha llegado al tope; una del día anterior sí", () => {
     expect(sessionMaxAgeReached({ ...base, startedAt: ahora() })).toBe(false)
     expect(sessionMaxAgeReached({ ...base, startedAt: ahora() - (MAX_SESSION_HOURS + 1) * 3600 })).toBe(true)
+  })
+
+  it("la identificación de quien cobra dura mucho menos que el mostrador abierto", () => {
+    // El mostrador se queda abierto un rato; quién está cobrando, no. Si las
+    // dos duraran lo mismo, la siguiente en llegar cobraría a nombre de la
+    // anterior — que es justo el fallo que el PIN viene a quitar.
+    expect(OPERATOR_WINDOW_SECONDS).toBeLessThan(INACTIVITY_MINUTES * 60)
+    expect(OPERATOR_WINDOW_SECONDS).toBeLessThanOrEqual(120)
   })
 
   it("los tokens antiguos, sin marca de inicio, no se dan por caducados", () => {

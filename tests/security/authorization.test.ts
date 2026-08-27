@@ -48,7 +48,6 @@ const DEBEN_SER_DEL_MOSTRADOR = [
 /** Rutas públicas a propósito, con su propia autenticación. */
 const RUTAS_PUBLICAS = [
   "app/api/auth/logout/route.ts",    // cerrar sesión no necesita sesión válida
-  "app/api/auth/switch-mode/route.ts", // valida sesión y contraseña por su cuenta
   "app/api/webhooks/whatsapp/route.ts", // Meta llama sin cookie; valida firma HMAC
 ]
 

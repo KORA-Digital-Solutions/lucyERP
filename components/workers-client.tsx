@@ -3,7 +3,7 @@
 import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
-import { Plus, Pencil, KeyRound, Trash2 } from "lucide-react"
+import { Plus, Pencil, KeyRound, Trash2, FileBarChart } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -15,6 +15,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { saveWorker, toggleWorkerActive, setUserPassword, deleteWorker } from "@/lib/actions"
+import { WorkerReportView } from "@/components/worker-report-view"
 
 export interface WorkerRow {
   id: string
@@ -54,6 +55,11 @@ export function WorkersClient({
   const [pwTarget, setPwTarget] = useState<WorkerRow | null>(null)
   const [tempPw, setTempPw] = useState("")
   const [deleteTarget, setDeleteTarget] = useState<WorkerRow | null>(null)
+  // Informe de personal: ocupa la pantalla entera, como la ficha del
+  // cliente. Se guarda el id y no la fila para que, al volver de un
+  // refresh, se siga viendo el informe de quien toca.
+  const [reportId, setReportId] = useState<string | null>(null)
+  const reportRow = reportId ? rows.find((r) => r.id === reportId) ?? null : null
 
   function openForm(r: WorkerRow | null) {
     setEditing(r)
@@ -112,6 +118,10 @@ export function WorkersClient({
     } else toast.error(res.error ?? "Error al asignar contraseña.")
   }
 
+  if (reportRow) {
+    return <WorkerReportView worker={reportRow} onBack={() => setReportId(null)} />
+  }
+
   return (
     <div>
       <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-card p-6">
@@ -137,6 +147,7 @@ export function WorkersClient({
                 <TableHead>Activo</TableHead>
                 <TableHead className="text-right">
                   <div className="flex justify-end text-xs font-normal text-muted-foreground">
+                    <span className="flex w-20 items-center justify-center gap-1"><FileBarChart className="h-3.5 w-3.5" /> Informe</span>
                     <span className="flex w-24 items-center justify-center gap-1"><KeyRound className="h-3.5 w-3.5" /> Contraseña</span>
                     <span className="flex w-20 items-center justify-center gap-1"><Pencil className="h-3.5 w-3.5" /> Editar</span>
                     <span className="flex w-20 items-center justify-center gap-1"><Trash2 className="h-3.5 w-3.5 text-destructive" /> Eliminar</span>
@@ -172,6 +183,11 @@ export function WorkersClient({
                   </TableCell>
                   <TableCell className="text-right">
                     <div className="flex justify-end">
+                      <span className="flex w-20 justify-center">
+                        <Button variant="ghost" size="icon" title="Ver informe de personal" onClick={() => setReportId(r.id)}>
+                          <FileBarChart className="h-4 w-4" />
+                        </Button>
+                      </span>
                       <span className="flex w-24 justify-center">
                         <Button variant="ghost" size="icon" title="Asignar contraseña" onClick={() => openSetPassword(r)}>
                           <KeyRound className="h-4 w-4" />

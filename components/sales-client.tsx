@@ -348,7 +348,7 @@ export function SalesClient({ sales, customers, services, products, workers, cur
                           {l.description}{l.durationMinutes ? ` · ${l.durationMinutes} min` : ""}
                           {l.worker && (
                             <span className="block text-xs text-muted-foreground">
-                              {l.type === "GIFT_CARD" ? "Vendida por" : "Atendido por"} {l.worker.name} {l.worker.lastName ?? ""}
+                              {l.type === "GIFT_CARD" ? "Vendida por" : l.type === "PRODUCT" ? "Vendido por" : "Atendido por"} {l.worker.name} {l.worker.lastName ?? ""}
                             </span>
                           )}
                           {l.notes && <span className="block text-xs text-muted-foreground">{l.notes}</span>}
@@ -529,7 +529,9 @@ function POSView({ sales, customers, services, products, workers, currentUserId,
     if (lines.length === 0 && selectedDebtIds.size === 0)
       errs.push("Añade al menos una línea al ticket o selecciona una deuda a cobrar.")
     lines.forEach((l) => {
-      if ((l.type === "SERVICE" || l.type === "GIFT_CARD") && !l.workerId)
+      // Todas las líneas, también el producto: sin saber quién vende qué no
+      // hay trazabilidad del ticket ni informe de personal que valga.
+      if (!l.workerId)
         errs.push(`Asigna un profesional a "${l.description}".`)
     })
     if (hasGiftCard && !giftRecipient)
@@ -1501,19 +1503,16 @@ function AddLinePanel({ services, products, workers, currentUserId, customers, g
                       className="w-full flex items-center justify-between px-4 py-2.5 hover:bg-muted/60 text-left transition-colors text-sm"
                       onClick={() => {
                         if (isService) {
-                          const defaultWorker = currentUserId
-                            ? workers.find((w) => w.id === currentUserId)?.id ?? (workers.length === 1 ? workers[0].id : null)
-                            : (workers.length === 1 ? workers[0].id : null)
                           onAdd({
                             key: 0, type: "SERVICE", itemId: s.id, description: s.name,
-                            workerId: defaultWorker, notes: null,
+                            workerId: defaultWorkerId, notes: null,
                             quantity: 1, unitPriceCents: s.priceCents, discountPercent: 0,
                             durationMinutes: s.pricingType === "PER_MINUTE" ? s.durationMinutes : null,
                           })
                         } else {
                           onAdd({
                             key: 0, type: "PRODUCT", itemId: p.id, description: p.name,
-                            workerId: null, quantity: 1, unitPriceCents: p.priceCents, discountPercent: 0,
+                            workerId: defaultWorkerId, quantity: 1, unitPriceCents: p.priceCents, discountPercent: 0,
                             durationMinutes: null, notes: null,
                           })
                         }
@@ -1564,18 +1563,18 @@ function LineRow({ line, workers, onUpdate, onRemove }: {
       </td>
 
       <td className="px-3 py-2">
-        {line.type === "SERVICE" || line.type === "GIFT_CARD" ? (
-          <Select value={line.workerId ?? ""} onValueChange={(v) => onUpdate({ workerId: v })}>
-            <SelectTrigger className={cn("h-8 text-xs w-36", !line.workerId && "border-orange-300 text-orange-600")}>
-              <SelectValue placeholder="Profesional…" />
-            </SelectTrigger>
-            <SelectContent>
-              {workers.map((w) => (
-                <SelectItem key={w.id} value={w.id}>{w.name} {w.lastName ?? ""}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        ) : <span className="text-muted-foreground text-xs">—</span>}
+        {/* También en el producto: quien lo vende queda guardado en la línea,
+            que es lo que permite seguir el ticket entero y medir a cada una. */}
+        <Select value={line.workerId ?? ""} onValueChange={(v) => onUpdate({ workerId: v })}>
+          <SelectTrigger className={cn("h-8 text-xs w-36", !line.workerId && "border-orange-300 text-orange-600")}>
+            <SelectValue placeholder="Profesional…" />
+          </SelectTrigger>
+          <SelectContent>
+            {workers.map((w) => (
+              <SelectItem key={w.id} value={w.id}>{w.name} {w.lastName ?? ""}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </td>
 
       <td className="px-3 py-2 text-center">

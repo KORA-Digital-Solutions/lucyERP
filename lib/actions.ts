@@ -514,6 +514,113 @@ export async function deleteWorker(id: string): Promise<ActionResult> {
   }
 }
 
+/* ---------------------- INFORME DE PERSONAL ------------------------------ */
+
+/**
+ * Lo que ha hecho una empleada, línea a línea, para el informe de personal.
+ *
+ * Servicios y tarjetas regalo salen de `SaleLine.workerId`, que es quien
+ * atiende o vende: en el mostrador cobra una y atiende otra, así que el
+ * usuario del ticket no sirve para medir a nadie.
+ *
+ * Las ventas anteriores a que el TPV pidiera la profesional en las líneas de
+ * producto se quedaron sin ella. Esas se atribuyen a quien cobró el ticket
+ * (`Sale.userId`) para no perderlas del informe, y vienen marcadas con
+ * `attributedByTicket` para poder avisarlo en pantalla en vez de dar por bueno
+ * un número que no lo es. En las ventas nuevas no queda ninguna así.
+ */
+export type WorkerReportLine = {
+  id: string
+  date: string
+  type: string
+  family: string
+  description: string
+  notes: string | null
+  customerName: string | null
+  quantity: number
+  discountPercent: number
+  totalCents: number
+  ticketStatus: string
+  attributedByTicket: boolean
+}
+
+export async function getWorkerReport(workerId: string): Promise<{
+  lines: WorkerReportLine[]
+  servicesCents: number
+  productsCents: number
+  giftCardsCents: number
+  totalCents: number
+  ticketCount: number
+}> {
+  await requireAdmin()
+  const clinicId = await getActiveClinicId()
+
+  const rows = await prisma.saleLine.findMany({
+    where: {
+      sale: { clinicId },
+      OR: [
+        { workerId },
+        // Productos antiguos, sin profesional en la línea: se cuentan a
+        // quien cobró el ticket.
+        { type: "PRODUCT", workerId: null, sale: { userId: workerId } },
+      ],
+    },
+    select: {
+      id: true,
+      saleId: true,
+      type: true,
+      description: true,
+      notes: true,
+      quantity: true,
+      discountPercent: true,
+      totalCents: true,
+      workerId: true,
+      service: { select: { family: { select: { name: true } } } },
+      sale: {
+        select: {
+          createdAt: true,
+          status: true,
+          customer: { select: { firstName: true, lastName: true, lastName2: true } },
+        },
+      },
+    },
+    orderBy: { sale: { createdAt: "desc" } },
+  })
+
+  const lines: WorkerReportLine[] = rows.map((l) => ({
+    id: l.id,
+    date: l.sale.createdAt.toISOString(),
+    type: l.type,
+    family:
+      l.type === "PRODUCT" ? HOME_CARE_FAMILY :
+      l.type === "GIFT_CARD" ? GIFT_CARD_FAMILY :
+      l.service?.family?.name ?? "Sin familia",
+    description: l.description,
+    notes: l.notes,
+    customerName: l.sale.customer
+      ? [l.sale.customer.lastName, l.sale.customer.lastName2].filter(Boolean).join(" ")
+        + `, ${l.sale.customer.firstName}`
+      : null,
+    quantity: l.quantity,
+    discountPercent: l.discountPercent,
+    totalCents: l.totalCents,
+    ticketStatus: l.sale.status,
+    attributedByTicket: l.workerId === null,
+  }))
+
+  const sumBy = (type: string) =>
+    lines.reduce((s, l) => (l.type === type ? s + l.totalCents : s), 0)
+
+  return {
+    lines,
+    servicesCents: sumBy("SERVICE"),
+    productsCents: sumBy("PRODUCT"),
+    giftCardsCents: sumBy("GIFT_CARD"),
+    totalCents: lines.reduce((s, l) => s + l.totalCents, 0),
+    ticketCount: new Set(rows.map((l) => l.saleId)).size,
+  }
+}
+
 /* ------------------------------- CABINAS -------------------------------- */
 
 export async function saveCabin(id: string | null, fd: FormData): Promise<ActionResult> {
@@ -745,6 +852,12 @@ export async function createSale(
     const clinicId = await getActiveClinicId()
 
     if (lines.length === 0) return { ok: false, error: "La venta debe tener al menos una línea." }
+    // Toda línea lleva profesional, también las de producto: es lo que permite
+    // seguir el ticket entero y medir a cada una en el informe de personal.
+    const sinProfesional = lines.find((l) => !l.workerId)
+    if (sinProfesional) {
+      return { ok: false, error: `Asigna un profesional a "${sinProfesional.description}".` }
+    }
 
     const subtotalCents = lines.reduce((s, l) => s + l.unitPriceCents * l.quantity, 0)
     const discountCents = lines.reduce((s, l) => s + Math.round(l.unitPriceCents * l.quantity * l.discountPercent / 100), 0)

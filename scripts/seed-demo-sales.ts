@@ -154,13 +154,20 @@ async function generar(prisma: PrismaClient) {
         type: string; serviceId?: string; productId?: string; description: string
         quantity: number; unitPriceCents: number; discountPercent: number
         durationMinutes?: number | null; totalCents: number
+        workerId?: string | null
       }[] = []
+
+      // Quien atiende o vende no tiene por qué ser quien cobra (`user`), que
+      // es justo lo que mide el informe de personal. Va en todas las líneas,
+      // producto incluido, igual que lo pide el TPV.
+      const atiende = () => pick(users).id
 
       if (esTarjetaRegalo) {
         const importe = pick([3000, 5000, 8000, 10000])
         lines.push({
           type: "GIFT_CARD", description: "Tarjeta regalo", quantity: 1,
           unitPriceCents: importe, discountPercent: 0, totalCents: importe,
+          workerId: atiende(),
         })
       } else {
         const numLineas = between(1, 3)
@@ -177,6 +184,7 @@ async function generar(prisma: PrismaClient) {
               type: "PRODUCT", productId: p.id, description: p.name, quantity: 1,
               unitPriceCents: p.priceCents, discountPercent: descuento,
               totalCents: Math.round(p.priceCents * (1 - descuento / 100)),
+              workerId: atiende(),
             })
           } else {
             const s = pick(services)
@@ -188,6 +196,7 @@ async function generar(prisma: PrismaClient) {
               unitPriceCents: precio, discountPercent: descuento,
               durationMinutes: s.pricingType === "PER_MINUTE" ? s.durationMinutes : null,
               totalCents: Math.round(precio * (1 - descuento / 100)),
+              workerId: atiende(),
             })
           }
         }

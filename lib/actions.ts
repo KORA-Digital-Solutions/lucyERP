@@ -971,6 +971,64 @@ export async function closeCashRegister(
 
 /* ---------------------------- FICHA CLIENTE ------------------------------ */
 
+// Una sola fila de cliente con la misma forma que las del listado (ClientRow).
+// La ficha se pinta a partir de esa fila, así que quien la abre desde fuera
+// de /clients — el TPV, por ejemplo — la pide por aquí en vez de traerse
+// todos los clientes.
+export async function getClientRow(customerId: string) {
+  await requireSession()
+  const clinicId = await getActiveClinicId()
+  const c = await prisma.customer.findFirst({
+    where: { id: customerId, clinicId },
+    include: {
+      appointments: {
+        where: { status: { in: ["DONE", "CONFIRMED", "PENDING"] } },
+        orderBy: { startAt: "desc" },
+        take: 1,
+      },
+      sales: {
+        where: { status: "DEBT" },
+        select: { totalCents: true, paidCents: true },
+      },
+    },
+  })
+  if (!c) return null
+
+  const lastApptDate = c.appointments[0]?.startAt ?? null
+  const daysSince = lastApptDate
+    ? Math.floor((Date.now() - lastApptDate.getTime()) / 86_400_000)
+    : null
+
+  return {
+    id: c.id,
+    fileNumber: c.fileNumber,
+    firstName: c.firstName,
+    lastName: c.lastName,
+    lastName2: c.lastName2,
+    sex: c.sex,
+    profession: c.profession,
+    phone: c.phone,
+    phoneLabel: c.phoneLabel,
+    phone2: c.phone2,
+    phone2Label: c.phone2Label,
+    email: c.email,
+    address: c.address,
+    referralSource: c.referralSource,
+    allergies: c.allergies,
+    birthDate: c.birthDate ? c.birthDate.toISOString().slice(0, 10) : null,
+    notes: c.notes,
+    createdAt: c.createdAt.toISOString(),
+    whatsappOptIn: c.whatsappOptIn,
+    active: c.active ?? true,
+    balanceCents: c.balanceCents,
+    debtCents: c.sales.reduce((s, x) => s + (x.totalCents - x.paidCents), 0),
+    lastAppointment: lastApptDate
+      ? lastApptDate.toLocaleString("es-ES", { day: "2-digit", month: "short", year: "numeric" })
+      : null,
+    daysSinceLastAppt: daysSince,
+  }
+}
+
 export async function getClientProfile(customerId: string) {
   await requireSession()
   const [customer, movements, appointments] = await Promise.all([

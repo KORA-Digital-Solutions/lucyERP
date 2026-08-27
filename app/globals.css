@@ -9,6 +9,11 @@
  *   #E5E9F7  azul muy claro       #AFB9D9  azul grisáceo
  *   #5F73B4  azul medio           #F5F8FC  fondo
  *   #FFFFFF  blanco
+ *
+ * Rosa polvo, sólo para recordatorios (ver lib/reminders.ts):
+ *   #FBF3F7  fondo flojo          #ECD2DF  borde flojo
+ *   #F9E7EF  fondo vencido        #E0AEC6  borde vencido
+ *   #A94A77  acento
  */
 :root {
   --background: #f5f8fc;

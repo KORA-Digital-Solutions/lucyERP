@@ -9,6 +9,9 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { completeCustomerReminder } from "@/lib/actions"
+import {
+  reminderCompleteLabel, reminderCompletedMessage, REMINDER_TONE,
+} from "@/lib/reminders"
 
 export interface DashboardReminderRow {
   id: string
@@ -25,12 +28,13 @@ export function DashboardRemindersCard({ reminders }: { reminders: DashboardRemi
   const [completingId, setCompletingId] = useState<string | null>(null)
 
   async function complete(id: string) {
+    const dueDate = items.find((r) => r.id === id)?.dueDate ?? null
     setCompletingId(id)
     const res = await completeCustomerReminder(id)
     setCompletingId(null)
     if (res.ok) {
       setItems((prev) => prev.filter((r) => r.id !== id))
-      toast.success("Recordatorio completado.")
+      toast.success(reminderCompletedMessage(dueDate))
       router.refresh()
     } else {
       toast.error(res.error ?? "Error al completar el recordatorio.")
@@ -65,7 +69,7 @@ export function DashboardRemindersCard({ reminders }: { reminders: DashboardRemi
                     {r.customerName}
                   </Link>
                   <p className="truncate text-xs text-muted-foreground">{r.title}</p>
-                  <p className={cn("text-xs font-medium", r.overdue ? "text-red-600" : "text-amber-700")}>
+                  <p className={cn("text-xs font-medium", REMINDER_TONE[r.overdue ? "overdue" : "due"].accent)}>
                     {r.overdue ? "Venció el " : "Vence el "}
                     {new Date(r.dueDate).toLocaleDateString("es-ES", { day: "2-digit", month: "short", year: "numeric" })}
                   </p>
@@ -77,7 +81,7 @@ export function DashboardRemindersCard({ reminders }: { reminders: DashboardRemi
                   disabled={completingId === r.id}
                   onClick={() => complete(r.id)}
                 >
-                  <CheckCircle2 className="h-4 w-4" /> Completar
+                  <CheckCircle2 className="h-4 w-4" /> {reminderCompleteLabel(r.dueDate)}
                 </Button>
               </div>
             ))}

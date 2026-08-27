@@ -4,7 +4,8 @@ import { useState, useMemo, useRef, useEffect } from "react"
 import {
   ArrowLeft, Plus, Search, CreditCard, Banknote, AlertCircle,
   Trash2, Gift, ShoppingCart, X, Clock, Wallet, Scissors, Package, Eye, CalendarDays, Receipt, UserPlus,
-  Bell, CheckCircle2, AlertTriangle,
+  FileText,
+  Bell, CheckCircle2, Pin,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -19,7 +20,12 @@ import {
   type SaleLineInput,
 } from "@/lib/actions"
 import { QuickCustomerDialog } from "@/components/quick-customer-dialog"
+import { ClientProfileDialog } from "@/components/client-profile-dialog"
+import { QuickReminderDialog } from "@/components/quick-reminder-dialog"
 import { customerLabel } from "@/lib/format"
+import {
+  reminderCompleteLabel, reminderCompletedMessage, REMINDER_ACCENT, REMINDER_TONE,
+} from "@/lib/reminders"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 
@@ -425,6 +431,10 @@ function POSView({ sales, customers, services, products, workers, currentUserId,
   const [errors, setErrors] = useState<string[]>([])
   const [showCancel, setShowCancel] = useState(false)
   const [selectedDebtIds, setSelectedDebtIds] = useState<Set<string>>(new Set())
+  // Ficha del cliente sobre el TPV: se consulta el historial sin perder el
+  // ticket que se está montando.
+  const [profileCustomerId, setProfileCustomerId] = useState<string | null>(null)
+  const [newReminderOpen, setNewReminderOpen] = useState(false)
 
   // Deuda pendiente (pendiente de cobro) por cliente, derivada de las ventas DEBT.
   const debtByCustomer = useMemo(() => {
@@ -592,15 +602,32 @@ function POSView({ sales, customers, services, products, workers, currentUserId,
   }
 
   async function completeAlert(id: string) {
+    const dueDate = alerts.find((a) => a.id === id)?.dueDate ?? null
     const res = await completeCustomerReminder(id)
     if (!res.ok) {
       toast.error(res.error ?? "Error al completar el recordatorio.")
       return
     }
-    toast.success("Recordatorio completado.")
+    toast.success(reminderCompletedMessage(dueDate))
     const quedan = alerts.filter((a) => a.id !== id)
     setAlerts(quedan)
     if (quedan.length === 0) setAlertsOpen(false)
+  }
+
+  // Tras apuntar un recordatorio nuevo se recargan los avisos por si el recién
+  // creado ya avisa (permanente, o con fecha dentro del plazo). No se abre el
+  // diálogo de avisos: acaba de escribirlo ella, no hace falta enseñárselo.
+  async function reloadAlerts() {
+    if (!customer) return
+    alertsRequestFor.current = customer.id
+    try {
+      const found = await getCustomerReminderAlerts(customer.id)
+      if (alertsRequestFor.current !== customer.id) return
+      setAlerts(found)
+      shownAlertsFor.current.add(customer.id)
+    } catch {
+      toast.error("No se han podido cargar los recordatorios de este cliente.")
+    }
   }
 
   function addLine(line: DraftLine) {
@@ -635,19 +662,31 @@ function POSView({ sales, customers, services, products, workers, currentUserId,
             onSelect={selectCustomer}
             onClear={clearCustomer}
             onCreated={(c) => setCreatedCustomers((prev) => [c, ...prev])}
+            onOpenProfile={(c) => setProfileCustomerId(c.id)}
             debtByCustomerId={debtByCustomer}
           />
-          {customer && alerts.length > 0 && (
-            <button
-              type="button"
-              onClick={() => setAlertsOpen(true)}
-              className="-mt-3 flex items-center gap-1.5 self-start text-xs font-medium text-[#E65100] hover:underline"
-            >
-              <Bell className="h-3.5 w-3.5 shrink-0" />
-              {alerts.length === 1
-                ? "1 recordatorio de este cliente"
-                : `${alerts.length} recordatorios de este cliente`}
-            </button>
+          {customer && (
+            <div className="-mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5">
+              {alerts.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setAlertsOpen(true)}
+                  className={cn("flex items-center gap-1.5 text-xs font-medium hover:underline", REMINDER_ACCENT)}
+                >
+                  <Bell className="h-3.5 w-3.5 shrink-0" />
+                  {alerts.length === 1
+                    ? "1 recordatorio de este cliente"
+                    : `${alerts.length} recordatorios de este cliente`}
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => setNewReminderOpen(true)}
+                className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground hover:underline"
+              >
+                <Plus className="h-3.5 w-3.5 shrink-0" /> Añadir recordatorio
+              </button>
+            </div>
           )}
           {!customer && (
             <p className="text-xs text-destructive flex items-center gap-1.5 -mt-3">
@@ -986,6 +1025,22 @@ function POSView({ sales, customers, services, products, workers, currentUserId,
         </div>
       </div>
 
+      {customer && (
+        <QuickReminderDialog
+          open={newReminderOpen}
+          onOpenChange={setNewReminderOpen}
+          customerId={customer.id}
+          customerName={customerLabel(customer)}
+          onCreated={reloadAlerts}
+        />
+      )}
+
+      <ClientProfileDialog
+        customerId={profileCustomerId}
+        open={profileCustomerId !== null}
+        onOpenChange={(o) => { if (!o) setProfileCustomerId(null) }}
+      />
+
       <ReminderAlertsDialog
         open={alertsOpen}
         onOpenChange={setAlertsOpen}
@@ -1044,7 +1099,7 @@ function ReminderAlertsDialog({ open, onOpenChange, customerName, alerts, onComp
       <DialogContent style={{ maxWidth: "30rem" }}>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Bell className="h-5 w-5 text-[#E65100] shrink-0" />
+            <Bell className={cn("h-5 w-5 shrink-0", REMINDER_ACCENT)} />
             {alerts.length === 1 ? "Recordatorio" : `Recordatorios (${alerts.length})`}
           </DialogTitle>
           <DialogDescription>{customerName}</DialogDescription>
@@ -1058,13 +1113,13 @@ function ReminderAlertsDialog({ open, onOpenChange, customerName, alerts, onComp
                 key={a.id}
                 className={cn(
                   "rounded-xl border px-4 py-3",
-                  permanente ? "border-amber-200 bg-amber-50/60" : a.overdue ? "border-red-200 bg-red-50/40" : "border-border",
+                  REMINDER_TONE[permanente ? "permanent" : a.overdue ? "overdue" : "due"].card,
                 )}
               >
                 <div className="flex items-start gap-2">
                   {permanente
-                    ? <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5 text-[#E65100]" />
-                    : <Bell className={cn("h-4 w-4 shrink-0 mt-0.5", a.overdue ? "text-red-600" : "text-blue-500")} />}
+                    ? <Pin className={cn("h-4 w-4 shrink-0 mt-0.5", REMINDER_TONE.permanent.accent)} />
+                    : <Bell className={cn("h-4 w-4 shrink-0 mt-0.5", REMINDER_TONE[a.overdue ? "overdue" : "due"].accent)} />}
                   <div className="min-w-0 flex-1">
                     <p className="text-sm font-medium">{a.title}</p>
                     <p className="text-xs text-muted-foreground">
@@ -1081,9 +1136,7 @@ function ReminderAlertsDialog({ open, onOpenChange, customerName, alerts, onComp
                     onClick={() => complete(a.id)}
                   >
                     <CheckCircle2 className="h-3.5 w-3.5" />
-                    {/* En un permanente "completar" quiere decir que deja de
-                        avisar para siempre, así que se dice con esas palabras. */}
-                    {permanente ? "Ya no aplica" : "Completar"}
+                    {reminderCompleteLabel(a.dueDate)}
                   </Button>
                 </div>
               </div>
@@ -1101,11 +1154,13 @@ function ReminderAlertsDialog({ open, onOpenChange, customerName, alerts, onComp
 
 /* ─── Customer selector (shared) ─────────────────────────────────────────── */
 
-function CustomerSelector({ label, customers, selected, onSelect, onClear, onCreated, placeholder, debtByCustomerId }: {
+function CustomerSelector({ label, customers, selected, onSelect, onClear, onCreated, onOpenProfile, placeholder, debtByCustomerId }: {
   label: string; customers: Customer[]; selected: Customer | null
   onSelect: (c: Customer) => void; onClear: () => void; placeholder?: string
   // Si se pasa, se ofrece dar de alta un cliente nuevo sin salir de la venta.
   onCreated?: (c: Customer) => void
+  // Si se pasa, el cliente elegido lleva un botón para abrir su ficha.
+  onOpenProfile?: (c: Customer) => void
   debtByCustomerId?: Map<string, number>
 }) {
   const [query, setQuery] = useState("")
@@ -1163,6 +1218,14 @@ function CustomerSelector({ label, customers, selected, onSelect, onClear, onCre
               )}
             </div>
           </div>
+          {onOpenProfile && (
+            <Button
+              variant="outline" size="sm" className="shrink-0 h-8 gap-1.5"
+              onClick={() => onOpenProfile(selected)}
+            >
+              <FileText className="h-3.5 w-3.5" /> Ver ficha
+            </Button>
+          )}
           <Button variant="ghost" size="sm" className="text-muted-foreground shrink-0 h-7 w-7 p-0" onClick={onClear}>
             <X className="h-4 w-4" />
           </Button>

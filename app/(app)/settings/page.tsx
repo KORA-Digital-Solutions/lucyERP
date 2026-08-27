@@ -17,6 +17,7 @@ export default async function SettingsPage() {
     <SettingsClient
       clinic={{
         name: clinic.name,
+        slogan: clinic.slogan,
         taxId: clinic.taxId,
         address: clinic.address,
         phone: clinic.phone,

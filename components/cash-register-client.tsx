@@ -12,7 +12,8 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog"
-import { openCashRegister, closeCashRegister } from "@/lib/actions"
+import { openCashRegister, closeCashRegister, forgetOperator } from "@/lib/actions"
+import { PinDialog } from "@/components/pin-dialog"
 
 type CashRegister = {
   id: string
@@ -30,6 +31,8 @@ type CashRegister = {
 }
 
 interface Props {
+  /** Hay PINes repartidos, así que cerrar caja exige identificarse. */
+  pinRequired: boolean
   todayRegister: CashRegister | null
   history: CashRegister[]
   suggestedOpeningCents: number
@@ -40,7 +43,7 @@ function fmt(cents: number) {
   return (cents / 100).toFixed(2) + " €"
 }
 
-export function CashRegisterClient({ todayRegister, history, suggestedOpeningCents, today }: Props) {
+export function CashRegisterClient({ todayRegister, history, suggestedOpeningCents, today, pinRequired }: Props) {
   const [showOpen, setShowOpen] = useState(false)
   const [showClose, setShowClose] = useState(false)
   const [openingInput, setOpeningInput] = useState((suggestedOpeningCents / 100).toFixed(2))
@@ -49,6 +52,9 @@ export function CashRegisterClient({ todayRegister, history, suggestedOpeningCen
   const [denomInput, setDenomInput] = useState("")
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
+  // El cierre lleva nombre: quien cuadra la caja responde del descuadre, así
+  // que se pide el PIN antes de cerrarla.
+  const [pinOpen, setPinOpen] = useState(false)
 
   async function handleOpen() {
     const openingCents = Math.round(Number(openingInput) * 100)
@@ -65,12 +71,23 @@ export function CashRegisterClient({ todayRegister, history, suggestedOpeningCen
 
   async function handleClose() {
     if (!todayRegister) return
+    if (pinRequired) { setError(""); setPinOpen(true); return }
+    await cerrar()
+  }
+
+  async function cerrar() {
+    if (!todayRegister) return
     setLoading(true); setError("")
     const declared = Math.round(Number(declaredInput) * 100)
     const kept = Math.round(Number(keptInput) * 100)
     const res = await closeCashRegister(todayRegister.id, declared, kept, denomInput || null)
+    // La identificación muere con el cierre, igual que con cada venta.
+    if (pinRequired) await forgetOperator()
     setLoading(false)
     if (res.ok) setShowClose(false)
+    // Si la ventana de identidad ha caducado entre medias, se vuelve a pedir
+    // el PIN en vez de soltar un error seco.
+    else if (res.needsPin) setPinOpen(true)
     else setError(res.error ?? "Error")
   }
 
@@ -305,6 +322,14 @@ export function CashRegisterClient({ todayRegister, history, suggestedOpeningCen
             </DialogFooter>
           </DialogContent>
         </Dialog>
+
+        <PinDialog
+          open={pinOpen}
+          onOpenChange={setPinOpen}
+          title="¿Quién cierra la caja?"
+          description="Teclea tu PIN. El cierre quedará a tu nombre."
+          onIdentified={() => { setPinOpen(false); void cerrar() }}
+        />
       </div>
     </div>
   )

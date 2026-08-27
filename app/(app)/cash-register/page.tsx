@@ -27,12 +27,19 @@ export default async function CashRegisterPage() {
     orderBy: { date: "desc" },
   })
 
+  // Mientras no haya ni un PIN repartido se sigue como hasta ahora, con el
+  // usuario de la sesión (ver requireOperator en lib/auth.ts).
+  const conPin = await prisma.user.count({
+    where: { clinicId: clinic.id, active: true, NOT: { pinHash: null } },
+  })
+
   return (
     <CashRegisterClient
       todayRegister={todayRegister as any}
       history={history as any}
       suggestedOpeningCents={lastClosed?.closingKeptCents ?? 0}
       today={today}
+      pinRequired={conPin > 0}
     />
   )
 }

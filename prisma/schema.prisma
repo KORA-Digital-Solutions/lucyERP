@@ -18,6 +18,10 @@ datasource db {
 model Clinic {
   id                   String   @id @default(cuid())
   name                 String
+  // Lo que se lee en la pantalla del PIN, debajo del nombre. Es lo primero
+  // que ve el centro al encender, así que se edita desde Configuración y no
+  // está escrito a fuego en el código.
+  slogan               String?
   taxId                String?
   address              String?
   phone                String?
@@ -63,6 +67,16 @@ model User {
   email               String?  @unique
   passwordHash        String?
   mustChangePassword  Boolean  @default(false)
+  // PIN de mostrador: identifica a quién hace la acción en un puesto
+  // compartido, donde la sesión es del puesto y no de nadie. Se guarda
+  // hasheado como la contraseña, pero NO es una contraseña: cuatro dígitos se
+  // ven desde el otro lado del mostrador. Sirve para atribuir, no para
+  // proteger, y por eso nunca abre las pantallas de administración.
+  pinHash             String?
+  // El PIN lo genera la administradora al dar de alta; la trabajadora elige el
+  // suyo la primera vez que entra. Mismo criterio que mustChangePassword, pero
+  // para el otro modo de acceso.
+  mustChangePin       Boolean  @default(false)
   phone               String?
   role                String   @default("WORKER")
   active              Boolean  @default(true)
@@ -203,6 +217,7 @@ model Appointment {
   updatedAt         DateTime  @updatedAt
 
   whatsappMessages WhatsappMessage[]
+  saleLines        SaleLine[]
 
   @@index([clinicId, startAt])
   @@index([clinicId, cabinId, startAt])
@@ -313,6 +328,11 @@ model SaleLine {
   // es saldo suelto, no va atada a un servicio, así que lo que se plantea
   // regalar no cabe en ningún otro campo.
   notes           String?
+  // La cita que se está cobrando, cuando la línea sale de la agenda. Es único
+  // para que la base impida cobrar dos veces la misma cita: en SQLite varios
+  // NULL conviven sin chocar, así que las líneas sueltas no se estorban.
+  appointmentId   String?      @unique
+  appointment     Appointment? @relation(fields: [appointmentId], references: [id])
 
   @@index([saleId])
 }

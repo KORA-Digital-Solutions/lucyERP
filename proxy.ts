@@ -1,5 +1,10 @@
 import { NextRequest, NextResponse } from "next/server"
-import { verifySession, getSessionFromRequest } from "@/lib/session"
+import {
+  verifySession, getSessionFromRequest, createSession,
+  sessionMaxAgeReached, sessionNeedsRefresh,
+  SESSION_COOKIE_NAME, SESSION_COOKIE_OPTIONS,
+  type VerifiedSession,
+} from "@/lib/session"
 
 /**
  * Primera barrera: redirige al login y corta rutas de página por rol.
@@ -14,13 +19,27 @@ import { verifySession, getSessionFromRequest } from "@/lib/session"
 // Su autenticación es la firma x-hub-signature-256, que valida el propio handler.
 const PUBLIC = ["/login", "/api/auth", "/api/webhooks/"]
 
-// Rutas de página solo para admin. Deben coincidir con ALL_NAV en
-// components/app-sidebar.tsx: si el menú lo oculta, esto lo bloquea.
-const ADMIN_ONLY_PAGES = ["/workers", "/services", "/cabins", "/settings", "/horarios", "/appointments", "/reports"]
+// Páginas de la gestión del centro. Desde el mostrador no existen: se entra
+// con contraseña de administradora por la otra puerta. Deben coincidir con
+// ALL_NAV en components/app-sidebar.tsx: si el menú lo oculta, esto lo bloquea.
+const MANAGEMENT_ONLY_PAGES = ["/workers", "/services", "/cabins", "/settings", "/horarios", "/appointments", "/reports"]
 
-// Rutas API solo para admin. Se listan aparte porque "/api/workers" no empieza
+// Rutas API de la gestión. Se listan aparte porque "/api/workers" no empieza
 // por "/workers": sin esta lista quedaban abiertas a cualquier sesión.
-const ADMIN_ONLY_API = ["/api/workers", "/api/services", "/api/cabins"]
+const MANAGEMENT_ONLY_API = ["/api/workers", "/api/services", "/api/cabins"]
+
+/**
+ * Renueva la cookie de sesión sobre la respuesta que ya se va a devolver.
+ *
+ * Aquí no vale setSessionCookie(): next/headers no está disponible en el
+ * proxy, así que la cookie se escribe en la respuesta. Es lo que hace que la
+ * sesión sea deslizante — ver lib/session.ts.
+ */
+async function conSesionRenovada<T extends NextResponse>(res: T, session: VerifiedSession): Promise<T> {
+  if (!sessionNeedsRefresh(session)) return res
+  res.cookies.set(SESSION_COOKIE_NAME, await createSession(session), SESSION_COOKIE_OPTIONS)
+  return res
+}
 
 export async function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl
@@ -29,7 +48,11 @@ export async function proxy(req: NextRequest) {
   if (isPublic) return NextResponse.next()
 
   const token = getSessionFromRequest(req)
-  const session = token ? await verifySession(token) : null
+  const verified = token ? await verifySession(token) : null
+  // Se descarta la sesión si ha llegado al tope, por mucho que se siga usando,
+  // y también si no trae modo: son tokens de antes de separar el mostrador de
+  // la gestión, y no se puede adivinar por cuál de las dos puertas entraron.
+  const session = verified && verified.mode && !sessionMaxAgeReached(verified) ? verified : null
 
   const isApi = pathname.startsWith("/api/")
 
@@ -39,21 +62,26 @@ export async function proxy(req: NextRequest) {
     if (isApi) return NextResponse.json({ error: "No autenticado." }, { status: 401 })
     const url = req.nextUrl.clone()
     url.pathname = "/login"
-    return NextResponse.redirect(url)
+    const res = NextResponse.redirect(url)
+    // La cookie caducada o agotada se borra: si se queda, el navegador la
+    // sigue mandando y el login arrastra una sesión muerta.
+    if (token) res.cookies.delete(SESSION_COOKIE_NAME)
+    return res
   }
 
-  if (session.role !== "ADMIN") {
-    if (ADMIN_ONLY_API.some((p) => pathname.startsWith(p))) {
+  if (session.mode !== "MANAGEMENT") {
+    if (MANAGEMENT_ONLY_API.some((p) => pathname.startsWith(p))) {
       return NextResponse.json({ error: "Sin permisos." }, { status: 403 })
     }
-    if (ADMIN_ONLY_PAGES.some((p) => pathname.startsWith(p))) {
+    if (MANAGEMENT_ONLY_PAGES.some((p) => pathname.startsWith(p))) {
       const url = req.nextUrl.clone()
-      url.pathname = "/agenda"
-      return NextResponse.redirect(url)
+      // A la portada del mostrador, que es donde se aterriza al entrar.
+      url.pathname = "/dashboard"
+      return conSesionRenovada(NextResponse.redirect(url), session)
     }
   }
 
-  return NextResponse.next()
+  return conSesionRenovada(NextResponse.next(), session)
 }
 
 export const config = {

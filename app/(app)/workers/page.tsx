@@ -19,6 +19,11 @@ export default async function WorkersPage() {
     active: w.active,
     color: w.color ?? "#3C54A4",
     mustChangePassword: w.mustChangePassword,
+    // Los hashes no salen de aquí: a la pantalla solo le hace falta saber si
+    // hay contraseña y si hay PIN.
+    hasPassword: w.passwordHash !== null,
+    hasPin: w.pinHash !== null,
+    mustChangePin: w.mustChangePin,
   }))
 
   const domain = clinic.email?.split("@")[1] ?? "centroesteticalucia.com"

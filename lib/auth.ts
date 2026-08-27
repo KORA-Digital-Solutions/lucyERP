@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server"
+import { prisma } from "@/lib/db"
+import { getOperator } from "@/lib/operator"
 import { getSession, type SessionPayload } from "@/lib/session"
 
 /**
@@ -30,14 +32,80 @@ export async function requireSession(): Promise<SessionPayload> {
   return session
 }
 
-/** Exige rol de administradora. Ojo: el modo trabajador de una admin cuenta
- *  como trabajadora, que es justo lo que se espera de ese modo. */
+/**
+ * Exige estar en la gestión del centro, con contraseña de administradora.
+ *
+ * No basta con que la persona sea administradora: tiene que haber entrado por
+ * la gestión. Una administradora que ha abierto el mostrador con su PIN está
+ * trabajando como una más, y desde ahí no se toca el catálogo ni los usuarios.
+ */
 export async function requireAdmin(): Promise<SessionPayload> {
   const session = await requireSession()
-  if (session.role !== "ADMIN") {
-    throw new AuthError("Esta acción requiere permisos de administradora.", 403)
+  if (session.mode !== "MANAGEMENT" || session.role !== "ADMIN") {
+    throw new AuthError("Esta acción requiere entrar en la gestión del centro.", 403)
   }
   return session
+}
+
+/**
+ * Exige estar en el mostrador.
+ *
+ * Todo lo que escribe en el día a día pasa por aquí. Desde la gestión el día a
+ * día se ve pero no se toca, y la garantía tiene que estar en el servidor: si
+ * dependiera de esconder botones, bastaría con que se me olvidara uno.
+ */
+export async function requireCounter(): Promise<SessionPayload> {
+  const session = await requireSession()
+  if (session.mode !== "COUNTER") {
+    throw new AuthError(
+      "Desde la gestión del centro esto es solo de consulta. Entra por el mostrador con tu PIN.",
+      403,
+    )
+  }
+  return session
+}
+
+/**
+ * Falta identificarse con el PIN. Es un error aparte para que la pantalla
+ * pueda abrir el teclado numérico en vez de limitarse a enseñar el mensaje.
+ */
+export class PinRequiredError extends AuthError {
+  constructor(message = "Identifícate con tu PIN para continuar.") {
+    super(message, 401)
+    this.name = "PinRequiredError"
+  }
+}
+
+/** Quien está haciendo la acción, ya identificada. */
+export interface Operator {
+  userId: string
+  name: string
+}
+
+/**
+ * Exige saber QUIÉN está haciendo esto, no solo que haya sesión.
+ *
+ * En un puesto compartido la sesión no identifica a nadie: se abre por la
+ * mañana y ahí se queda. Todo lo que deja un nombre escrito —cobrar, cerrar
+ * caja— pasa por aquí, y el nombre sale del PIN que se acaba de teclear
+ * (lib/operator.ts), no de quién encendió el ordenador.
+ *
+ * Mientras no haya ni un solo PIN puesto en el centro se sigue usando el
+ * usuario de la sesión, como siempre: si no, el TPV deja de funcionar el día
+ * que se despliega esto y hasta que alguien entre a repartir PINes.
+ */
+export async function requireOperator(): Promise<Operator> {
+  const session = await requireCounter()
+
+  const operator = await getOperator()
+  if (operator) return { userId: operator.userId, name: operator.name }
+
+  const conPin = await prisma.user.count({
+    where: { clinicId: session.clinicId, active: true, NOT: { pinHash: null } },
+  })
+  if (conPin === 0) return { userId: session.userId, name: session.name }
+
+  throw new PinRequiredError()
 }
 
 /**

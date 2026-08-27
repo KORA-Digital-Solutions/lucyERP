@@ -808,9 +808,22 @@ export async function updateClinic(fd: FormData): Promise<ActionResult> {
 
 /* ------------------------------ PROVEEDORES ----------------------------- */
 
+/**
+ * El catálogo —qué productos hay, de quién se compran y a qué precio— se toca
+ * desde la gestión del centro, igual que los servicios. Lo que se mueve todos
+ * los días son las existencias, y eso sigue siendo del mostrador: ver
+ * registerOrder y addStockMovement, más abajo.
+ *
+ * Las dos pantallas enseñan lo mismo, así que al guardar se revalidan las dos.
+ */
+function revalidateCatalogo() {
+  revalidatePath("/products")
+  revalidatePath("/stock")
+}
+
 export async function saveSupplier(id: string | null, fd: FormData): Promise<ActionResult> {
   try {
-    await requireCounter()
+    await requireAdmin()
     const clinicId = await getActiveClinicId()
     const data = {
       name: str(fd, "name"),
@@ -824,7 +837,7 @@ export async function saveSupplier(id: string | null, fd: FormData): Promise<Act
     } else {
       await prisma.supplier.create({ data: { ...data, clinicId } })
     }
-    revalidatePath("/stock")
+    revalidateCatalogo()
     return { ok: true }
   } catch (e) {
     return { ok: false, error: errMsg(e) }
@@ -833,11 +846,11 @@ export async function saveSupplier(id: string | null, fd: FormData): Promise<Act
 
 export async function deleteSupplier(id: string): Promise<ActionResult> {
   try {
-    await requireCounter()
+    await requireAdmin()
     const count = await prisma.product.count({ where: { supplierId: id } })
     if (count > 0) return { ok: false, error: "No se puede borrar: tiene productos asignados." }
     await prisma.supplier.delete({ where: { id } })
-    revalidatePath("/stock")
+    revalidateCatalogo()
     return { ok: true }
   } catch (e) {
     return { ok: false, error: errMsg(e) }
@@ -848,7 +861,7 @@ export async function deleteSupplier(id: string): Promise<ActionResult> {
 
 export async function saveProduct(id: string | null, fd: FormData): Promise<ActionResult> {
   try {
-    await requireCounter()
+    await requireAdmin()
     const clinicId = await getActiveClinicId()
     const data = {
       name: str(fd, "name"),
@@ -864,7 +877,7 @@ export async function saveProduct(id: string | null, fd: FormData): Promise<Acti
     } else {
       await prisma.product.create({ data: { ...data, clinicId, stock: 0 } })
     }
-    revalidatePath("/stock")
+    revalidateCatalogo()
     return { ok: true }
   } catch (e) {
     return { ok: false, error: errMsg(e) }
@@ -892,7 +905,7 @@ export async function registerOrder(
         }),
       ])
     )
-    revalidatePath("/stock")
+    revalidateCatalogo()
     revalidatePath("/dashboard")
     return { ok: true }
   } catch (e) {
@@ -925,7 +938,53 @@ export async function addStockMovement(
         data: { stock: newStock },
       }),
     ])
-    revalidatePath("/stock")
+    revalidateCatalogo()
+    revalidatePath("/dashboard")
+    return { ok: true }
+  } catch (e) {
+    return { ok: false, error: errMsg(e) }
+  }
+}
+
+/**
+ * Regularización de inventario, desde la gestión del centro.
+ *
+ * No es una entrada ni un consumo: eso es el día a día y se apunta en el
+ * mostrador según pasa. Esto es lo otro —se cuenta el estante, hay tres y el
+ * sistema dice cinco— y se corrige poniendo lo que hay de verdad, no la
+ * diferencia: nadie cuenta "me faltan dos", cuenta "hay tres".
+ *
+ * El motivo es obligatorio. Un descuadre sin explicación es justo el apunte
+ * que dentro de un mes no sirve para nada, y este es el único sitio donde el
+ * stock cambia sin que haya pasado nada en el mostrador.
+ */
+export async function adjustStock(
+  productId: string,
+  countedStock: number,
+  reason: string,
+): Promise<ActionResult> {
+  try {
+    const session = await requireAdmin()
+
+    const motivo = reason.trim()
+    if (!motivo) return { ok: false, error: "Escribe el motivo del ajuste." }
+    if (!Number.isInteger(countedStock) || countedStock < 0) {
+      return { ok: false, error: "Las existencias contadas tienen que ser un número entero de 0 o más." }
+    }
+
+    const product = await prisma.product.findUniqueOrThrow({ where: { id: productId } })
+    const delta = countedStock - product.stock
+    if (delta === 0) return { ok: false, error: "Ese es el stock que ya había: no hay nada que ajustar." }
+
+    await prisma.$transaction([
+      // La cantidad va con signo, que es lo que distingue "aparecieron dos" de
+      // "faltan dos". En ENTRY y CONSUME el signo lo pone el tipo; aquí no.
+      prisma.stockMovement.create({
+        data: { productId, userId: session.userId, type: "ADJUST", quantity: delta, notes: motivo },
+      }),
+      prisma.product.update({ where: { id: productId }, data: { stock: countedStock } }),
+    ])
+    revalidateCatalogo()
     revalidatePath("/dashboard")
     return { ok: true }
   } catch (e) {

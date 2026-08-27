@@ -260,7 +260,9 @@ model Product {
   saleLines SaleLine[]
 }
 
-// type: ENTRY | CONSUME | SALE
+// type: ENTRY | CONSUME | SALE | ADJUST
+// quantity va con signo solo en ADJUST (regularización de recuento); en los
+// demás el signo lo pone el tipo y siempre es positiva.
 model StockMovement {
   id        String   @id @default(cuid())
   productId String

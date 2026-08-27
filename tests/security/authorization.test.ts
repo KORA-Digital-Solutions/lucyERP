@@ -16,11 +16,12 @@ import { describe, expect, it } from "vitest"
 
 const RAIZ = join(__dirname, "..", "..")
 
-/** Acciones que gestionan usuarios, configuración o borran clientes. */
+/** Acciones que tocan el catálogo, los usuarios, la configuración o borran clientes. */
 const DEBEN_SER_ADMIN = [
   "saveWorker", "deleteWorker", "setUserPassword", "toggleWorkerActive",
   "saveService", "toggleServiceActive", "saveServiceFamily", "toggleServiceFamilyActive",
   "saveCabin", "toggleCabinActive",
+  "saveSupplier", "deleteSupplier", "saveProduct", "adjustStock",
   "updateClinic",
   "saveClinicWeeklySchedule", "saveWorkerWeeklySchedule",
   "saveClinicScheduleOverride", "deleteClinicScheduleOverride",
@@ -41,7 +42,7 @@ const DEBEN_SER_DEL_MOSTRADOR = [
   "saveCustomer", "createCustomerQuick",
   "createCustomerReminder", "deleteCustomerReminder", "reopenCustomerReminder",
   "completeCustomerReminder",
-  "saveSupplier", "deleteSupplier", "saveProduct", "registerOrder", "addStockMovement",
+  "registerOrder", "addStockMovement",
   "createSale", "payDebt", "openCashRegister", "closeCashRegister",
 ]
 

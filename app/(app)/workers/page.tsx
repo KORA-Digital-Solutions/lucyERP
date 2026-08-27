@@ -7,7 +7,14 @@ export const dynamic = "force-dynamic"
 export default async function WorkersPage() {
   const clinic = await getActiveClinic()
 
-  const workers = await prisma.user.findMany({ where: { clinicId: clinic.id }, orderBy: { name: "asc" } })
+  // Por apellidos, que es como se lista a la gente en la ficha del cliente y
+  // en el informe. Ordenar por el nombre de pila dejaba dos criterios distintos
+  // para la misma persona según la pantalla. Los grupos (administración,
+  // equipo, desactivadas) los arma la vista sobre este orden.
+  const workers = await prisma.user.findMany({
+    where: { clinicId: clinic.id },
+    orderBy: [{ lastName: "asc" }, { name: "asc" }],
+  })
 
   const rows: WorkerRow[] = workers.map((w) => ({
     id: w.id,

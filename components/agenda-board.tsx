@@ -30,7 +30,7 @@ import {
   AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { cn } from "@/lib/utils"
-import { STATUS_META, type AppointmentStatus } from "@/lib/enums"
+import { STATUS_META, LEAVE_TYPE_META, type AppointmentStatus, type LeaveType } from "@/lib/enums"
 import { MiniCalendar } from "@/components/mini-calendar"
 import {
   AppointmentPanel,
@@ -95,8 +95,6 @@ interface Props {
   customers: CustomerOption[]
   appointments: AgendaAppointment[]
 }
-
-const LEAVE_LABELS: Record<string, string> = { VACATION: "Vacaciones", PERSONAL: "Asuntos propios" }
 
 function formatRanges(ranges: WorkingRange[]): string {
   return ranges.map((r) => `${r.startTime}–${r.endTime}`).join(", ")
@@ -484,7 +482,11 @@ export function AgendaBoard({
         {workers.map((w) => {
           const leaveType = workerLeaveType[w.id]
           const ranges = workerHours[w.id] ?? []
-          const statusLabel = leaveType ? LEAVE_LABELS[leaveType] ?? leaveType : ranges.length === 0 ? "Cerrado" : formatRanges(ranges)
+          const statusLabel = leaveType
+            ? LEAVE_TYPE_META[leaveType as LeaveType]?.label ?? leaveType
+            : ranges.length === 0
+              ? "No trabaja"
+              : formatRanges(ranges)
           const Chip = isAdmin ? "button" : "span"
           return (
             <Chip

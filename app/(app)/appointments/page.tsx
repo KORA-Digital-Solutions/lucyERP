@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/db"
 import { getActiveClinic } from "@/lib/clinic"
 import { AppointmentsHistoryClient, type AppointmentRow } from "@/components/appointments-history-client"
+import { toDateInputValue, parseDateParam } from "@/lib/format"
 
 export const dynamic = "force-dynamic"
 
@@ -22,8 +23,8 @@ export default async function AppointmentsPage({
   const defaultFrom = new Date(now)
   defaultFrom.setDate(defaultFrom.getDate() - 30)
 
-  const fromStr = from ?? defaultFrom.toISOString().slice(0, 10)
-  const toStr = to ?? now.toISOString().slice(0, 10)
+  const fromStr = parseDateParam(from, toDateInputValue(defaultFrom))
+  const toStr = parseDateParam(to, toDateInputValue(now))
   const statusParam = status ?? "all"
 
   const fromDate = new Date(fromStr + "T00:00:00")

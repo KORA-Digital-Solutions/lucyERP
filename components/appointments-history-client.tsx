@@ -20,7 +20,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { cn } from "@/lib/utils"
-import { normalizeSearch } from "@/lib/format"
+import { normalizeSearch, capitalizeFirst } from "@/lib/format"
 import { STATUS_META, type AppointmentStatus } from "@/lib/enums"
 import { deleteAppointment } from "@/lib/actions"
 
@@ -36,12 +36,14 @@ export interface AppointmentRow {
 }
 
 function formatDate(iso: string) {
-  return new Date(iso).toLocaleDateString("es-ES", {
-    weekday: "short",
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-  })
+  return capitalizeFirst(
+    new Date(iso).toLocaleDateString("es-ES", {
+      weekday: "short",
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+    }),
+  )
 }
 
 function formatTime(iso: string) {
@@ -198,7 +200,7 @@ export function AppointmentsHistoryClient({ rows, defaultFrom, defaultTo, defaul
                   className="cursor-pointer"
                   onClick={() => router.push(`/agenda?date=${toDateParam(r.startAt)}`)}
                 >
-                  <TableCell className="capitalize text-muted-foreground">
+                  <TableCell className="text-muted-foreground">
                     {formatDate(r.startAt)}
                   </TableCell>
                   <TableCell className="tabular-nums text-muted-foreground">

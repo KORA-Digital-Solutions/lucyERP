@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/db"
 import { getActiveClinic } from "@/lib/clinic"
 import { getSession } from "@/lib/session"
-import { dayRange, toDateInputValue, toTimeString, toTimeInputValue, formatLongDate, customerLabel } from "@/lib/format"
+import { dayRange, toDateInputValue, toTimeString, toTimeInputValue, formatLongDate, customerLabel, parseDateParam } from "@/lib/format"
 import { getEffectiveClinicHours, getEffectiveWorkingHours } from "@/lib/schedule"
 import { AgendaBoard, type AgendaAppointment } from "@/components/agenda-board"
 
@@ -18,7 +18,7 @@ export default async function AgendaPage({
   searchParams: Promise<{ date?: string }>
 }) {
   const { date: dateParam } = await searchParams
-  const date = dateParam || toDateInputValue(new Date())
+  const date = parseDateParam(dateParam, toDateInputValue(new Date()))
   const clinic = await getActiveClinic()
   const session = await getSession()
   const { start, end } = dayRange(date)

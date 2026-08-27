@@ -69,7 +69,7 @@ export function MiniCalendar({ date, longDate, onSelect, disableWeekends }: Prop
         <Button
           variant="ghost"
           size="sm"
-          className="h-auto gap-1.5 px-2 py-0.5 text-base font-normal capitalize text-muted-foreground hover:bg-muted hover:text-foreground"
+          className="h-auto gap-1.5 px-2 py-0.5 text-base font-normal text-muted-foreground hover:bg-muted hover:text-foreground"
         >
           <CalendarDays className="h-4 w-4 shrink-0 opacity-60" />
           {longDate}

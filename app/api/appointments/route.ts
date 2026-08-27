@@ -3,7 +3,7 @@ import { prisma } from "@/lib/db"
 import { requireSession, AuthError, authErrorResponse } from "@/lib/auth"
 import { getActiveClinicId } from "@/lib/clinic"
 import { validateAppointmentSlot } from "@/lib/availability"
-import { dayRange, toDateInputValue } from "@/lib/format"
+import { dayRange, toDateInputValue, parseDateParam } from "@/lib/format"
 
 
 // GET /api/appointments?date=YYYY-MM-DD
@@ -11,7 +11,7 @@ export async function GET(req: NextRequest) {
   try {
     await requireSession()
     const clinicId = await getActiveClinicId()
-    const date = req.nextUrl.searchParams.get("date") ?? toDateInputValue(new Date())
+    const date = parseDateParam(req.nextUrl.searchParams.get("date"), toDateInputValue(new Date()))
     const { start, end } = dayRange(date)
 
     const appointments = await prisma.appointment.findMany({

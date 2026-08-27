@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/db"
 import { getActiveClinic } from "@/lib/clinic"
-import { toDateInputValue } from "@/lib/format"
+import { toDateInputValue, parseDateParam } from "@/lib/format"
 import { getClinicWeekCells, getWorkerWeekCells } from "@/lib/schedule"
 import { HorariosClient } from "@/components/horarios-client"
 import type { WeeklyDay, OverrideRow, HolidayRow } from "@/components/schedules-client"
@@ -46,7 +46,7 @@ export default async function HorariosPage({
   const year = Number(yearParam) || new Date().getFullYear()
   const clinic = await getActiveClinic()
   const todayStr = toDateInputValue(new Date())
-  const weekStart = weekParam && /^\d{4}-\d{2}-\d{2}$/.test(weekParam) ? mondayOf(weekParam) : mondayOf(todayStr)
+  const weekStart = mondayOf(parseDateParam(weekParam, todayStr))
   const weekDates = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i))
 
   const [workers, clinicSlots, workerSlots, clinicOverrides, workerOverrides, balances, leaves, weekLeaves, holidays, clinicWeekCells] =

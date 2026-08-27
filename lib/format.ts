@@ -48,6 +48,22 @@ export function toTimeInputValue(d: Date): string {
   return `${h}:${m}`
 }
 
+// Las fechas que llegan por la URL (?date=, ?from=, ?week=) las escribe quien
+// quiera en la barra de direcciones. Sin comprobarlas, un valor como "'" acaba
+// en un Invalid Date que revienta la consulta a Prisma y tumba la página, así
+// que se descarta lo que no sea una fecha real del calendario y se cae al valor
+// por defecto. El round-trip descarta también días inexistentes (2026-02-31).
+export function isValidDateString(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false
+  const [y, mo, d] = value.split("-").map(Number)
+  const parsed = new Date(y, mo - 1, d)
+  return parsed.getFullYear() === y && parsed.getMonth() === mo - 1 && parsed.getDate() === d
+}
+
+export function parseDateParam(value: string | null | undefined, fallback: string): string {
+  return value && isValidDateString(value) ? value : fallback
+}
+
 // Inicio/fin del día local para una fecha "YYYY-MM-DD".
 export function dayRange(date: string): { start: Date; end: Date } {
   const [y, mo, d] = date.split("-").map(Number)
@@ -56,14 +72,23 @@ export function dayRange(date: string): { start: Date; end: Date } {
   return { start, end }
 }
 
+// En español solo va en mayúscula la primera letra de la fecha: los días de la
+// semana y los meses son nombres comunes. Se hace aquí y no con `capitalize` de
+// CSS, que pondría en mayúscula todas las palabras ("27 De Agosto De 2026").
+export function capitalizeFirst(text: string): string {
+  return text.charAt(0).toUpperCase() + text.slice(1)
+}
+
 export function formatLongDate(date: string): string {
   const [y, mo, d] = date.split("-").map(Number)
-  return new Date(y, mo - 1, d).toLocaleDateString("es-ES", {
-    weekday: "long",
-    day: "numeric",
-    month: "long",
-    year: "numeric",
-  })
+  return capitalizeFirst(
+    new Date(y, mo - 1, d).toLocaleDateString("es-ES", {
+      weekday: "long",
+      day: "numeric",
+      month: "long",
+      year: "numeric",
+    }),
+  )
 }
 
 // Etiqueta de cliente en formato "primer apellido segundo apellido, nombre".

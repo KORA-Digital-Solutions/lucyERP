@@ -24,7 +24,7 @@ import { PinDialog } from "@/components/pin-dialog"
 import { QuickCustomerDialog } from "@/components/quick-customer-dialog"
 import { ClientProfileDialog } from "@/components/client-profile-dialog"
 import { QuickReminderDialog } from "@/components/quick-reminder-dialog"
-import { customerLabel } from "@/lib/format"
+import { customerLabel, capitalizeFirst } from "@/lib/format"
 import {
   reminderCompleteLabel, reminderCompletedMessage, REMINDER_ACCENT, REMINDER_TONE,
 } from "@/lib/reminders"
@@ -512,7 +512,7 @@ function POSView({ sales, customers, services, products, workers, currentUserId,
 
   const now = new Date()
   const timeStr = now.toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" })
-  const dateStr = now.toLocaleDateString("es-ES", { weekday: "long", day: "numeric", month: "long" })
+  const dateStr = capitalizeFirst(now.toLocaleDateString("es-ES", { weekday: "long", day: "numeric", month: "long" }))
 
   const subtotalCents = lines.reduce((s, l) => s + l.unitPriceCents * l.quantity, 0)
   const discountCents = lines.reduce((s, l) => s + (l.unitPriceCents * l.quantity - lineTotal(l)), 0)
@@ -734,7 +734,7 @@ function POSView({ sales, customers, services, products, workers, currentUserId,
           <ArrowLeft className="h-4 w-4" /> Volver
         </Button>
         <span className="font-semibold flex-1">Nueva venta</span>
-        <span className="text-sm text-muted-foreground capitalize">{dateStr} · {timeStr}</span>
+        <span className="text-sm text-muted-foreground">{dateStr} · {timeStr}</span>
       </div>
 
       <div className="flex flex-1 overflow-hidden">

@@ -57,6 +57,24 @@ export async function usuariaDelPin(pin: string): Promise<UsuariaDelPin | null> 
   return null
 }
 
+/**
+ * Un PIN al azar que no sea de nadie, o null si no aparece ninguno.
+ *
+ * Dos personas con el mismo PIN significa cobrar a nombre de quien no toca,
+ * así que se reintenta hasta dar con uno libre. Con un millón de
+ * combinaciones y un puñado de empleadas, el primero vale casi siempre.
+ *
+ * `paraId` es de quien va a ser: su PIN de ahora no se lo bloquea a sí misma.
+ */
+export async function generarPinLibre(paraId?: string): Promise<string | null> {
+  for (let intento = 0; intento < 20; intento++) {
+    const candidato = generarPin()
+    const dueña = await usuariaDelPin(candidato)
+    if (!dueña || dueña.id === paraId) return candidato
+  }
+  return null
+}
+
 export function nombreCompleto(u: { name: string; lastName: string | null }): string {
   return [u.name, u.lastName].filter(Boolean).join(" ")
 }

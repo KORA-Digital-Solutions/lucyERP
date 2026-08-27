@@ -32,8 +32,10 @@ vi.mock("@/lib/auth", () => {
 
 import { prisma } from "@/lib/db"
 import { getActiveClinicId } from "@/lib/clinic"
-import { clearUserPin, generateUserPin, identifyByPin } from "@/lib/actions"
-import { PIN_LENGTH, olvidarFallosDePin, usuariaDelPin } from "@/lib/pin"
+import {
+  clearUserPin, generateUserPin, identifyByPin, saveWorker, toggleWorkerActive,
+} from "@/lib/actions"
+import { PIN_LENGTH, hashearPin, olvidarFallosDePin, usuariaDelPin } from "@/lib/pin"
 
 let clinicId: string
 let ana: string
@@ -56,7 +58,7 @@ beforeEach(async () => {
   olvidarFallosDePin()
   await prisma.user.updateMany({
     where: { id: { in: creados } },
-    data: { pinHash: null, mustChangePin: false, active: true },
+    data: { pinHash: null, mustChangePin: false, active: true, restorePinOnReactivate: false },
   })
 })
 
@@ -131,6 +133,97 @@ describe("identifyByPin", () => {
     const res = await identifyByPin("0".repeat(PIN_LENGTH))
     expect(res.ok).toBe(false)
     expect(res.name).toBeUndefined()
+  })
+})
+
+describe("toggleWorkerActive", () => {
+  it("al desactivar le retira el PIN: sus dígitos vuelven al bote", async () => {
+    const res = await generateUserPin(ana)
+    expect((await toggleWorkerActive(ana, false)).ok).toBe(true)
+
+    const u = await prisma.user.findUniqueOrThrow({
+      where: { id: ana },
+      select: { pinHash: true, mustChangePin: true, restorePinOnReactivate: true },
+    })
+    expect(u.pinHash).toBeNull()
+    expect(u.mustChangePin).toBe(false)
+    // Y queda la nota de que lo tenía, que es lo que le devuelve uno al volver.
+    expect(u.restorePinOnReactivate).toBe(true)
+    expect(await usuariaDelPin(res.pin!)).toBeNull()
+  })
+
+  it("al volver recibe un PIN nuevo, no el de antes", async () => {
+    const viejo = await generateUserPin(ana)
+    await toggleWorkerActive(ana, false)
+
+    const vuelta = await toggleWorkerActive(ana, true)
+    expect(vuelta.ok).toBe(true)
+    expect(vuelta.pin).toMatch(new RegExp(`^[0-9]{${PIN_LENGTH}}$`))
+    expect(vuelta.pin).not.toBe(viejo.pin)
+
+    // El nuevo la identifica; el viejo ya no es de nadie.
+    expect((await usuariaDelPin(vuelta.pin!))?.id).toBe(ana)
+    expect(await usuariaDelPin(viejo.pin!)).toBeNull()
+
+    const u = await prisma.user.findUniqueOrThrow({
+      where: { id: ana },
+      select: { mustChangePin: true, restorePinOnReactivate: true },
+    })
+    // Nace marcado para cambiar, como el del alta: se ha dicho en voz alta.
+    expect(u.mustChangePin).toBe(true)
+    expect(u.restorePinOnReactivate).toBe(false)
+  })
+
+  it("quien no tenía PIN vuelve sin PIN", async () => {
+    // Una administradora que entra solo con contraseña no gana mostrador por
+    // haber pasado por una baja.
+    await toggleWorkerActive(bea, false)
+    const vuelta = await toggleWorkerActive(bea, true)
+    expect(vuelta.ok).toBe(true)
+    expect(vuelta.pin).toBeUndefined()
+    const u = await prisma.user.findUniqueOrThrow({ where: { id: bea }, select: { pinHash: true } })
+    expect(u.pinHash).toBeNull()
+  })
+
+  it("el PIN de una que se fue puede acabar siendo de otra, sin chocar", async () => {
+    // El caso que esto arregla: si el PIN de Ana siguiera guardado mientras
+    // está de baja, al volver habría dos activas con los mismos dígitos y el
+    // mostrador no sabría a quién apuntar el cobro.
+    const deAna = await generateUserPin(ana)
+    await toggleWorkerActive(ana, false)
+
+    // Bea se queda con esos mismos dígitos, ahora libres.
+    await prisma.user.update({
+      where: { id: bea },
+      data: { pinHash: await hashearPin(deAna.pin!), mustChangePin: false },
+    })
+
+    const vuelta = await toggleWorkerActive(ana, true)
+    expect(vuelta.ok).toBe(true)
+    expect(vuelta.pin).not.toBe(deAna.pin)
+    // Los dígitos de siempre siguen siendo de una sola persona: de Bea.
+    expect((await usuariaDelPin(deAna.pin!))?.id).toBe(bea)
+    expect((await usuariaDelPin(vuelta.pin!))?.id).toBe(ana)
+  })
+
+  it("guardar la ficha con la casilla desmarcada retira el PIN igual", async () => {
+    // El formulario es el otro camino que toca 'active'; ver saveWorker.
+    const res = await generateUserPin(ana)
+    const fd = new FormData()
+    fd.set("name", "Ana")
+    fd.set("lastName", "Pin")
+    fd.set("role", "WORKER")
+    const guardado = await saveWorker(ana, fd)
+    expect(guardado.ok).toBe(true)
+
+    const u = await prisma.user.findUniqueOrThrow({
+      where: { id: ana },
+      select: { active: true, pinHash: true, restorePinOnReactivate: true },
+    })
+    expect(u.active).toBe(false)
+    expect(u.pinHash).toBeNull()
+    expect(u.restorePinOnReactivate).toBe(true)
+    expect(await usuariaDelPin(res.pin!)).toBeNull()
   })
 })
 

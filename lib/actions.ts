@@ -9,7 +9,7 @@ import {
   requireSession, requireAdmin, requireCounter, requireOperator, PinRequiredError,
 } from "@/lib/auth"
 import {
-  PIN_LENGTH, apuntarFalloDePin, bloqueoRestanteMs, esPinBienFormado, generarPin,
+  PIN_LENGTH, apuntarFalloDePin, bloqueoRestanteMs, esPinBienFormado, generarPinLibre,
   hashearPin, mensajeDeBloqueo, nombreCompleto, olvidarFallosDePin, usuariaDelPin,
 } from "@/lib/pin"
 import {
@@ -431,7 +431,16 @@ export async function toggleServiceFamilyActive(id: string, active: boolean): Pr
 
 /* ----------------------------- TRABAJADORES ----------------------------- */
 
-export async function saveWorker(id: string | null, fd: FormData): Promise<ActionResult> {
+/**
+ * La casilla "Activo" de este formulario es el otro camino por el que alguien
+ * se va o vuelve, así que el PIN se trata aquí igual que en el interruptor de
+ * la lista: ver pinAlCambiarDeActividad. Devuelve el PIN nuevo cuando la
+ * reactivación se lo genera, para que la pantalla pueda dictárselo.
+ */
+export async function saveWorker(
+  id: string | null,
+  fd: FormData,
+): Promise<ActionResult & { pin?: string }> {
   try {
     await requireAdmin()
     const clinicId = await getActiveClinicId()
@@ -445,10 +454,16 @@ export async function saveWorker(id: string | null, fd: FormData): Promise<Actio
       color: optStr(fd, "color") || "#3C54A4",
     }
     if (id) {
-      await prisma.user.update({ where: { id }, data })
-    } else {
-      await prisma.user.create({ data: { ...data, clinicId } })
+      const usuaria = await prisma.user.findFirstOrThrow({
+        where: { id, clinicId },
+        select: { id: true, active: true, pinHash: true, restorePinOnReactivate: true },
+      })
+      const { pin, ...delPin } = await pinAlCambiarDeActividad(usuaria, data.active)
+      await prisma.user.update({ where: { id }, data: { ...data, ...delPin } })
+      revalidateAll()
+      return { ok: true, pin }
     }
+    await prisma.user.create({ data: { ...data, clinicId } })
     revalidateAll()
     return { ok: true }
   } catch (e) {
@@ -479,6 +494,61 @@ export async function setUserPassword(id: string, password: string): Promise<Act
 
 /* ------------------------- PIN DE MOSTRADOR ------------------------------ */
 
+const SIN_PIN_LIBRE = "No se ha podido generar un PIN libre. Vuelve a intentarlo."
+
+/** Lo que hace falta saber de una usuaria para decidir qué pasa con su PIN. */
+type UsuariaAlCambiarDeActividad = {
+  id: string
+  active: boolean
+  pinHash: string | null
+  restorePinOnReactivate: boolean
+}
+
+/**
+ * Qué le pasa al PIN cuando alguien se va del centro o vuelve.
+ *
+ * Al desactivarla se le retira: sus dígitos vuelven al bote en vez de quedar
+ * reservados a quien ya no trabaja aquí. Si volviera con el suyo puesto, otra
+ * podría haberlo elegido mientras tanto, y entonces habría dos activas con el
+ * mismo PIN: el mostrador se identifica solo con los dígitos, así que el cobro
+ * se apuntaría a quien saliera antes de la base.
+ *
+ * Al reactivarla se le da uno nuevo, porque el suyo ya no existe —solo se
+ * guardaba hasheado— y nace marcado para cambiar, igual que el del alta: hay
+ * que dictárselo en voz alta. Solo lo recibe quien lo tenía: reactivar a una
+ * administradora de solo contraseña no le abre el mostrador.
+ *
+ * Lo llaman los dos caminos que tocan `active`: el interruptor de la lista
+ * (toggleWorkerActive) y la casilla del formulario (saveWorker).
+ */
+async function pinAlCambiarDeActividad(
+  usuaria: UsuariaAlCambiarDeActividad,
+  active: boolean,
+): Promise<{
+  pinHash?: string | null
+  mustChangePin?: boolean
+  restorePinOnReactivate?: boolean
+  /** En claro y una sola vez, para dictarlo. La pantalla lo enseña. */
+  pin?: string
+}> {
+  if (active === usuaria.active) return {}
+
+  if (!active) {
+    return { pinHash: null, mustChangePin: false, restorePinOnReactivate: usuaria.pinHash !== null }
+  }
+
+  if (!usuaria.restorePinOnReactivate) return {}
+  const pin = await generarPinLibre(usuaria.id)
+  if (!pin) throw new Error(SIN_PIN_LIBRE)
+  return {
+    pinHash: await hashearPin(pin),
+    mustChangePin: true,
+    restorePinOnReactivate: false,
+    pin,
+  }
+}
+
+
 /**
  * Da un PIN nuevo a una trabajadora y lo devuelve EN CLARO una sola vez, para
  * poder dictárselo. No se guarda en claro en ningún sitio, así que si se
@@ -500,16 +570,8 @@ export async function generateUserPin(id: string): Promise<ActionResult & { pin?
     })
     if (!usuaria.active) return { ok: false, error: "Activa a la usuaria antes de darle un PIN." }
 
-    // Dos personas con el mismo PIN significa cobrar a nombre de quien no
-    // toca, así que se reintenta hasta dar con uno libre. Con un millón de
-    // combinaciones y un puñado de empleadas, la primera vale casi siempre.
-    let pin = ""
-    for (let intento = 0; intento < 20; intento++) {
-      const candidato = generarPin()
-      const dueña = await usuariaDelPin(candidato)
-      if (!dueña || dueña.id === id) { pin = candidato; break }
-    }
-    if (!pin) return { ok: false, error: "No se ha podido generar un PIN libre. Vuelve a intentarlo." }
+    const pin = await generarPinLibre(id)
+    if (!pin) return { ok: false, error: SIN_PIN_LIBRE }
 
     await prisma.user.update({
       where: { id },
@@ -575,12 +637,26 @@ export async function forgetOperator(): Promise<ActionResult> {
   }
 }
 
-export async function toggleWorkerActive(id: string, active: boolean): Promise<ActionResult> {
+/**
+ * El interruptor de la lista. Devuelve el PIN nuevo cuando la reactivación se
+ * lo genera, para que la pantalla pueda dictárselo: es la única vez que se ve.
+ */
+export async function toggleWorkerActive(
+  id: string,
+  active: boolean,
+): Promise<ActionResult & { pin?: string }> {
   try {
     await requireAdmin()
-    await prisma.user.update({ where: { id }, data: { active } })
+    const clinicId = await getActiveClinicId()
+    const usuaria = await prisma.user.findFirstOrThrow({
+      where: { id, clinicId },
+      select: { id: true, active: true, pinHash: true, restorePinOnReactivate: true },
+    })
+
+    const { pin, ...delPin } = await pinAlCambiarDeActividad(usuaria, active)
+    await prisma.user.update({ where: { id }, data: { active, ...delPin } })
     revalidateAll()
-    return { ok: true }
+    return { ok: true, pin }
   } catch (e) {
     return { ok: false, error: errMsg(e) }
   }

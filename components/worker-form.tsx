@@ -16,6 +16,7 @@ import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { saveWorker } from "@/lib/actions"
+import { PinNuevoDialog } from "@/components/pin-nuevo-dialog"
 import type { WorkerRow } from "@/components/workers-client"
 
 /** nombre.apellidos@dominio-del-centro, que es como se dan de alta aquí. */
@@ -52,6 +53,9 @@ export function WorkerForm({
     worker?.email ?? buildEmail(worker?.name ?? "", worker?.lastName ?? "", domain),
   )
   const [loading, setLoading] = useState(false)
+  // Volver a marcar "Activo" a quien tenía PIN le genera uno nuevo, y hay que
+  // enseñarlo: se ve una sola vez. Ver pinAlCambiarDeActividad en lib/actions.
+  const [pinNuevo, setPinNuevo] = useState<string | null>(null)
 
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
@@ -63,7 +67,10 @@ export function WorkerForm({
     if (res.ok) {
       toast.success("Usuario guardado.")
       router.refresh()
-      onDone()
+      // Con PIN nuevo el formulario se queda: cerrarlo se llevaría por delante
+      // los dígitos antes de que a nadie le dé tiempo a apuntarlos.
+      if (res.pin) setPinNuevo(res.pin)
+      else onDone()
     } else toast.error(res.error ?? "Error al guardar.")
   }
 
@@ -147,6 +154,12 @@ export function WorkerForm({
         )}
         <Button type="submit" disabled={loading}>{loading ? "Guardando…" : submitLabel}</Button>
       </div>
+
+      <PinNuevoDialog
+        pin={pinNuevo}
+        nombre={name}
+        onClose={() => { setPinNuevo(null); onDone() }}
+      />
     </form>
   )
 }

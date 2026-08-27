@@ -69,7 +69,7 @@ model User {
   mustChangePassword  Boolean  @default(false)
   // PIN de mostrador: identifica a quién hace la acción en un puesto
   // compartido, donde la sesión es del puesto y no de nadie. Se guarda
-  // hasheado como la contraseña, pero NO es una contraseña: cuatro dígitos se
+  // hasheado como la contraseña, pero NO es una contraseña: unos dígitos se
   // ven desde el otro lado del mostrador. Sirve para atribuir, no para
   // proteger, y por eso nunca abre las pantallas de administración.
   pinHash             String?
@@ -77,6 +77,11 @@ model User {
   // suyo la primera vez que entra. Mismo criterio que mustChangePassword, pero
   // para el otro modo de acceso.
   mustChangePin       Boolean  @default(false)
+  // Al desactivar a alguien se le retira el PIN, para que sus dígitos vuelvan
+  // al bote y no queden reservados a quien ya no trabaja aquí. Esto recuerda
+  // que lo tenía, y es lo único que distingue a quien vuelve —y necesita uno
+  // nuevo— de la administradora que nunca tuvo mostrador.
+  restorePinOnReactivate Boolean @default(false)
   phone               String?
   role                String   @default("WORKER")
   active              Boolean  @default(true)

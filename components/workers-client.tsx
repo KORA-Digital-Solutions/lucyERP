@@ -13,6 +13,7 @@ import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 import { toggleWorkerActive } from "@/lib/actions"
 import { WorkerForm } from "@/components/worker-form"
+import { PinNuevoDialog } from "@/components/pin-nuevo-dialog"
 import { EstadoAcceso, WorkerProfileView, type WorkerTab } from "@/components/worker-profile-view"
 
 export interface WorkerRow {
@@ -198,6 +199,9 @@ function TablaDeUsuarios({ filas, onAbrir, conRol = false, onDesactivada }: {
   onDesactivada?: () => void
 }) {
   const router = useRouter()
+  // Al reactivar a quien tenía PIN se le genera uno nuevo, y se enseña aquí:
+  // es la única vez que se ve en claro.
+  const [pinNuevo, setPinNuevo] = useState<{ pin: string; nombre: string } | null>(null)
 
   async function onToggle(r: WorkerRow) {
     const res = await toggleWorkerActive(r.id, !r.active)
@@ -206,58 +210,67 @@ function TablaDeUsuarios({ filas, onAbrir, conRol = false, onDesactivada }: {
       // desaparece sin más y parece que se ha borrado: se abre para que se vea
       // adónde ha ido.
       if (r.active) onDesactivada?.()
+      else if (res.pin) setPinNuevo({ pin: res.pin, nombre: r.name })
       router.refresh()
     } else toast.error(res.error ?? "Error")
   }
 
   return (
-    <Card className="overflow-hidden p-0">
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>Nombre</TableHead>
-            {conRol && <TableHead>Rol</TableHead>}
-            <TableHead>Email</TableHead>
-            <TableHead>Teléfono</TableHead>
-            <TableHead>Acceso</TableHead>
-            <TableHead className="w-24 text-center">Activo</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {filas.map((r) => {
-            const acceso = resumenAcceso(r)
-            return (
-              <TableRow
-                key={r.id}
-                onClick={() => onAbrir(r)}
-                className={cn("cursor-pointer", !r.active && "opacity-60")}
-              >
-                <TableCell className="font-medium">
-                  <span className="mr-2 inline-block h-3 w-3 rounded-full align-middle" style={{ backgroundColor: r.color }} />
-                  {r.lastName ? `${r.lastName}, ${r.name}` : r.name}
-                </TableCell>
-                {conRol && (
-                  <TableCell>
-                    <Badge variant={r.role === "ADMIN" ? "default" : "secondary"}>
-                      {r.role === "ADMIN" ? "Administrador" : "Trabajador"}
-                    </Badge>
+    <>
+      <Card className="overflow-hidden p-0">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Nombre</TableHead>
+              {conRol && <TableHead>Rol</TableHead>}
+              <TableHead>Email</TableHead>
+              <TableHead>Teléfono</TableHead>
+              <TableHead>Acceso</TableHead>
+              <TableHead className="w-24 text-center">Activo</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {filas.map((r) => {
+              const acceso = resumenAcceso(r)
+              return (
+                <TableRow
+                  key={r.id}
+                  onClick={() => onAbrir(r)}
+                  className={cn("cursor-pointer", !r.active && "opacity-60")}
+                >
+                  <TableCell className="font-medium">
+                    <span className="mr-2 inline-block h-3 w-3 rounded-full align-middle" style={{ backgroundColor: r.color }} />
+                    {r.lastName ? `${r.lastName}, ${r.name}` : r.name}
                   </TableCell>
-                )}
-                <TableCell className="text-muted-foreground">{r.email ?? "—"}</TableCell>
-                <TableCell className="text-muted-foreground">{r.phone ?? "—"}</TableCell>
-                <TableCell>
-                  <EstadoAcceso tono={acceso.tono} texto={acceso.texto} />
-                </TableCell>
-                {/* El interruptor no abre la ficha: se usa de pasada desde el
-                    listado y un clic aquí no debería cambiarte de pantalla. */}
-                <TableCell className="text-center" onClick={(e) => e.stopPropagation()}>
-                  <Switch checked={r.active} onCheckedChange={() => onToggle(r)} />
-                </TableCell>
-              </TableRow>
-            )
-          })}
-        </TableBody>
-      </Table>
-    </Card>
+                  {conRol && (
+                    <TableCell>
+                      <Badge variant={r.role === "ADMIN" ? "default" : "secondary"}>
+                        {r.role === "ADMIN" ? "Administrador" : "Trabajador"}
+                      </Badge>
+                    </TableCell>
+                  )}
+                  <TableCell className="text-muted-foreground">{r.email ?? "—"}</TableCell>
+                  <TableCell className="text-muted-foreground">{r.phone ?? "—"}</TableCell>
+                  <TableCell>
+                    <EstadoAcceso tono={acceso.tono} texto={acceso.texto} />
+                  </TableCell>
+                  {/* El interruptor no abre la ficha: se usa de pasada desde el
+                      listado y un clic aquí no debería cambiarte de pantalla. */}
+                  <TableCell className="text-center" onClick={(e) => e.stopPropagation()}>
+                    <Switch checked={r.active} onCheckedChange={() => onToggle(r)} />
+                  </TableCell>
+                </TableRow>
+              )
+            })}
+          </TableBody>
+        </Table>
+      </Card>
+
+      <PinNuevoDialog
+        pin={pinNuevo?.pin ?? null}
+        nombre={pinNuevo?.nombre ?? ""}
+        onClose={() => setPinNuevo(null)}
+      />
+    </>
   )
 }

@@ -17,27 +17,36 @@ import {
   Wallet,
   Clock,
   BarChart3,
-  Eye,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { LuciaMark } from "@/components/lucia-logo"
 import type { SessionMode } from "@/lib/session"
 
 /**
- * Dos modos, dos menús.
+ * Dos modos, dos menús, y ninguno enseña el del otro.
  *
  * En el MOSTRADOR solo está el día a día. Las pantallas de gestión no salen
  * atenuadas ni piden nada: sencillamente no existen, porque para llegar a
  * ellas hay que salir y entrar por la otra puerta.
  *
- * En la GESTIÓN DEL CENTRO está todo, pero el día a día va marcado como
- * consulta: se ve para revisar, y para tocarlo hay que bajar al mostrador. Lo
- * que aquí es una etiqueta, en el servidor es requireCounter() (ver
- * lib/auth.ts): esconder el botón no sería garantía de nada.
+ * En la GESTIÓN DEL CENTRO está lo que se administra, y nada más. El día a
+ * día llegó a salir aquí en un bloque "solo consulta", y era repetir seis
+ * pantallas para no poder hacer nada en ellas: quien gestiona no entra a mirar
+ * la agenda, y para tocarla hay que bajar al mostrador de todas formas.
+ *
+ * Quitarlas del menú no las cierra: siguen abriéndose por URL y allí avisa
+ * ReadOnlyBanner. Quien manda es requireCounter() en el servidor (ver
+ * lib/auth.ts); esconder un botón nunca fue garantía de nada.
  */
 
-/** El día a día. Se trabaja desde el mostrador y se consulta desde la gestión. */
-const NAV_DIA_A_DIA = [
+interface NavItem {
+  icon: typeof LayoutGrid
+  label: string
+  href: string
+}
+
+/** El día a día: el menú del mostrador, entero. */
+const NAV_DIA_A_DIA: NavItem[] = [
   { icon: LayoutGrid,   label: "Dashboard", href: "/dashboard" },
   { icon: Calendar,     label: "Agenda",    href: "/agenda" },
   { icon: Users,        label: "Clientes",  href: "/clients" },
@@ -46,15 +55,37 @@ const NAV_DIA_A_DIA = [
   { icon: Package,      label: "Stock",     href: "/stock" },
 ]
 
-/** Lo que solo se ve desde la gestión del centro. */
-const NAV_GESTION = [
-  { icon: BarChart3,     label: "Informes",        href: "/reports" },
-  { icon: ClipboardList, label: "Historial citas", href: "/appointments" },
-  { icon: Briefcase,     label: "Servicios",       href: "/services" },
-  { icon: DoorOpen,      label: "Cabinas",         href: "/cabins" },
-  { icon: UserCog,       label: "Usuarios",        href: "/workers" },
-  { icon: Clock,         label: "Horarios",        href: "/horarios" },
-  { icon: Settings,      label: "Configuración",   href: "/settings" },
+/**
+ * Lo que solo se ve desde la gestión del centro, por bloques.
+ *
+ * Antes iban los siete seguidos y había que leer la lista entera para dar con
+ * lo que buscabas: "Informes" y "Configuración" no se parecen en nada, pero
+ * estaban a la misma distancia. Por bloques se recorre como se piensa el
+ * centro: cómo ha ido, quién trabaja y cómo está montado.
+ */
+const GRUPOS_GESTION: { titulo: string; items: NavItem[] }[] = [
+  {
+    titulo: "Análisis",
+    items: [
+      { icon: BarChart3,     label: "Informes",        href: "/reports" },
+      { icon: ClipboardList, label: "Historial citas", href: "/appointments" },
+    ],
+  },
+  {
+    titulo: "Equipo",
+    items: [
+      { icon: UserCog, label: "Usuarios", href: "/workers" },
+      { icon: Clock,   label: "Horarios", href: "/horarios" },
+    ],
+  },
+  {
+    titulo: "El centro",
+    items: [
+      { icon: Briefcase, label: "Servicios",     href: "/services" },
+      { icon: DoorOpen,  label: "Cabinas",       href: "/cabins" },
+      { icon: Settings,  label: "Configuración", href: "/settings" },
+    ],
+  },
 ]
 
 interface Props {
@@ -63,6 +94,15 @@ interface Props {
   mode: SessionMode
   /** El del centro, tal y como esté puesto en Configuración. */
   clinicName: string
+}
+
+/** Cabecera de bloque: orienta, no se pulsa. */
+function GroupTitle({ label }: { label: string }) {
+  return (
+    <p className="px-3 pb-1 text-[11px] font-semibold uppercase tracking-wide text-sidebar-muted">
+      {label}
+    </p>
+  )
 }
 
 export function AppSidebar({ name, lastName, mode, clinicName }: Props) {
@@ -79,7 +119,7 @@ export function AppSidebar({ name, lastName, mode, clinicName }: Props) {
     router.refresh()
   }
 
-  function NavLink({ item }: { item: { icon: typeof LayoutGrid; label: string; href: string } }) {
+  function NavLink({ item }: { item: NavItem }) {
     const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`)
     return (
       <Link
@@ -116,21 +156,18 @@ export function AppSidebar({ name, lastName, mode, clinicName }: Props) {
       </div>
 
       <nav className="flex-1 overflow-y-auto px-3 py-4">
-        {esGestion && (
-          <>
-            <div className="space-y-1">
-              {NAV_GESTION.map((item) => <NavLink key={item.href} item={item} />)}
+        {esGestion ? (
+          GRUPOS_GESTION.map((grupo, i) => (
+            <div key={grupo.titulo} className={cn("space-y-1", i > 0 && "mt-4")}>
+              <GroupTitle label={grupo.titulo} />
+              {grupo.items.map((item) => <NavLink key={item.href} item={item} />)}
             </div>
-            <div className="my-3 border-t border-sidebar-border" />
-            <p className="flex items-center gap-1.5 px-3 pb-1 text-[11px] uppercase tracking-wide text-sidebar-muted">
-              <Eye className="h-3 w-3" /> Solo consulta
-            </p>
-          </>
+          ))
+        ) : (
+          <div className="space-y-1">
+            {NAV_DIA_A_DIA.map((item) => <NavLink key={item.href} item={item} />)}
+          </div>
         )}
-
-        <div className="space-y-1">
-          {NAV_DIA_A_DIA.map((item) => <NavLink key={item.href} item={item} />)}
-        </div>
       </nav>
 
       <div className="border-t border-sidebar-border p-4">

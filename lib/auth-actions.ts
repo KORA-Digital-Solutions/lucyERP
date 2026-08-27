@@ -197,7 +197,7 @@ export async function loginWithPinAction(
     // a nombre de quien abrió. La identificación nace al firmar una acción.
     await clearOperatorCookie()
 
-    destino = user.mustChangePin ? "/cambiar-pin" : "/agenda"
+    destino = user.mustChangePin ? "/cambiar-pin" : "/dashboard"
   } catch (e) {
     console.error("[login-pin]", e)
     return { error: "Error interno. Vuelve a intentarlo." }
@@ -249,5 +249,5 @@ export async function changeOwnPinAction(
     return { error: "No se ha podido guardar el PIN." }
   }
 
-  redirect("/agenda")
+  redirect("/dashboard")
 }

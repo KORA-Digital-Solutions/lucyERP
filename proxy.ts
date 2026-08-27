@@ -75,7 +75,8 @@ export async function proxy(req: NextRequest) {
     }
     if (MANAGEMENT_ONLY_PAGES.some((p) => pathname.startsWith(p))) {
       const url = req.nextUrl.clone()
-      url.pathname = "/agenda"
+      // A la portada del mostrador, que es donde se aterriza al entrar.
+      url.pathname = "/dashboard"
       return conSesionRenovada(NextResponse.redirect(url), session)
     }
   }

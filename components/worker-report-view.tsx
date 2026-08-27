@@ -9,15 +9,19 @@
  * la misma disposición (filtros arriba, tabla que ordena por cabeceras, total
  * de lo que se está viendo abajo) y una línea por concepto cobrado, no por
  * ticket, que es como se leen los listados de servicios realizados de siempre.
+ *
+ * Es el contenido de la pestaña "Actividad" de la ficha de empleada: quién es
+ * y cómo se vuelve atrás lo pone la ficha, así que aquí no hay ni cabecera ni
+ * botón de volver. Antes esto se abría a pantalla completa desde un icono de
+ * la tabla de usuarios y quedaba fuera de todo contexto.
  */
 
 import { useEffect, useMemo, useState } from "react"
-import { ArrowLeft, Info, Search, ShoppingCart, X } from "lucide-react"
+import { Info, Search, ShoppingCart, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Badge } from "@/components/ui/badge"
 import { Table, TableBody, TableCell, TableHeader, TableRow } from "@/components/ui/table"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { fmtEur } from "@/components/client-profile-view"
@@ -56,10 +60,7 @@ const SORT_INICIAL: SortRule<SortKey>[] = [{ key: "fecha", dir: "desc" }]
 const TODOS_TIPOS = "__todos__"
 const TODAS_FAMILIAS = "__todas__"
 
-export function WorkerReportView({ worker, onBack }: {
-  worker: WorkerRow
-  onBack: () => void
-}) {
+export function WorkerReportView({ worker }: { worker: WorkerRow }) {
   const [data, setData] = useState<ReportData | null>(null)
   const [search, setSearch] = useState("")
   const [type, setType] = useState(TODOS_TIPOS)
@@ -127,39 +128,12 @@ export function WorkerReportView({ worker, onBack }: {
     setSearch(""); setType(TODOS_TIPOS); setFamily(TODAS_FAMILIAS); setFrom(""); setTo("")
   }
 
-  const fullName = worker.lastName ? `${worker.lastName}, ${worker.name}` : worker.name
-
   return (
-    <div className="flex h-screen flex-col overflow-hidden bg-background">
-      {/* Header */}
-      <div className="shrink-0 border-b bg-background">
-        <div className="flex items-start gap-4 px-6 pb-3 pt-3">
-          <Button variant="ghost" size="sm" onClick={onBack} className="mt-0.5 shrink-0 gap-1.5">
-            <ArrowLeft className="h-4 w-4" /> Volver
-          </Button>
-          <div className="min-w-0 flex-1">
-            <p className="mb-0.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              Informe de personal · Servicios realizados y productos vendidos
-            </p>
-            <h1 className="flex items-center gap-2 text-xl font-semibold leading-tight">
-              <span
-                className="inline-block h-3 w-3 shrink-0 rounded-full"
-                style={{ backgroundColor: worker.color }}
-              />
-              {fullName}
-            </h1>
-            <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground">
-              <Badge variant={worker.role === "ADMIN" ? "default" : "secondary"} className="py-0 text-xs">
-                {worker.role === "ADMIN" ? "Administrador" : "Trabajador"}
-              </Badge>
-              {!worker.active && <span>Usuario desactivado</span>}
-              {data && <span className="tabular-nums">{data.ticketCount} tickets</span>}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div className="flex-1 overflow-auto p-6">
+    <div>
+      <p className="mb-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+        Servicios realizados y productos vendidos
+      </p>
+      <div>
         {!data ? (
           <p className="text-sm text-muted-foreground">Cargando informe…</p>
         ) : rows.length === 0 ? (
@@ -282,8 +256,12 @@ export function WorkerReportView({ worker, onBack }: {
                 que es la pregunta del informe. Cuando hay filtros se recuerda
                 además el total de todo, para no perder la referencia. */}
             <div className="flex flex-wrap items-baseline justify-end gap-x-6 gap-y-1 rounded-xl border bg-muted/20 px-4 py-3">
+              {/* Los tickets solo se pueden contar sobre el informe entero:
+                  la línea no guarda de qué ticket viene, así que con filtros
+                  puestos el número mentiría y se calla. */}
               <span className="mr-auto text-xs text-muted-foreground">
                 {sorted.length} {sorted.length === 1 ? "línea" : "líneas"}
+                {!hayFiltro && ` · ${data.ticketCount} tickets`}
               </span>
               <span className="flex items-baseline gap-2">
                 <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Servicios</span>

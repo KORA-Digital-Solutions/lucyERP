@@ -35,7 +35,12 @@ type Customer = { id: string; firstName: string; lastName: string | null; lastNa
 type Worker   = { id: string; name: string; lastName: string | null; color: string | null }
 type Service  = { id: string; name: string; priceCents: number; pricingType: string; pricePerMinuteCents: number | null; durationMinutes: number }
 type Product  = { id: string; name: string; priceCents: number; stock: number }
-type SaleLine = { id: string; type: string; description: string; quantity: number; unitPriceCents: number; discountPercent: number; totalCents: number; durationMinutes: number | null }
+type SaleLine = {
+  id: string; type: string; description: string; quantity: number
+  unitPriceCents: number; discountPercent: number; totalCents: number
+  durationMinutes: number | null; notes: string | null
+  worker: { name: string; lastName: string | null } | null
+}
 type Sale = {
   id: string; saleType: string; status: string; paymentMethod: string
   totalCents: number; paidCents: number; createdAt: string; notes: string | null
@@ -63,6 +68,8 @@ type DraftLine = {
   key: number; type: LineType; itemId: string; description: string
   workerId: string | null; quantity: number; unitPriceCents: number
   discountPercent: number; durationMinutes: number | null
+  /** Solo tarjetas regalo: qué se plantea regalar. */
+  notes: string | null
 }
 
 /* ─── Helpers ────────────────────────────────────────────────────────────── */
@@ -337,7 +344,15 @@ export function SalesClient({ sales, customers, services, products, workers, cur
                   <tbody>
                     {detailSale.lines.map((l) => (
                       <tr key={l.id} className="border-b last:border-0">
-                        <td className="py-1.5">{l.description}{l.durationMinutes ? ` · ${l.durationMinutes} min` : ""}</td>
+                        <td className="py-1.5">
+                          {l.description}{l.durationMinutes ? ` · ${l.durationMinutes} min` : ""}
+                          {l.worker && (
+                            <span className="block text-xs text-muted-foreground">
+                              {l.type === "GIFT_CARD" ? "Vendida por" : "Atendido por"} {l.worker.name} {l.worker.lastName ?? ""}
+                            </span>
+                          )}
+                          {l.notes && <span className="block text-xs text-muted-foreground">{l.notes}</span>}
+                        </td>
                         <td className="text-right tabular-nums py-1.5">{l.quantity}</td>
                         <td className="text-right tabular-nums py-1.5">{fmtEur(l.unitPriceCents)}</td>
                         <td className="text-right py-1.5">{l.discountPercent > 0 ? `-${l.discountPercent}%` : "—"}</td>
@@ -514,7 +529,7 @@ function POSView({ sales, customers, services, products, workers, currentUserId,
     if (lines.length === 0 && selectedDebtIds.size === 0)
       errs.push("Añade al menos una línea al ticket o selecciona una deuda a cobrar.")
     lines.forEach((l) => {
-      if (l.type === "SERVICE" && !l.workerId)
+      if ((l.type === "SERVICE" || l.type === "GIFT_CARD") && !l.workerId)
         errs.push(`Asigna un profesional a "${l.description}".`)
     })
     if (hasGiftCard && !giftRecipient)
@@ -540,6 +555,8 @@ function POSView({ sales, customers, services, products, workers, currentUserId,
         discountPercent: l.discountPercent,
         durationMinutes: l.durationMinutes ?? undefined,
         totalCents: lineTotal(l),
+        workerId: l.workerId,
+        notes: l.notes,
       }))
 
       const res = await createSale(
@@ -1314,6 +1331,10 @@ function AddLinePanel({ services, products, workers, currentUserId, customers, g
   const [tab, setTab] = useState<AddLineTab>("SERVICE")
   const [query, setQuery] = useState("")
   const [giftAmount, setGiftAmount] = useState("")
+  // Quien vende la tarjeta. Arranca en quien tiene la sesión abierta, que es
+  // lo normal, pero se puede cambiar: en el mostrador cobra una y vende otra.
+  const [giftWorkerId, setGiftWorkerId] = useState<string | null>(null)
+  const [giftNote, setGiftNote] = useState("")
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
 
@@ -1325,6 +1346,16 @@ function AddLinePanel({ services, products, workers, currentUserId, customers, g
     return () => document.removeEventListener("mousedown", out)
   }, [])
 
+  const defaultWorkerId = useMemo(
+    () => (currentUserId ? workers.find((w) => w.id === currentUserId)?.id : undefined)
+      ?? (workers.length === 1 ? workers[0].id : null),
+    [currentUserId, workers],
+  )
+
+  useEffect(() => {
+    setGiftWorkerId((prev) => prev ?? defaultWorkerId)
+  }, [defaultWorkerId])
+
   const tabItems = useMemo(() => {
     const q = normalize(query)
     if (tab === "SERVICE") return services.filter((s) => !q || normalize(s.name).includes(q))
@@ -1333,14 +1364,16 @@ function AddLinePanel({ services, products, workers, currentUserId, customers, g
 
   function addGiftCard() {
     const cents = Math.round(Number(giftAmount) * 100)
-    if (!cents || cents <= 0) return
+    if (!cents || cents <= 0 || !giftWorkerId) return
     const recipientName = giftRecipient ? customerLabel(giftRecipient) : ""
     onAdd({
       key: 0, type: "GIFT_CARD", itemId: "gift_card",
       description: recipientName ? `Tarjeta regalo — ${recipientName}` : "Tarjeta regalo",
-      workerId: null, quantity: 1, unitPriceCents: cents, discountPercent: 0, durationMinutes: null,
+      workerId: giftWorkerId, quantity: 1, unitPriceCents: cents, discountPercent: 0,
+      durationMinutes: null, notes: giftNote.trim() || null,
     })
     setGiftAmount("")
+    setGiftNote("")
   }
 
   const tabs: { id: AddLineTab; label: string; icon: React.ElementType }[] = [
@@ -1396,8 +1429,8 @@ function AddLinePanel({ services, products, workers, currentUserId, customers, g
               onCreated={onCustomerCreated}
               placeholder="Buscar cliente destinatario…"
             />
-            {/* Importe */}
-            <div className="flex gap-2 items-end">
+            {/* Importe y profesional */}
+            <div className="flex gap-2">
               <div className="flex-1 space-y-1">
                 <label className="text-xs text-muted-foreground">Importe (€)</label>
                 <Input
@@ -1407,10 +1440,40 @@ function AddLinePanel({ services, products, workers, currentUserId, customers, g
                   className="tabular-nums"
                 />
               </div>
-              <Button onClick={addGiftCard} disabled={!giftAmount || Number(giftAmount) <= 0 || !giftRecipient}>
-                <Plus className="h-4 w-4 mr-1" /> Añadir
-              </Button>
+              <div className="flex-1 space-y-1">
+                <label className="text-xs text-muted-foreground">Profesional que la vende</label>
+                <Select value={giftWorkerId ?? ""} onValueChange={setGiftWorkerId}>
+                  <SelectTrigger className={cn("w-full", !giftWorkerId && "border-orange-300 text-orange-600")}>
+                    <SelectValue placeholder="Profesional…" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {workers.map((w) => (
+                      <SelectItem key={w.id} value={w.id}>{w.name} {w.lastName ?? ""}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
+
+            {/* La tarjeta es saldo suelto, sin servicio ni producto detrás, así
+                que lo que se plantea regalar solo queda escrito si se apunta. */}
+            <div className="space-y-1">
+              <label className="text-xs text-muted-foreground">Para qué se la regala (opcional)</label>
+              <Input
+                maxLength={120}
+                placeholder="Ej. Un tratamiento facial por su cumpleaños"
+                value={giftNote}
+                onChange={(e) => setGiftNote(e.target.value)}
+              />
+            </div>
+
+            <Button
+              className="w-full"
+              onClick={addGiftCard}
+              disabled={!giftAmount || Number(giftAmount) <= 0 || !giftRecipient || !giftWorkerId}
+            >
+              <Plus className="h-4 w-4 mr-1" /> Añadir
+            </Button>
             {!giftRecipient && (
               <p className="text-xs text-muted-foreground">Selecciona primero el destinatario.</p>
             )}
@@ -1443,14 +1506,15 @@ function AddLinePanel({ services, products, workers, currentUserId, customers, g
                             : (workers.length === 1 ? workers[0].id : null)
                           onAdd({
                             key: 0, type: "SERVICE", itemId: s.id, description: s.name,
-                            workerId: defaultWorker,
+                            workerId: defaultWorker, notes: null,
                             quantity: 1, unitPriceCents: s.priceCents, discountPercent: 0,
                             durationMinutes: s.pricingType === "PER_MINUTE" ? s.durationMinutes : null,
                           })
                         } else {
                           onAdd({
                             key: 0, type: "PRODUCT", itemId: p.id, description: p.name,
-                            workerId: null, quantity: 1, unitPriceCents: p.priceCents, discountPercent: 0, durationMinutes: null,
+                            workerId: null, quantity: 1, unitPriceCents: p.priceCents, discountPercent: 0,
+                            durationMinutes: null, notes: null,
                           })
                         }
                         setQuery(""); setOpen(false)
@@ -1494,10 +1558,13 @@ function LineRow({ line, workers, onUpdate, onRemove }: {
             </span>
           )}
         </div>
+        {line.notes && (
+          <p className="text-xs text-muted-foreground truncate max-w-[14rem]">{line.notes}</p>
+        )}
       </td>
 
       <td className="px-3 py-2">
-        {line.type === "SERVICE" ? (
+        {line.type === "SERVICE" || line.type === "GIFT_CARD" ? (
           <Select value={line.workerId ?? ""} onValueChange={(v) => onUpdate({ workerId: v })}>
             <SelectTrigger className={cn("h-8 text-xs w-36", !line.workerId && "border-orange-300 text-orange-600")}>
               <SelectValue placeholder="Profesional…" />

@@ -495,6 +495,7 @@ type ConsumptionData = Awaited<ReturnType<typeof getCustomerConsumption>>
 
 type ServiceRow = {
   key: string
+  notes: string | null
   date: string
   family: string
   description: string
@@ -536,6 +537,7 @@ function ClientServicesTab({ data }: { data: ConsumptionData | null }) {
           date: t.date,
           family: l.family,
           description: l.description,
+          notes: l.notes,
           quantity: l.quantity,
           discountPercent: l.discountPercent,
           totalCents: l.totalCents,
@@ -651,7 +653,12 @@ function ClientServicesTab({ data }: { data: ConsumptionData | null }) {
                   )}
                 </TableCell>
                 <TableCell className="whitespace-nowrap">{r.family}</TableCell>
-                <TableCell>{r.description}</TableCell>
+                <TableCell>
+                  {r.description}
+                  {/* Solo las tarjetas regalo la traen: es lo único que dice
+                      para qué se compró, porque no van atadas a un servicio. */}
+                  {r.notes && <span className="block text-xs text-muted-foreground">{r.notes}</span>}
+                </TableCell>
                 {/* Las unidades van siempre, aunque sea 1: si solo se pintan
                     cuando hay varias, la columna se queda vacía y parece rota.
                     El descuento sí se oculta a 0, que es lo pedido. */}
@@ -1486,12 +1493,19 @@ export function ClientProfileView({
                 ) : movements.map((m) => {
                   const meta = MOV_META[m.type] ?? { label: m.type, sign: "", cls: "" }
                   const date = new Date(m.createdAt).toLocaleDateString("es-ES", { day: "2-digit", month: "short", year: "numeric" })
+                  // Solo las tarjetas regalo traen línea: es donde se apunta
+                  // para qué se regalan y quién las vendió.
+                  const gift = m.sale?.lines?.[0] ?? null
+                  const vendedora = gift?.worker
+                    ? `${gift.worker.name} ${gift.worker.lastName ?? ""}`.trim()
+                    : null
                   return (
                     <div key={m.id} className="flex items-center justify-between rounded-lg border px-3 py-2 text-xs">
                       <div className="min-w-0 flex-1">
                         <span className={cn("font-medium", meta.cls)}>{meta.label}</span>
                         <span className="ml-2 text-muted-foreground">{date}</span>
-                        {m.notes && <span className="ml-1 text-muted-foreground">· {m.notes}</span>}
+                        {vendedora && <span className="ml-1 text-muted-foreground">· vendida por {vendedora}</span>}
+                        {m.notes && <p className="text-muted-foreground">{m.notes}</p>}
                       </div>
                       <span className={cn("ml-3 shrink-0 font-semibold tabular-nums", meta.cls)}>
                         {meta.sign}{fmtEur(Math.abs(m.amountCents))}

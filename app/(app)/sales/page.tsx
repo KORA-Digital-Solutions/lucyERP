@@ -13,7 +13,8 @@ export default async function SalesPage() {
     prisma.sale.findMany({
       where: { clinicId: clinic.id },
       include: {
-        customer: true, user: true, lines: true,
+        customer: true, user: true,
+        lines: { include: { worker: { select: { name: true, lastName: true } } } },
         balanceMovements: { where: { type: "BALANCE_USED" }, select: { amountCents: true } },
       },
       orderBy: { createdAt: "desc" },

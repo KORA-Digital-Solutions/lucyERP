@@ -718,6 +718,10 @@ export type SaleLineInput = {
   discountPercent: number
   durationMinutes?: number
   totalCents: number
+  /** Quien atiende o vende, que no tiene por qué ser quien cobra. */
+  workerId?: string | null
+  /** Solo tarjetas regalo: qué se plantea regalar. */
+  notes?: string | null
 }
 
 export async function createSale(
@@ -804,6 +808,8 @@ export async function createSale(
               discountPercent: l.discountPercent,
               durationMinutes: l.durationMinutes ?? null,
               totalCents: l.totalCents,
+              workerId: l.workerId ?? null,
+              notes: l.notes ?? null,
             })),
           },
         },
@@ -827,7 +833,9 @@ export async function createSale(
       for (const gc of giftCardLines) {
         if (recipientId) {
           await tx.customerBalanceMovement.create({
-            data: { clinicId, customerId: recipientId, userId: session.userId, type: "GIFT_CARD_IN", amountCents: gc.totalCents, saleId: s.id, notes: gc.description },
+            // La nota explica qué se le regala; sin ella queda la descripción
+            // de siempre ("Tarjeta regalo — Fulanita"), que es lo que había.
+            data: { clinicId, customerId: recipientId, userId: session.userId, type: "GIFT_CARD_IN", amountCents: gc.totalCents, saleId: s.id, notes: gc.notes?.trim() || gc.description },
           })
           await tx.customer.update({ where: { id: recipientId }, data: { balanceCents: { increment: gc.totalCents } } })
         }
@@ -1042,7 +1050,19 @@ export async function getClientProfile(customerId: string) {
     }),
     prisma.customerBalanceMovement.findMany({
       where: { customerId },
-      include: { user: { select: { name: true, lastName: true } } },
+      include: {
+        user: { select: { name: true, lastName: true } },
+        // Un abono por tarjeta regalo se explica en la venta que lo generó: la
+        // nota de qué se le regala y quién se la vendió viven en su línea.
+        sale: {
+          select: {
+            lines: {
+              where: { type: "GIFT_CARD" },
+              select: { notes: true, worker: { select: { name: true, lastName: true } } },
+            },
+          },
+        },
+      },
       orderBy: { createdAt: "desc" },
       take: 30,
     }),
@@ -1067,6 +1087,8 @@ export type ConsumptionLine = {
   totalCents: number
   /** Solo en líneas de producto: permite ver cada cuánto lo repone. */
   productId: string | null
+  /** Solo en tarjetas regalo: qué se plantea regalar. */
+  notes: string | null
 }
 
 export type ConsumptionTicket = {
@@ -1103,6 +1125,7 @@ export async function getCustomerConsumption(customerId: string): Promise<{
           discountPercent: true,
           totalCents: true,
           productId: true,
+          notes: true,
           service: { select: { family: { select: { name: true } } } },
         },
       },
@@ -1125,6 +1148,7 @@ export async function getCustomerConsumption(customerId: string): Promise<{
       discountPercent: l.discountPercent,
       totalCents: l.totalCents,
       productId: l.productId,
+      notes: l.notes,
     })),
   }))
 

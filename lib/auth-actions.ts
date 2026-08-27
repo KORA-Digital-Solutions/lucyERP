@@ -4,7 +4,7 @@ import { redirect } from "next/navigation"
 import bcrypt from "bcryptjs"
 import { prisma } from "@/lib/db"
 import { AuthError, requireSession } from "@/lib/auth"
-import { createSession, setSessionCookie } from "@/lib/session"
+import { createSession, setSessionCookie, type SessionMode } from "@/lib/session"
 import { clearOperatorCookie } from "@/lib/operator"
 import {
   PIN_LENGTH, apuntarFalloDePin, bloqueoRestanteMs, esPinBienFormado, hashearPin,
@@ -38,6 +38,19 @@ export type EstadoFormulario = { error?: string }
  * diferencia permite averiguar qué cuentas hay dadas de alta.
  */
 const HASH_SEÑUELO = "$2b$12$hT9alJYlj8bbMgXK/HyWLe9Y54Wo2ZlV5QniC.eWxhnR0z2Hr0I5S"
+
+/**
+ * Dónde aterriza cada puerta.
+ *
+ * El mostrador abre en su portada, el dashboard. La gestión no: el dashboard
+ * es del día a día y ni siquiera sale en su menú (ver components/app-sidebar
+ * .tsx), así que dejarla ahí era darle de bienvenida la única pantalla en la
+ * que no puede tocar nada. Empieza en Informes, que es a lo que entra.
+ */
+const INICIO: Record<SessionMode, string> = {
+  MANAGEMENT: "/reports",
+  COUNTER: "/dashboard",
+}
 
 /** El mismo mensaje para usuario inexistente y contraseña mala, por lo mismo. */
 const CREDENCIALES_MAL = "Credenciales incorrectas."
@@ -92,7 +105,7 @@ export async function loginAction(
     // una identificación viva de antes, se tira.
     await clearOperatorCookie()
 
-    destino = user.mustChangePassword ? "/change-password" : "/dashboard"
+    destino = user.mustChangePassword ? "/change-password" : INICIO.MANAGEMENT
   } catch (e) {
     // Los detalles van al log del servidor, no al navegador.
     console.error("[login]", e)
@@ -131,7 +144,7 @@ export async function changePasswordAction(
     // La cookie lleva mustChangePassword dentro: sin reemitirla, el usuario
     // vuelve a /change-password en cada navegación.
     await setSessionCookie(await createSession({ ...session, mustChangePassword: false }))
-    destino = "/dashboard"
+    destino = INICIO[session.mode]
   } catch (e) {
     // AuthError trae un mensaje pensado para la usuaria ("tu sesión ha
     // caducado"); cualquier otra cosa se queda en el log.
@@ -197,7 +210,7 @@ export async function loginWithPinAction(
     // a nombre de quien abrió. La identificación nace al firmar una acción.
     await clearOperatorCookie()
 
-    destino = user.mustChangePin ? "/cambiar-pin" : "/dashboard"
+    destino = user.mustChangePin ? "/cambiar-pin" : INICIO.COUNTER
   } catch (e) {
     console.error("[login-pin]", e)
     return { error: "Error interno. Vuelve a intentarlo." }
@@ -249,5 +262,5 @@ export async function changeOwnPinAction(
     return { error: "No se ha podido guardar el PIN." }
   }
 
-  redirect("/dashboard")
+  redirect(INICIO.COUNTER)
 }

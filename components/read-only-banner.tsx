@@ -7,6 +7,10 @@
  * el aviso en las seis pantallas del día a día es seis sitios donde olvidarse
  * de ponerlo.
  *
+ * Desde la gestión ya no se llega aquí por el menú —el día a día no sale—,
+ * pero sí por una URL guardada o un enlace viejo, que es justo cuando hace
+ * falta que alguien avise.
+ *
  * Es un aviso, no una barrera: quien manda es requireCounter() en el servidor
  * (ver lib/auth.ts). Si esto no estuviera, la acción se caería igual.
  */

@@ -25,6 +25,16 @@ function todayAt(hour: number, minute = 0): Date {
   return d
 }
 
+// Un Date a mediodía, N días antes (negativo) o después (positivo) de hoy. A
+// mediodía para que la fecha local y la UTC sean la misma sea cual sea el
+// desfase horario.
+function enDias(offset: number): Date {
+  const d = new Date()
+  d.setHours(12, 0, 0, 0)
+  d.setDate(d.getDate() + offset)
+  return d
+}
+
 function toDateStr(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
 }
@@ -75,6 +85,9 @@ async function main() {
   const clinic = await prisma.clinic.create({
     data: {
       name: "Centro de Estética Lucía",
+      // Se lee debajo del nombre en la pantalla de encendido, la del PIN. Sin
+      // esto esa pantalla sale a medias, que es como estaba hasta ahora.
+      slogan: "Cuidarte es nuestro oficio",
       taxId: "B12345678",
       address: "Calle Mayor 12, 28013 Madrid",
       phone: "+34910000000",
@@ -92,6 +105,24 @@ async function main() {
   // Usuarios / trabajadores
   const adminPasswordHash = await bcrypt.hash("admin", 12)
 
+  // PIN de mostrador. Sin esto la puerta que se abre por defecto —la del
+  // pin-pad— no deja entrar a nadie recién sembrado, y el TPV se queda en el
+  // modo de compatibilidad de `requireOperator` (lib/auth.ts), donde cobra
+  // siempre quien encendió el ordenador. O sea: sin PINes el seed no enseña
+  // nada de cómo funciona el mostrador de verdad.
+  //
+  // Tienen que ser distintos entre sí: `usuariaDelPin` deduce de quién es un
+  // PIN comparando hashes uno a uno, así que dos iguales serían la misma
+  // persona para el sistema. El coste 10 es el de `hashearPin` (lib/pin.ts);
+  // se repite aquí porque los scripts no resuelven los alias "@/…" y ese
+  // fichero arrastra la conexión a la base.
+  const PINES = { lucia: "100001", marta: "200002", lola: "300003" }
+  const [pinLucia, pinMarta, pinLola] = await Promise.all([
+    bcrypt.hash(PINES.lucia, 10),
+    bcrypt.hash(PINES.marta, 10),
+    bcrypt.hash(PINES.lola, 10),
+  ])
+
   const [admin, marta, lola] = await Promise.all([
     prisma.user.create({
       data: {
@@ -103,15 +134,31 @@ async function main() {
         phone: "+34600000001",
         color: "#A055A6",
         passwordHash: adminPasswordHash,
+        pinHash: pinLucia,
       },
     }),
     prisma.user.create({
-      data: { clinicId: clinic.id, name: "Marta", lastName: "Sánchez", role: "WORKER", color: "#487F2E", email: "marta.sanchez@centroesteticalucia.com" },
+      // Marta llega con el PIN de un solo uso que le dio la administradora:
+      // al entrar la manda a /cambiar-pin y así el seed enseña también el
+      // primer acceso, no solo el caso ya rodado.
+      data: { clinicId: clinic.id, name: "Marta", lastName: "Sánchez", role: "WORKER", color: "#487F2E", email: "marta.sanchez@centroesteticalucia.com", pinHash: pinMarta, mustChangePin: true },
     }),
     prisma.user.create({
-      data: { clinicId: clinic.id, name: "Lola", lastName: "Romero", role: "WORKER", color: "#B25F18", email: "lola.romero@centroesteticalucia.com" },
+      data: { clinicId: clinic.id, name: "Lola", lastName: "Romero", role: "WORKER", color: "#B25F18", email: "lola.romero@centroesteticalucia.com", pinHash: pinLola },
     }),
   ])
+
+  // Una ficha dada de baja. La lista de usuarios agrupa en administración,
+  // equipo y desactivadas, y sin esto el tercer grupo no aparece nunca. No
+  // lleva PIN ni horario: se fue, no trabaja.
+  //
+  // El nombre se lee como falso a propósito. Las otras tres son personajes de
+  // la demo de toda la vida y ya se citan por su nombre en otras pantallas;
+  // meter aquí una cuarta con nombre creíble haría pensar que existió alguien
+  // que no ha existido.
+  await prisma.user.create({
+    data: { clinicId: clinic.id, name: "Prueba", lastName: "Baja", role: "WORKER", color: "#7A5C99", active: false },
+  })
 
   // Horario semanal del centro: lunes a viernes 9:00-20:00 (sábado y domingo cerrado).
   await prisma.clinicWeeklySlot.createMany({
@@ -255,47 +302,60 @@ async function main() {
   const [maria, pepita, fernando, ana, carlos] = await Promise.all([
     // El nº de expediente va explícito porque estas altas van en paralelo y
     // calcularlo aquí daría números repetidos.
+    //
+    // La fecha de alta también va explícita y escalonada hacia atrás. Con el
+    // `now()` por defecto los cinco se daban de alta el día que siembras, y
+    // entonces el centro parece recién abierto: no hay clientela antigua, y
+    // cualquier cuenta de «nuevos vs. de siempre» sale con todo en la columna
+    // de nuevos.
     prisma.customer.create({
       data: {
-        clinicId: clinic.id, fileNumber: 1,
+        clinicId: clinic.id, fileNumber: 1, createdAt: enDias(-1300),
         firstName: "María José", lastName: "Soriano", lastName2: "García",
         sex: "FEMALE", birthDate: new Date("1985-03-14"), profession: "Maestra",
         phone: "+34600111222", address: "C/ Mayor 12, 3ºB, Albacete",
         referralSource: "OTHER_CLIENT", whatsappOptIn: true,
+        notes: "Prefiere cita a primera hora, antes de entrar a clase.",
       },
     }),
     prisma.customer.create({
       data: {
-        clinicId: clinic.id, fileNumber: 2,
+        clinicId: clinic.id, fileNumber: 2, createdAt: enDias(-950),
         firstName: "Pepita", lastName: "Pérez", lastName2: "Molina",
         sex: "FEMALE", birthDate: new Date("1992-07-22"), profession: "Comercial",
-        phone: "+34600222333", phone2: "+34611222333", phone2Label: "Trabajo",
+        // Los dos teléfonos etiquetados: es el caso para el que se hizo la
+        // etiqueta, saber a quién llamas antes de marcar.
+        phone: "+34600222333", phoneLabel: "Personal",
+        phone2: "+34611222333", phone2Label: "Trabajo",
         referralSource: "SOCIAL_MEDIA", allergies: "Alergia al níquel",
         whatsappOptIn: true,
       },
     }),
     prisma.customer.create({
       data: {
-        clinicId: clinic.id, fileNumber: 3,
+        clinicId: clinic.id, fileNumber: 3, createdAt: enDias(-610),
         firstName: "Fernando", lastName: "López", lastName2: "Navarro",
         sex: "MALE", birthDate: new Date("1978-11-05"), profession: "Fontanero",
-        phone: "+34600333444", referralSource: "WALK_BY", whatsappOptIn: true,
+        phone: "+34600333444", phoneLabel: "Trabajo",
+        referralSource: "WALK_BY", whatsappOptIn: true,
+        notes: "Solo puede venir por las tardes.",
       },
     }),
     prisma.customer.create({
       data: {
-        clinicId: clinic.id, fileNumber: 4,
+        clinicId: clinic.id, fileNumber: 4, createdAt: enDias(-280),
         firstName: "Ana", lastName: "Martínez", lastName2: "Ruiz",
         sex: "FEMALE", birthDate: new Date("1990-01-30"), profession: "Enfermera",
         phone: "+34600444555", phone2: "+34600999888", phone2Label: "Madre",
         email: "ana@example.com", address: "Avda. de España 45, Albacete",
         referralSource: "INTERNET", allergies: "Alergia al látex",
         whatsappOptIn: false,
+        notes: "No quiere WhatsApp: avisarla por teléfono.",
       },
     }),
     prisma.customer.create({
       data: {
-        clinicId: clinic.id, fileNumber: 5,
+        clinicId: clinic.id, fileNumber: 5, createdAt: enDias(-95),
         firstName: "Carlos", lastName: "Ruiz", lastName2: "Fernández",
         sex: "MALE", birthDate: new Date("1983-09-18"), profession: "Informático",
         phone: "+34600555666", referralSource: "ADVERTISING", whatsappOptIn: true,
@@ -340,6 +400,49 @@ async function main() {
     appt({ customerId: carlos.id, serviceId: masaje.id, workerId: marta.id, cabinId: cabins[0].id, startHour: 13, startMinute: 0, duration: 90, status: "PENDING", reminderStatus: "PENDING" }),
     appt({ customerId: ana.id, serviceId: manicura.id, workerId: lola.id, cabinId: cabins[1].id, startHour: 16, startMinute: 0, duration: 30, status: "DONE", reminderStatus: "NOT_SCHEDULED" }),
   ])
+
+  // Recordatorios de cliente. Hay dos clases y se comportan distinto, así que
+  // hacen falta las dos sembradas: sin fecha es un aviso permanente de la
+  // ficha (sale siempre que se atiende a esa persona y no vence solo), y con
+  // fecha es una tarea que vence y que el dashboard saca cuando entra en su
+  // ventana de aviso. Hasta ahora el seed no creaba ninguno y no se veía
+  // ninguna de las dos.
+  await prisma.customerReminder.createMany({
+    data: [
+      // Permanente: el ejemplo de manual, la alergia que hay que tener
+      // delante cada vez, no una tarea que se marca hecha y desaparece.
+      {
+        clinicId: clinic.id, customerId: ana.id, createdByUserId: admin.id,
+        title: "Alergia al látex: usar guantes de nitrilo", dueDate: null,
+      },
+      {
+        clinicId: clinic.id, customerId: pepita.id, createdByUserId: admin.id,
+        title: "Alergia al níquel: nada de bisutería durante el tratamiento", dueDate: null,
+      },
+      // Con fecha y dentro de la ventana de aviso: estos dos son los que salen
+      // en el dashboard, uno por vencer y otro ya pasado de fecha.
+      {
+        clinicId: clinic.id, customerId: maria.id, createdByUserId: admin.id,
+        title: "Llamar para revisar cómo va el tratamiento facial", dueDate: enDias(3),
+      },
+      {
+        clinicId: clinic.id, customerId: fernando.id, createdByUserId: admin.id,
+        title: "Pendiente de decidir si sigue con la depilación eléctrica", dueDate: enDias(-2),
+      },
+      // Con fecha pero todavía lejos: NO debe salir en el dashboard. Está para
+      // que se note que el aviso empieza cuando toca y no en cuanto se crea.
+      {
+        clinicId: clinic.id, customerId: carlos.id, createdByUserId: admin.id,
+        title: "Ofrecerle el bono de masajes cuando se acabe el actual", dueDate: enDias(45),
+      },
+      // Ya hecho: la ficha del cliente lo separa de los pendientes.
+      {
+        clinicId: clinic.id, customerId: pepita.id, createdByUserId: admin.id,
+        title: "Confirmar que le llegó la tarjeta regalo", dueDate: enDias(-10),
+        completedAt: enDias(-9), completedByUserId: lola.id,
+      },
+    ],
+  })
 
   // Proveedores
   const [dermoder, lamdors] = await Promise.all([
@@ -427,10 +530,11 @@ async function main() {
 
   console.log("✅ Seed completado:")
   console.log(`   Clínica: ${clinic.name}`)
-  console.log(`   ${cabins.length} cabinas · 3 trabajadores · 5 servicios · 5 clientes · 5 citas`)
-  console.log(`   2 proveedores (Dermoder, Lamdors) · 5 productos`)
+  console.log(`   ${cabins.length} cabinas · 3 trabajadoras + 1 desactivada · 5 servicios · 5 clientes · 5 citas`)
+  console.log(`   2 proveedores (Dermoder, Lamdors) · 5 productos · 6 recordatorios`)
   console.log(`   Horarios: 3 excepciones · 5 días de ausencia (semana del ${day(0)})`)
-  console.log(`   Login demo: ${admin.email} / admin`)
+  console.log(`   Gestión: ${admin.email} / admin`)
+  console.log(`   Mostrador (PIN): Lucía ${PINES.lucia} · Lola ${PINES.lola} · Marta ${PINES.marta} (de un solo uso, se lo cambia al entrar)`)
 }
 
 main()

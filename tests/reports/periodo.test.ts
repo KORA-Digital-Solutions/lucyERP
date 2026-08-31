@@ -154,6 +154,7 @@ describe("variacion", () => {
 function linea(p: Partial<LineaDeInforme> & { type: string; totalCents: number }): LineaDeInforme {
   return {
     saleId: "v1", quantity: 1, workerId: null, cobradoPorId: null,
+    customerId: null, fecha: new Date(2026, 7, 15),
     // Sin descuento salvo que la prueba diga otra cosa.
     unitPriceCents: p.totalCents,
     serviceId: null, serviceName: null, familyName: null,

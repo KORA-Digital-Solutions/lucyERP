@@ -55,21 +55,15 @@ function resumenAcceso(r: WorkerRow): { tono: "ok" | "warn" | "none"; texto: str
 export function WorkersClient({
   rows,
   domain,
-  fichaInicial = null,
-  tabInicial = "datos",
 }: {
   rows: WorkerRow[]
   domain: string
-  /** Ficha que viene abierta desde fuera (Informes enlaza aquí). */
-  fichaInicial?: string | null
-  tabInicial?: WorkerTab
 }) {
-  const router = useRouter()
   const [nuevoOpen, setNuevoOpen] = useState(false)
   // Se guarda el id y no la fila para que, tras un refresh, se siga viendo la
   // ficha de quien toca con los datos ya actualizados.
-  const [fichaId, setFichaId] = useState<string | null>(fichaInicial)
-  const [fichaTab, setFichaTab] = useState<WorkerTab>(tabInicial)
+  const [fichaId, setFichaId] = useState<string | null>(null)
+  const [fichaTab, setFichaTab] = useState<WorkerTab>("datos")
   const [verInactivas, setVerInactivas] = useState(false)
 
   const ficha = fichaId ? rows.find((r) => r.id === fichaId) ?? null : null
@@ -86,13 +80,7 @@ export function WorkersClient({
         domain={domain}
         tab={fichaTab}
         onTabChange={setFichaTab}
-        onBack={() => {
-          setFichaId(null)
-          // Si se llegó con ?ficha= en la URL hay que quitarlo al cerrar; si
-          // no, el siguiente refresco volvería a abrir la ficha que se acaba
-          // de cerrar.
-          if (fichaInicial) router.replace("/workers")
-        }}
+        onBack={() => setFichaId(null)}
       />
     )
   }

@@ -21,6 +21,8 @@
  * ────────────────────────────────────────────────────────────────────────────
  */
 
+import { HOME_CARE_FAMILY } from "@/lib/enums"
+
 /* ─── Períodos ───────────────────────────────────────────────────────────── */
 
 export type PeriodoId = "mes" | "anterior" | "trimestre" | "anio" | "personalizado"
@@ -32,6 +34,13 @@ export const PERIODOS: { id: PeriodoId; label: string }[] = [
   { id: "anio", label: "Año" },
   { id: "personalizado", label: "Personalizado" },
 ]
+
+/**
+ * Hasta dónde atrás puede pedirse un período personalizado. Diez años son más
+ * de lo que ningún centro va a mirar de una vez, y dejan el tramo de
+ * comparación —otros diez años antes— dentro de fechas que la base entiende.
+ */
+export const MAX_ANIOS_PERSONALIZADO = 10
 
 export type Periodo = {
   id: PeriodoId
@@ -135,8 +144,20 @@ export function resolverPeriodo(
   }
 
   if (id === "personalizado") {
-    const desde = inicioDelDia(fechaDeParametro(opts.desde) ?? inicioDelMes(anio, mes))
-    const hastaBruto = inicioDelDia(fechaDeParametro(opts.hasta) ?? hoy)
+    // Las dos fechas se meten a la fuerza en una ventana con suelo y techo.
+    //
+    // No es paranoia: las escribe cualquiera en la URL, y un rango como
+    // 0001-01-01 → 9999-12-31 son casi tres millones de días. El tramo de
+    // comparación es igual de largo y va justo antes, así que restarlos
+    // aterriza en el año −5960, que Prisma no sabe convertir a fecha y tumba
+    // la página con un 500. Además, un informe de ocho mil años tampoco es una
+    // pregunta que nadie se haga: el centro existe desde hace lo que existe.
+    const suelo = inicioDelDia(new Date(anio - MAX_ANIOS_PERSONALIZADO, mes, hoy.getDate()))
+    const techo = inicioDelDia(new Date(anio, 11, 31))
+    const acotar = (d: Date) => (d < suelo ? suelo : d > techo ? techo : d)
+
+    const desde = acotar(inicioDelDia(fechaDeParametro(opts.desde) ?? inicioDelMes(anio, mes)))
+    const hastaBruto = acotar(inicioDelDia(fechaDeParametro(opts.hasta) ?? hoy))
     // Si vienen del revés se enderezan en vez de devolver un rango vacío: se
     // teclean a mano y equivocarse de orden es lo más fácil del mundo.
     const [ini, fin] = desde <= hastaBruto ? [desde, hastaBruto] : [hastaBruto, desde]
@@ -190,8 +211,13 @@ export type LineaDeInforme = {
   saleId: string
   type: string // SERVICE | PRODUCT | GIFT_CARD
   quantity: number
+  /** Precio de tarifa, antes del descuento. */
+  unitPriceCents: number
   totalCents: number
+  /** Quien atiende o vende. */
   workerId: string | null
+  /** Quien cobró el ticket del que cuelga la línea. */
+  cobradoPorId: string | null
   serviceId: string | null
   serviceName: string | null
   familyName: string | null
@@ -281,6 +307,11 @@ export type FilaDeConcepto = {
 /**
  * Lo más vendido, agrupado por servicio o por producto.
  *
+ * Ordena por unidades, que es lo que quiere decir "más vendido": cuántas veces
+ * se ha hecho o se ha despachado. El importe va en la tabla como dato, pero no
+ * ordena — un tratamiento caro que se hace dos veces no es "lo más vendido",
+ * es lo más caro, y eso se ve en los ingresos por familia.
+ *
  * Devuelve TODO, ordenado; recortar a los diez primeros es cosa de quien lo
  * pinta. Así la misma lista sirve para el top y para el total, y el porcentaje
  * se calcula sobre lo que de verdad se ha vendido y no sobre los diez que se
@@ -299,7 +330,118 @@ export function ranking(lineas: LineaDeInforme[], tipo: "SERVICE" | "PRODUCT"): 
     acc.totalCents += l.totalCents
     porConcepto.set(id, acc)
   }
-  return [...porConcepto.values()].sort((a, b) => b.totalCents - a.totalCents)
+  // A igualdad de unidades manda el importe, para que el orden no dependa de
+  // en qué orden vinieran las filas de la base.
+  return [...porConcepto.values()]
+    .sort((a, b) => b.unidades - a.unidades || b.totalCents - a.totalCents)
+}
+
+/* ─── Ingresos por familia ───────────────────────────────────────────────── */
+
+export type FilaDeFamilia = { nombre: string; unidades: number; totalCents: number }
+
+/**
+ * Qué familia de tratamientos sostiene el centro.
+ *
+ * Los productos entran como una familia más, "Tto. domiciliario", que es como
+ * se han clasificado siempre en los listados de la casa (ver HOME_CARE_FAMILY
+ * en lib/enums.ts, y cómo lo hacen ya el informe de empleada y el del cliente).
+ * Dejarlos fuera daría un total distinto al de la tarjeta de facturación.
+ */
+export function ingresosPorFamilia(lineas: LineaDeInforme[]): FilaDeFamilia[] {
+  const porFamilia = new Map<string, FilaDeFamilia>()
+  for (const l of lineas) {
+    if (!FACTURA.includes(l.type)) continue
+    const nombre = l.type === "PRODUCT" ? HOME_CARE_FAMILY : l.familyName ?? "Sin familia"
+    const acc = porFamilia.get(nombre) ?? { nombre, unidades: 0, totalCents: 0 }
+    acc.unidades += l.quantity
+    acc.totalCents += l.totalCents
+    porFamilia.set(nombre, acc)
+  }
+  return [...porFamilia.values()].sort((a, b) => b.totalCents - a.totalCents)
+}
+
+/* ─── Formas de cobro ────────────────────────────────────────────────────── */
+
+export type VentaDeInforme = { paymentMethod: string; totalCents: number }
+export type FilaDeCobro = { metodo: string; etiqueta: string; ventas: number; totalCents: number }
+
+export const ETIQUETA_DE_COBRO: Record<string, string> = {
+  CASH: "Efectivo",
+  CARD: "Tarjeta",
+  GIFT_CARD: "Saldo de tarjeta regalo",
+  DEBT: "Queda a deber",
+}
+
+/**
+ * Por dónde entra el dinero.
+ *
+ * OJO: esto NO suma lo mismo que la facturación, y es correcto que no lo haga.
+ * Aquí se cuenta el ticket entero, tarjetas regalo vendidas incluidas, porque
+ * la pregunta es cuánto ha pasado por cada vía de cobro. La facturación mide
+ * otra cosa —lo que se ha dado— y por eso deja las tarjetas fuera.
+ *
+ * "Queda a deber" tampoco es dinero que haya entrado: es lo que falta por
+ * cobrar, y va en la lista porque la alternativa es que desaparezca.
+ */
+export function formasDeCobro(ventas: VentaDeInforme[]): FilaDeCobro[] {
+  const porMetodo = new Map<string, FilaDeCobro>()
+  for (const v of ventas) {
+    const acc = porMetodo.get(v.paymentMethod) ?? {
+      metodo: v.paymentMethod,
+      etiqueta: ETIQUETA_DE_COBRO[v.paymentMethod] ?? v.paymentMethod,
+      ventas: 0, totalCents: 0,
+    }
+    acc.ventas++
+    acc.totalCents += v.totalCents
+    porMetodo.set(v.paymentMethod, acc)
+  }
+  return [...porMetodo.values()].sort((a, b) => b.totalCents - a.totalCents)
+}
+
+/* ─── Descuentos ─────────────────────────────────────────────────────────── */
+
+export type ResumenDeDescuentos = {
+  /** Lo que habrían sumado las líneas a precio de tarifa. */
+  brutoCents: number
+  descuentoCents: number
+  /** Qué parte del bruto se ha regalado, en porcentaje con un decimal. */
+  porcentaje: number
+  filas: { userId: string | null; descuentoCents: number; lineas: number }[]
+}
+
+/**
+ * Cuánto se deja de ingresar en descuentos, y en manos de quién.
+ *
+ * Se reparte por quien COBRA (`Sale.userId`) y no por quien atiende, al revés
+ * que la facturación: el descuento se decide en el mostrador, en el momento de
+ * cobrar, y quien lo hace es quien está en la caja.
+ */
+export function descuentos(lineas: LineaDeInforme[]): ResumenDeDescuentos {
+  let brutoCents = 0
+  let descuentoCents = 0
+  const porUsuaria = new Map<string, { userId: string | null; descuentoCents: number; lineas: number }>()
+
+  for (const l of lineas) {
+    if (!FACTURA.includes(l.type)) continue
+    const bruto = l.unitPriceCents * l.quantity
+    const rebaja = bruto - l.totalCents
+    brutoCents += bruto
+    if (rebaja <= 0) continue
+    descuentoCents += rebaja
+    const clave = l.cobradoPorId ?? ""
+    const acc = porUsuaria.get(clave) ?? { userId: l.cobradoPorId, descuentoCents: 0, lineas: 0 }
+    acc.descuentoCents += rebaja
+    acc.lineas++
+    porUsuaria.set(clave, acc)
+  }
+
+  return {
+    brutoCents,
+    descuentoCents,
+    porcentaje: brutoCents > 0 ? Math.round((descuentoCents / brutoCents) * 1000) / 10 : 0,
+    filas: [...porUsuaria.values()].sort((a, b) => b.descuentoCents - a.descuentoCents),
+  }
 }
 
 export type MesDeEvolucion = { clave: string; etiqueta: string; cents: number }

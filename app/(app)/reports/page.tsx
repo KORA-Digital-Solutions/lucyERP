@@ -1,7 +1,8 @@
 import { prisma } from "@/lib/db"
 import { getActiveClinic } from "@/lib/clinic"
 import {
-  FACTURA, esPeriodoId, evolucionMensual, facturacionPorEmpleada, finDeEvolucion, inicioDeEvolucion,
+  FACTURA, descuentos, esPeriodoId, evolucionMensual, facturacionPorEmpleada, finDeEvolucion,
+  formasDeCobro, ingresosPorFamilia, inicioDeEvolucion,
   ranking, resolverPeriodo, totales, variacion,
   type LineaDeInforme,
 } from "@/lib/reports"
@@ -31,17 +32,25 @@ export default async function ReportsPage({
   const ultimoMes = finDeEvolucion(p.hasta)
   const inicioEvolucion = inicioDeEvolucion(ultimoMes, MESES_DE_EVOLUCION)
 
-  const [filas, tramoAnterior, filasEvolucion, usuarias] = await Promise.all([
+  const [filas, ventas, tramoAnterior, filasEvolucion, usuarias] = await Promise.all([
     // Sin filtrar por tipo: las tarjetas regalo no facturan, pero la pantalla
     // dice cuánto saldo se ha vendido y para eso hacen falta sus líneas.
     prisma.saleLine.findMany({
       where: delCentroEntre(p.desde, p.hasta),
       select: {
         saleId: true, type: true, quantity: true, totalCents: true, workerId: true,
-        serviceId: true, productId: true,
+        unitPriceCents: true, serviceId: true, productId: true,
         service: { select: { name: true, family: { select: { name: true } } } },
         product: { select: { name: true } },
+        // Quién cobró el ticket: es quien aplica el descuento.
+        sale: { select: { userId: true } },
       },
+    }),
+    // La forma de cobro vive en la venta, no en la línea: se paga el ticket
+    // entero de una manera, no cada concepto por su lado.
+    prisma.sale.findMany({
+      where: { clinicId: clinic.id, createdAt: { gte: p.desde, lte: p.hasta } },
+      select: { paymentMethod: true, totalCents: true },
     }),
     prisma.saleLine.aggregate({
       _sum: { totalCents: true },
@@ -63,8 +72,10 @@ export default async function ReportsPage({
     saleId: l.saleId,
     type: l.type,
     quantity: l.quantity,
+    unitPriceCents: l.unitPriceCents,
     totalCents: l.totalCents,
     workerId: l.workerId,
+    cobradoPorId: l.sale.userId,
     serviceId: l.serviceId,
     serviceName: l.service?.name ?? null,
     familyName: l.service?.family.name ?? null,
@@ -74,7 +85,12 @@ export default async function ReportsPage({
 
   const resumen = totales(lineas)
   const empleadas = facturacionPorEmpleada(lineas)
+  const rebajas = descuentos(lineas)
   const porNombre = new Map(usuarias.map((u) => [u.id, u]))
+  const nombreDe = (id: string | null) => {
+    const u = id ? porNombre.get(id) : null
+    return u ? [u.name, u.lastName].filter(Boolean).join(" ") : "Sin asignar"
+  }
 
   return (
     <ReportsClient
@@ -91,13 +107,19 @@ export default async function ReportsPage({
         const u = e.workerId ? porNombre.get(e.workerId) : null
         return {
           ...e,
-          nombre: u ? [u.name, u.lastName].filter(Boolean).join(" ") : "Sin asignar",
+          nombre: nombreDe(e.workerId),
           color: u?.color ?? "#9AA0A6",
           activa: u?.active ?? false,
         }
       })}
       servicios={ranking(lineas, "SERVICE")}
       productos={ranking(lineas, "PRODUCT")}
+      familias={ingresosPorFamilia(lineas)}
+      cobros={formasDeCobro(ventas)}
+      descuentos={{
+        ...rebajas,
+        filas: rebajas.filas.map((f) => ({ ...f, nombre: nombreDe(f.userId) })),
+      }}
       evolucion={evolucionMensual(
         filasEvolucion.map((l) => ({ createdAt: l.sale.createdAt, type: l.type, totalCents: l.totalCents })),
         ultimoMes,

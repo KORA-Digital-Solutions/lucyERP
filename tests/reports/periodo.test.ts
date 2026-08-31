@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import {
-  evolucionMensual, facturacionPorEmpleada, fechaDeParametro, finDeEvolucion, ranking,
+  descuentos, evolucionMensual, facturacionPorEmpleada, fechaDeParametro, finDeEvolucion,
+  formasDeCobro, ingresosPorFamilia, ranking,
   resolverPeriodo, totales, variacion, type LineaDeInforme,
 } from "@/lib/reports"
 
@@ -77,6 +78,38 @@ describe("resolverPeriodo", () => {
       expect(iso(p.desde)).toBe("2026-08-10")
       expect(iso(p.hasta)).toBe("2026-08-19")
     })
+
+    // Un rango de ocho mil años dejaba el tramo de comparación en el año −5960,
+    // que Prisma no sabe convertir a fecha: la pantalla se caía con un 500.
+    it("acota un rango imposible en vez de irse a un año negativo", () => {
+      // "0001-01-01" ni siquiera llega hasta aquí: lo descarta antes
+      // fechaDeParametro, así que el inicio cae en el arranque del mes.
+      const p = resolverPeriodo("personalizado", { hoy, desde: "0001-01-01", hasta: "9999-12-31" })
+      expect(iso(p.desde)).toBe("2026-08-01")
+      expect(iso(p.hasta)).toBe("2026-12-31")
+      expect(p.anterior.desde.getFullYear()).toBeGreaterThan(2000)
+    })
+
+    it("no deja pedir más de diez años atrás", () => {
+      const p = resolverPeriodo("personalizado", { hoy, desde: "2000-01-01", hasta: "2026-08-15" })
+      expect(iso(p.desde)).toBe("2016-08-15")
+    })
+
+    it("ninguna fecha del período ni de su comparación se sale del calendario", () => {
+      for (const [desde, hasta] of [
+        ["0001-01-01", "9999-12-31"],
+        ["0001-01-01", "0001-01-02"],
+        ["9999-01-01", "9999-12-31"],
+        ["9999-12-31", "0001-01-01"],
+      ]) {
+        const p = resolverPeriodo("personalizado", { hoy, desde, hasta })
+        for (const d of [p.desde, p.hasta, p.anterior.desde, p.anterior.hasta]) {
+          expect(d.getFullYear()).toBeGreaterThan(1900)
+          expect(d.getFullYear()).toBeLessThan(2100)
+        }
+        expect(p.desde <= p.hasta).toBe(true)
+      }
+    })
   })
 })
 
@@ -93,6 +126,15 @@ describe("fechaDeParametro", () => {
     expect(fechaDeParametro("ayer")).toBeNull()
     expect(fechaDeParametro("")).toBeNull()
     expect(fechaDeParametro(undefined)).toBeNull()
+  })
+
+  // `new Date(1, 0, 1)` es 1901 y no el año 1: JavaScript entiende los años de
+  // dos cifras como 19xx. La comprobación de que el año no ha cambiado los caza
+  // de rebote, y viene bien que así sea, pero conviene que esté escrito.
+  it("rechaza de paso los años de menos de tres cifras", () => {
+    expect(fechaDeParametro("0001-01-01")).toBeNull()
+    expect(fechaDeParametro("0099-06-15")).toBeNull()
+    expect(fechaDeParametro("0100-06-15")?.getFullYear()).toBe(100)
   })
 })
 
@@ -111,7 +153,9 @@ describe("variacion", () => {
 
 function linea(p: Partial<LineaDeInforme> & { type: string; totalCents: number }): LineaDeInforme {
   return {
-    saleId: "v1", quantity: 1, workerId: null,
+    saleId: "v1", quantity: 1, workerId: null, cobradoPorId: null,
+    // Sin descuento salvo que la prueba diga otra cosa.
+    unitPriceCents: p.totalCents,
     serviceId: null, serviceName: null, familyName: null,
     productId: null, productName: null,
     ...p,
@@ -188,6 +232,87 @@ describe("ranking", () => {
     expect(filas).toHaveLength(2)
     expect(filas[0]).toMatchObject({ id: "s1", nombre: "Facial", unidades: 2, totalCents: 13000 })
     expect(filas[1].id).toBe("s2")
+  })
+
+  it("ordena por unidades, no por dinero: lo más vendido es lo que más veces se hace", () => {
+    const filas = ranking([
+      // Un masaje carísimo, una sola vez.
+      linea({ type: "SERVICE", totalCents: 20000, quantity: 1, serviceId: "masaje", serviceName: "Masaje" }),
+      // Tres manicuras baratas.
+      linea({ type: "SERVICE", totalCents: 2500, quantity: 3, serviceId: "mani", serviceName: "Manicura" }),
+    ], "SERVICE")
+
+    expect(filas.map((f) => f.id)).toEqual(["mani", "masaje"])
+  })
+})
+
+describe("ingresosPorFamilia", () => {
+  it("mete los productos como una familia más y ordena por importe", () => {
+    const filas = ingresosPorFamilia([
+      linea({ type: "SERVICE", totalCents: 6500, familyName: "Facial" }),
+      linea({ type: "SERVICE", totalCents: 8000, familyName: "Depilación" }),
+      linea({ type: "PRODUCT", totalCents: 9900, quantity: 2 }),
+      linea({ type: "GIFT_CARD", totalCents: 5000 }),
+    ])
+
+    expect(filas.map((f) => f.nombre)).toEqual(["Tto. domiciliario", "Depilación", "Facial"])
+    expect(filas[0].unidades).toBe(2)
+    // La tarjeta regalo no aparece: no factura.
+    expect(filas.some((f) => f.nombre === "Tarjeta regalo")).toBe(false)
+  })
+
+  it("suma lo mismo que la tarjeta de facturación", () => {
+    const lineas = [
+      linea({ type: "SERVICE", totalCents: 6500, familyName: "Facial" }),
+      linea({ type: "PRODUCT", totalCents: 2000 }),
+      linea({ type: "GIFT_CARD", totalCents: 5000 }),
+    ]
+    const suma = ingresosPorFamilia(lineas).reduce((a, f) => a + f.totalCents, 0)
+    expect(suma).toBe(totales(lineas).totalCents)
+  })
+})
+
+describe("formasDeCobro", () => {
+  it("agrupa por vía y ordena de más a menos", () => {
+    const filas = formasDeCobro([
+      { paymentMethod: "CASH", totalCents: 5000 },
+      { paymentMethod: "CARD", totalCents: 9000 },
+      { paymentMethod: "CASH", totalCents: 3000 },
+      { paymentMethod: "DEBT", totalCents: 1000 },
+    ])
+    expect(filas.map((f) => [f.metodo, f.ventas, f.totalCents])).toEqual([
+      ["CARD", 1, 9000],
+      ["CASH", 2, 8000],
+      ["DEBT", 1, 1000],
+    ])
+    expect(filas[0].etiqueta).toBe("Tarjeta")
+  })
+
+  it("no inventa filas de vías que no se han usado", () => {
+    expect(formasDeCobro([{ paymentMethod: "CASH", totalCents: 100 }])).toHaveLength(1)
+  })
+})
+
+describe("descuentos", () => {
+  it("calcula lo rebajado sobre el precio de tarifa y lo reparte por quien cobra", () => {
+    const r = descuentos([
+      // 100 € de tarifa cobrados a 80 €.
+      linea({ type: "SERVICE", unitPriceCents: 10000, totalCents: 8000, cobradoPorId: "lola" }),
+      // Dos unidades de 50 € cobradas a 90 € en total.
+      linea({ type: "PRODUCT", unitPriceCents: 5000, quantity: 2, totalCents: 9000, cobradoPorId: "lola" }),
+      // Sin descuento: no debe aparecer en el reparto.
+      linea({ type: "SERVICE", unitPriceCents: 4000, totalCents: 4000, cobradoPorId: "marta" }),
+    ])
+
+    expect(r.brutoCents).toBe(24000)
+    expect(r.descuentoCents).toBe(3000)
+    expect(r.porcentaje).toBe(12.5)
+    expect(r.filas).toHaveLength(1)
+    expect(r.filas[0]).toMatchObject({ userId: "lola", descuentoCents: 3000, lineas: 2 })
+  })
+
+  it("sin ventas no divide entre cero", () => {
+    expect(descuentos([])).toMatchObject({ brutoCents: 0, descuentoCents: 0, porcentaje: 0 })
   })
 })
 

@@ -1,28 +1,10 @@
 import { prisma } from "@/lib/db"
 import { getActiveClinic } from "@/lib/clinic"
 import { WorkersClient, type WorkerRow } from "@/components/workers-client"
-import type { WorkerTab } from "@/components/worker-profile-view"
 
 export const dynamic = "force-dynamic"
 
-// La pestaña se valida aquí y no en el componente de la ficha: aquello es
-// "use client", y todo lo que exporta un módulo de cliente se convierte en una
-// referencia que el servidor no puede ejecutar. El tipo sí se puede importar,
-// que desaparece al compilar.
-const TABS_DE_FICHA: WorkerTab[] = ["datos", "actividad", "acceso"]
-function esTabDeFicha(v: string | undefined): v is WorkerTab {
-  return TABS_DE_FICHA.includes(v as WorkerTab)
-}
-
-// Se puede llegar con una ficha abierta desde fuera: Informes enlaza aquí con
-// ?ficha=<id>&tab=actividad para saltar de la fila de facturación al detalle
-// de lo que ha hecho esa persona.
-export default async function WorkersPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ ficha?: string; tab?: string }>
-}) {
-  const { ficha, tab } = await searchParams
+export default async function WorkersPage() {
   const clinic = await getActiveClinic()
 
   // Por apellidos, que es como se lista a la gente en la ficha del cliente y
@@ -52,14 +34,5 @@ export default async function WorkersPage({
   }))
 
   const domain = clinic.email?.split("@")[1] ?? "centroesteticalucia.com"
-  return (
-    <WorkersClient
-      rows={rows}
-      domain={domain}
-      // Un id que ya no exista no rompe nada: la vista no encuentra la fila y
-      // se queda en el listado.
-      fichaInicial={ficha ?? null}
-      tabInicial={esTabDeFicha(tab) ? tab : "datos"}
-    />
-  )
+  return <WorkersClient rows={rows} domain={domain} />
 }

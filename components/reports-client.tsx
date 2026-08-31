@@ -4,9 +4,10 @@
  * Informes del centro.
  *
  * La mitad de arriba ya son datos de verdad: resumen del período, facturación
- * por empleada, lo más vendido y la evolución mensual. Abajo sigue el catálogo
- * de lo que falta, que es lo que se acordó con la propietaria antes de
- * ponerse, y que sirve de mapa de por dónde seguir.
+ * por empleada, lo más vendido, ingresos por familia, formas de cobro,
+ * descuentos y la evolución mensual. Abajo sigue el catálogo de lo que falta,
+ * que es lo que se acordó con la propietaria antes de ponerse, y que sirve de
+ * mapa de por dónde seguir.
  *
  * Qué cuenta como facturación y por qué las tarjetas regalo van aparte está
  * explicado en lib/reports.ts, que es donde se calcula. Aquí solo se pinta.
@@ -36,8 +37,19 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { fmtEur } from "@/components/client-profile-view"
-import { PERIODOS, type FilaDeConcepto, type MesDeEvolucion, type PeriodoId, type Totales } from "@/lib/reports"
+import {
+  PERIODOS,
+  type FilaDeCobro, type FilaDeConcepto, type FilaDeFamilia, type MesDeEvolucion,
+  type PeriodoId, type ResumenDeDescuentos, type Totales,
+} from "@/lib/reports"
 import { cn } from "@/lib/utils"
+
+/**
+ * En esta pantalla no se pincha en ninguna fila, así que ninguna se ilumina al
+ * pasar por encima: el resalte del ratón promete que algo va a pasar, y aquí no
+ * pasa nada. Es lo que trae `TableRow` de serie y hay que quitarlo a mano.
+ */
+const SIN_HOVER = "hover:bg-transparent"
 
 /* ─── Lo que recibe de la página ─────────────────────────────────────────── */
 
@@ -66,6 +78,11 @@ export interface ReportsClientProps {
   empleadas: FilaDeEmpleadaConNombre[]
   servicios: FilaDeConcepto[]
   productos: FilaDeConcepto[]
+  familias: FilaDeFamilia[]
+  cobros: FilaDeCobro[]
+  descuentos: Omit<ResumenDeDescuentos, "filas"> & {
+    filas: (ResumenDeDescuentos["filas"][number] & { nombre: string })[]
+  }
   evolucion: MesDeEvolucion[]
 }
 
@@ -118,10 +135,9 @@ const GROUPS: ReportGroup[] = [
         availability: "DONE",
       },
       {
-        title: "Ingresos por familia de servicio",
+        title: "Ingresos por familia",
         question: "¿Qué familias sostienen el centro y cuáles no compensan?",
-        availability: "READY",
-        note: "El ranking por servicio ya está arriba; falta el resumen agrupado por familia.",
+        availability: "DONE",
       },
       {
         title: "Margen de la venta de producto",
@@ -132,12 +148,12 @@ const GROUPS: ReportGroup[] = [
       {
         title: "Formas de cobro",
         question: "¿Cuánto entra en efectivo, tarjeta, saldo de tarjeta regalo o queda a deber?",
-        availability: "READY",
+        availability: "DONE",
       },
       {
         title: "Descuentos aplicados",
         question: "¿Cuánto dejamos de ingresar en descuentos y quién los hace?",
-        availability: "READY",
+        availability: "DONE",
       },
     ],
   },
@@ -267,7 +283,8 @@ function porcentaje(parte: number, total: number) {
 /* ─── Componente ─────────────────────────────────────────────────────────── */
 
 export function ReportsClient({
-  periodo, resumen, variacion, empleadas, servicios, productos, evolucion,
+  periodo, resumen, variacion, empleadas, servicios, productos,
+  familias, cobros, descuentos, evolucion,
 }: ReportsClientProps) {
   const [group, setGroup] = useState<string>("ingresos")
   const activeGroup = GROUPS.find((g) => g.id === group) ?? GROUPS[0]
@@ -333,6 +350,13 @@ export function ReportsClient({
               />
 
               <LoMasVendido servicios={servicios} productos={productos} />
+
+              <IngresosPorFamilia filas={familias} totalCents={resumen.totalCents} />
+
+              <div className="grid gap-4 lg:grid-cols-2">
+                <FormasDeCobro filas={cobros} />
+                <Descuentos resumen={descuentos} />
+              </div>
 
               <Evolucion meses={evolucion} />
             </>
@@ -467,12 +491,11 @@ function FacturacionPorEmpleada({
   saldoVendidoCents: number
   periodo: string
 }) {
-  const router = useRouter()
   const maximo = Math.max(1, ...filas.map((f) => f.totalCents))
 
   return (
     <Card>
-      <CardHeader className="flex flex-row items-center justify-between pb-2">
+      <CardHeader className="flex flex-row items-start justify-between gap-3 pb-2">
         <div className="flex items-center gap-2">
           <div className="rounded-lg bg-accent p-2">
             <Star className="h-4 w-4 text-accent-foreground" />
@@ -480,37 +503,34 @@ function FacturacionPorEmpleada({
           <div>
             <CardTitle className="text-base font-medium">Facturación por empleada</CardTitle>
             <p className="text-xs text-muted-foreground">
-              Servicios y venta de producto · {periodo} · pulsa una fila para ver su actividad
+              Servicios y venta de producto · {periodo}
             </p>
           </div>
         </div>
+        {/* El detalle de qué ha hecho cada una vive en su ficha, y es una
+            pantalla entera: se va allí a propósito y no de un clic al vuelo. */}
+        <Button asChild variant="outline" size="sm" className="shrink-0 gap-1.5">
+          <Link href="/workers">
+            Para ver el detalle, ir a Usuarios <ChevronRight className="h-4 w-4" />
+          </Link>
+        </Button>
       </CardHeader>
       <CardContent className="space-y-4">
         <Table>
           <TableHeader>
-            <TableRow>
+            <TableRow className={SIN_HOVER}>
               <TableHead>Empleada</TableHead>
               <TableHead className="text-right">Servicios</TableHead>
               <TableHead className="text-right">Producto</TableHead>
               <TableHead className="text-right">Total</TableHead>
               <TableHead className="text-right">Tickets</TableHead>
               <TableHead className="w-56">Peso sobre el total</TableHead>
-              <TableHead className="w-8" />
             </TableRow>
           </TableHeader>
           <TableBody>
             {filas.map((w) => {
-              // La fila de las líneas viejas sin trabajadora no lleva a
-              // ninguna ficha: no es una persona, es un cajón de sastre.
-              const abrible = w.workerId !== null
               return (
-                <TableRow
-                  key={w.workerId ?? "sin-asignar"}
-                  className={cn(abrible && "cursor-pointer")}
-                  onClick={abrible
-                    ? () => router.push(`/workers?ficha=${w.workerId}&tab=actividad`)
-                    : undefined}
-                >
+                <TableRow key={w.workerId ?? "sin-asignar"} className={SIN_HOVER}>
                   <TableCell className="font-medium">
                     <span className="flex items-center gap-2">
                       <span
@@ -544,9 +564,6 @@ function FacturacionPorEmpleada({
                       {porcentaje(w.totalCents, totalCents)} % de la facturación
                     </span>
                   </TableCell>
-                  <TableCell className="text-muted-foreground">
-                    {abrible && <ChevronRight className="h-4 w-4" />}
-                  </TableCell>
                 </TableRow>
               )
             })}
@@ -578,101 +595,211 @@ function FacturacionPorEmpleada({
 const TOP = 10
 
 function LoMasVendido({ servicios, productos }: { servicios: FilaDeConcepto[]; productos: FilaDeConcepto[] }) {
-  // "Más vendido" es ambiguo: el masaje deja más dinero, la manicura se hace
-  // más veces. Se puede mirar de las dos maneras en vez de elegir por ella.
-  const [criterio, setCriterio] = useState<"importe" | "unidades">("importe")
-
   return (
     <Card>
-      <CardHeader className="flex flex-row items-center justify-between pb-2">
-        <div>
-          <CardTitle className="text-base font-medium">Lo más vendido</CardTitle>
-          <p className="text-xs text-muted-foreground">
-            Los {TOP} primeros de cada lista, sobre el total del período
-          </p>
-        </div>
-        <div className="flex gap-1">
-          {(["importe", "unidades"] as const).map((c) => (
-            <button
-              key={c}
-              type="button"
-              onClick={() => setCriterio(c)}
-              className={cn(
-                "rounded-lg px-3 py-1 text-xs font-medium transition-colors",
-                criterio === c ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted",
-              )}
-            >
-              {c === "importe" ? "Por importe" : "Por unidades"}
-            </button>
-          ))}
-        </div>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-base font-medium">Lo más vendido</CardTitle>
+        <p className="text-xs text-muted-foreground">
+          Por número de veces que se ha hecho o despachado · los {TOP} primeros de cada lista
+        </p>
       </CardHeader>
       <CardContent className="grid gap-6 md:grid-cols-2">
-        <TablaDeRanking titulo="Servicios" filas={servicios} criterio={criterio} />
-        <TablaDeRanking titulo="Productos" filas={productos} criterio={criterio} />
+        <TablaDeRanking titulo="Servicios" filas={servicios} />
+        <TablaDeRanking titulo="Productos" filas={productos} />
       </CardContent>
     </Card>
   )
 }
 
-function TablaDeRanking({
-  titulo, filas, criterio,
-}: {
-  titulo: string
-  filas: FilaDeConcepto[]
-  criterio: "importe" | "unidades"
-}) {
-  // El porcentaje se calcula sobre TODO lo vendido, no sobre los diez que se
-  // enseñan: si no, el décimo de la lista parecería más importante de lo que es.
-  const totalCents = filas.reduce((a, f) => a + f.totalCents, 0)
+function TablaDeRanking({ titulo, filas }: { titulo: string; filas: FilaDeConcepto[] }) {
+  // El porcentaje se calcula sobre TODAS las unidades vendidas, no sobre las de
+  // los diez que se enseñan: si no, el décimo de la lista parecería más
+  // importante de lo que es. Vienen ya ordenadas por unidades desde lib.
   const totalUnidades = filas.reduce((a, f) => a + f.unidades, 0)
-  const ordenadas = [...filas].sort((a, b) =>
-    criterio === "importe" ? b.totalCents - a.totalCents : b.unidades - a.unidades,
-  )
 
   return (
     <div className="space-y-2">
       <h3 className="text-sm font-medium">{titulo}</h3>
-      {ordenadas.length === 0 ? (
+      {filas.length === 0 ? (
         <p className="py-4 text-sm text-muted-foreground">Nada vendido en este período.</p>
       ) : (
         <Table>
           <TableHeader>
-            <TableRow>
+            <TableRow className={SIN_HOVER}>
               <TableHead>Concepto</TableHead>
               <TableHead className="text-right">Uds.</TableHead>
-              <TableHead className="text-right">Importe</TableHead>
               <TableHead className="w-16 text-right">%</TableHead>
+              <TableHead className="text-right">Importe</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {ordenadas.slice(0, TOP).map((f) => (
-              <TableRow key={f.id}>
+            {filas.slice(0, TOP).map((f) => (
+              <TableRow key={f.id} className={SIN_HOVER}>
                 <TableCell className="font-medium">
                   {f.nombre}
                   {f.grupo && (
                     <span className="block text-[11px] font-normal text-muted-foreground">{f.grupo}</span>
                   )}
                 </TableCell>
-                <TableCell className="text-right tabular-nums text-muted-foreground">{f.unidades}</TableCell>
-                <TableCell className="text-right tabular-nums">{fmtEur(f.totalCents)}</TableCell>
+                <TableCell className="text-right font-medium tabular-nums">{f.unidades}</TableCell>
                 <TableCell className="text-right tabular-nums text-muted-foreground">
-                  {criterio === "importe"
-                    ? porcentaje(f.totalCents, totalCents)
-                    : porcentaje(f.unidades, totalUnidades)} %
+                  {porcentaje(f.unidades, totalUnidades)} %
                 </TableCell>
+                <TableCell className="text-right tabular-nums text-muted-foreground">{fmtEur(f.totalCents)}</TableCell>
               </TableRow>
             ))}
           </TableBody>
         </Table>
       )}
-      {ordenadas.length > TOP && (
+      {filas.length > TOP && (
         <p className="text-[11px] text-muted-foreground">
-          y {ordenadas.length - TOP} más, que suman{" "}
-          {fmtEur(ordenadas.slice(TOP).reduce((a, f) => a + f.totalCents, 0))}.
+          y {filas.length - TOP} más, que suman{" "}
+          {filas.slice(TOP).reduce((a, f) => a + f.unidades, 0)} unidades.
         </p>
       )}
     </div>
+  )
+}
+
+/* ─── Ingresos por familia ───────────────────────────────────────────────── */
+
+function IngresosPorFamilia({ filas, totalCents }: { filas: FilaDeFamilia[]; totalCents: number }) {
+  const maximo = Math.max(1, ...filas.map((f) => f.totalCents))
+
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-base font-medium">Ingresos por familia</CardTitle>
+        <p className="text-xs text-muted-foreground">
+          Qué sostiene el centro. Los productos van como una familia más, «Tto. domiciliario»,
+          que es como se listan en la casa.
+        </p>
+      </CardHeader>
+      <CardContent>
+        <Table>
+          <TableHeader>
+            <TableRow className={SIN_HOVER}>
+              <TableHead>Familia</TableHead>
+              <TableHead className="text-right">Uds.</TableHead>
+              <TableHead className="text-right">Importe</TableHead>
+              <TableHead className="w-56">Peso</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {filas.map((f) => (
+              <TableRow key={f.nombre} className={SIN_HOVER}>
+                <TableCell className="font-medium">{f.nombre}</TableCell>
+                <TableCell className="text-right tabular-nums text-muted-foreground">{f.unidades}</TableCell>
+                <TableCell className="text-right font-medium tabular-nums">{fmtEur(f.totalCents)}</TableCell>
+                <TableCell>
+                  <div className="h-3 w-full overflow-hidden rounded-full bg-muted">
+                    <div className="h-full bg-[#3C54A4]" style={{ width: `${(f.totalCents / maximo) * 100}%` }} />
+                  </div>
+                  <span className="mt-1 block text-[11px] text-muted-foreground">
+                    {porcentaje(f.totalCents, totalCents)} % de la facturación
+                  </span>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </CardContent>
+    </Card>
+  )
+}
+
+/* ─── Formas de cobro ────────────────────────────────────────────────────── */
+
+function FormasDeCobro({ filas }: { filas: FilaDeCobro[] }) {
+  const total = filas.reduce((a, f) => a + f.totalCents, 0)
+
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-base font-medium">Formas de cobro</CardTitle>
+        <p className="text-xs text-muted-foreground">Por dónde ha entrado el dinero, ticket a ticket</p>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <Table>
+          <TableHeader>
+            <TableRow className={SIN_HOVER}>
+              <TableHead>Vía</TableHead>
+              <TableHead className="text-right">Tickets</TableHead>
+              <TableHead className="text-right">Importe</TableHead>
+              <TableHead className="w-16 text-right">%</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {filas.map((f) => (
+              <TableRow key={f.metodo} className={SIN_HOVER}>
+                <TableCell className={cn("font-medium", f.metodo === "DEBT" && "text-[#B31412]")}>
+                  {f.etiqueta}
+                </TableCell>
+                <TableCell className="text-right tabular-nums text-muted-foreground">{f.ventas}</TableCell>
+                <TableCell className="text-right font-medium tabular-nums">{fmtEur(f.totalCents)}</TableCell>
+                <TableCell className="text-right tabular-nums text-muted-foreground">
+                  {porcentaje(f.totalCents, total)} %
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+        {/* Sin esto, la primera pregunta al ver la tarjeta es por qué no cuadra
+            con la facturación de arriba. */}
+        <p className="text-[11px] text-muted-foreground">
+          Aquí va el ticket entero, tarjetas regalo incluidas, así que el total no coincide con
+          la facturación: son dos preguntas distintas. Y «queda a deber» todavía no ha entrado.
+        </p>
+      </CardContent>
+    </Card>
+  )
+}
+
+/* ─── Descuentos ─────────────────────────────────────────────────────────── */
+
+function Descuentos({ resumen }: { resumen: ReportsClientProps["descuentos"] }) {
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-base font-medium">Descuentos aplicados</CardTitle>
+        <p className="text-xs text-muted-foreground">
+          Lo que se ha dejado de ingresar, repartido por quien cobró el ticket
+        </p>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <div className="flex flex-wrap items-baseline gap-x-6 gap-y-1">
+          <div>
+            <p className="text-2xl font-bold tabular-nums">{fmtEur(resumen.descuentoCents)}</p>
+            <p className="text-xs text-muted-foreground">
+              {resumen.porcentaje} % sobre {fmtEur(resumen.brutoCents)} a precio de tarifa
+            </p>
+          </div>
+        </div>
+
+        {resumen.filas.length === 0 ? (
+          <p className="py-2 text-sm text-muted-foreground">Ningún descuento en este período.</p>
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow className={SIN_HOVER}>
+                <TableHead>Quien cobra</TableHead>
+                <TableHead className="text-right">Líneas</TableHead>
+                <TableHead className="text-right">Descuento</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {resumen.filas.map((f) => (
+                <TableRow key={f.userId ?? "sin-asignar"} className={SIN_HOVER}>
+                  <TableCell className="font-medium">{f.nombre}</TableCell>
+                  <TableCell className="text-right tabular-nums text-muted-foreground">{f.lineas}</TableCell>
+                  <TableCell className="text-right font-medium tabular-nums">{fmtEur(f.descuentoCents)}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </CardContent>
+    </Card>
   )
 }
 

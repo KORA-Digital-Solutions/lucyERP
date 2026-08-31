@@ -25,6 +25,16 @@ function todayAt(hour: number, minute = 0): Date {
   return d
 }
 
+// Un Date a mediodía, N días antes (negativo) o después (positivo) de hoy. A
+// mediodía para que la fecha local y la UTC sean la misma sea cual sea el
+// desfase horario.
+function enDias(offset: number): Date {
+  const d = new Date()
+  d.setHours(12, 0, 0, 0)
+  d.setDate(d.getDate() + offset)
+  return d
+}
+
 function toDateStr(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
 }
@@ -141,8 +151,13 @@ async function main() {
   // Una ficha dada de baja. La lista de usuarios agrupa en administración,
   // equipo y desactivadas, y sin esto el tercer grupo no aparece nunca. No
   // lleva PIN ni horario: se fue, no trabaja.
+  //
+  // El nombre se lee como falso a propósito. Las otras tres son personajes de
+  // la demo de toda la vida y ya se citan por su nombre en otras pantallas;
+  // meter aquí una cuarta con nombre creíble haría pensar que existió alguien
+  // que no ha existido.
   await prisma.user.create({
-    data: { clinicId: clinic.id, name: "Sofía", lastName: "Navarro", role: "WORKER", color: "#7A5C99", email: "sofia.navarro@centroesteticalucia.com", active: false },
+    data: { clinicId: clinic.id, name: "Prueba", lastName: "Baja", role: "WORKER", color: "#7A5C99", active: false },
   })
 
   // Horario semanal del centro: lunes a viernes 9:00-20:00 (sábado y domingo cerrado).
@@ -287,47 +302,60 @@ async function main() {
   const [maria, pepita, fernando, ana, carlos] = await Promise.all([
     // El nº de expediente va explícito porque estas altas van en paralelo y
     // calcularlo aquí daría números repetidos.
+    //
+    // La fecha de alta también va explícita y escalonada hacia atrás. Con el
+    // `now()` por defecto los cinco se daban de alta el día que siembras, y
+    // entonces el centro parece recién abierto: no hay clientela antigua, y
+    // cualquier cuenta de «nuevos vs. de siempre» sale con todo en la columna
+    // de nuevos.
     prisma.customer.create({
       data: {
-        clinicId: clinic.id, fileNumber: 1,
+        clinicId: clinic.id, fileNumber: 1, createdAt: enDias(-1300),
         firstName: "María José", lastName: "Soriano", lastName2: "García",
         sex: "FEMALE", birthDate: new Date("1985-03-14"), profession: "Maestra",
         phone: "+34600111222", address: "C/ Mayor 12, 3ºB, Albacete",
         referralSource: "OTHER_CLIENT", whatsappOptIn: true,
+        notes: "Prefiere cita a primera hora, antes de entrar a clase.",
       },
     }),
     prisma.customer.create({
       data: {
-        clinicId: clinic.id, fileNumber: 2,
+        clinicId: clinic.id, fileNumber: 2, createdAt: enDias(-950),
         firstName: "Pepita", lastName: "Pérez", lastName2: "Molina",
         sex: "FEMALE", birthDate: new Date("1992-07-22"), profession: "Comercial",
-        phone: "+34600222333", phone2: "+34611222333", phone2Label: "Trabajo",
+        // Los dos teléfonos etiquetados: es el caso para el que se hizo la
+        // etiqueta, saber a quién llamas antes de marcar.
+        phone: "+34600222333", phoneLabel: "Personal",
+        phone2: "+34611222333", phone2Label: "Trabajo",
         referralSource: "SOCIAL_MEDIA", allergies: "Alergia al níquel",
         whatsappOptIn: true,
       },
     }),
     prisma.customer.create({
       data: {
-        clinicId: clinic.id, fileNumber: 3,
+        clinicId: clinic.id, fileNumber: 3, createdAt: enDias(-610),
         firstName: "Fernando", lastName: "López", lastName2: "Navarro",
         sex: "MALE", birthDate: new Date("1978-11-05"), profession: "Fontanero",
-        phone: "+34600333444", referralSource: "WALK_BY", whatsappOptIn: true,
+        phone: "+34600333444", phoneLabel: "Trabajo",
+        referralSource: "WALK_BY", whatsappOptIn: true,
+        notes: "Solo puede venir por las tardes.",
       },
     }),
     prisma.customer.create({
       data: {
-        clinicId: clinic.id, fileNumber: 4,
+        clinicId: clinic.id, fileNumber: 4, createdAt: enDias(-280),
         firstName: "Ana", lastName: "Martínez", lastName2: "Ruiz",
         sex: "FEMALE", birthDate: new Date("1990-01-30"), profession: "Enfermera",
         phone: "+34600444555", phone2: "+34600999888", phone2Label: "Madre",
         email: "ana@example.com", address: "Avda. de España 45, Albacete",
         referralSource: "INTERNET", allergies: "Alergia al látex",
         whatsappOptIn: false,
+        notes: "No quiere WhatsApp: avisarla por teléfono.",
       },
     }),
     prisma.customer.create({
       data: {
-        clinicId: clinic.id, fileNumber: 5,
+        clinicId: clinic.id, fileNumber: 5, createdAt: enDias(-95),
         firstName: "Carlos", lastName: "Ruiz", lastName2: "Fernández",
         sex: "MALE", birthDate: new Date("1983-09-18"), profession: "Informático",
         phone: "+34600555666", referralSource: "ADVERTISING", whatsappOptIn: true,
@@ -379,13 +407,6 @@ async function main() {
   // fecha es una tarea que vence y que el dashboard saca cuando entra en su
   // ventana de aviso. Hasta ahora el seed no creaba ninguno y no se veía
   // ninguna de las dos.
-  function enDias(offset: number): Date {
-    const d = new Date()
-    d.setHours(12, 0, 0, 0)
-    d.setDate(d.getDate() + offset)
-    return d
-  }
-
   await prisma.customerReminder.createMany({
     data: [
       // Permanente: el ejemplo de manual, la alergia que hay que tener

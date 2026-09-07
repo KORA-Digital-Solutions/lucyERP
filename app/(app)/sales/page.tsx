@@ -6,6 +6,17 @@ import { SalesClient } from "@/components/sales-client"
 
 export const dynamic = "force-dynamic"
 
+/**
+ * Cuántas ventas se traen para el histórico.
+ *
+ * La pantalla filtra en el navegador —se teclea y responde al momento, sin ir
+ * y volver al servidor por cada letra—, así que hace falta tener delante un
+ * trozo de historia, no la historia entera. Con este tope entran holgadamente
+ * más de un año de un centro como este; que haya más antiguas lo dice la
+ * propia pantalla en vez de callárselo.
+ */
+const VENTAS_CARGADAS = 500
+
 export default async function SalesPage() {
   const [clinic, session] = await Promise.all([getActiveClinic(), getSession()])
   const today = new Date().toISOString().slice(0, 10)
@@ -15,11 +26,19 @@ export default async function SalesPage() {
       where: { clinicId: clinic.id },
       include: {
         customer: true, user: true,
-        lines: { include: { worker: { select: { name: true, lastName: true } } } },
+        lines: {
+          include: {
+            worker: { select: { name: true, lastName: true } },
+            // La familia del servicio, para poder filtrar el histórico por
+            // ella. El producto, la tarjeta y el bono no tienen familia
+            // propia: se agrupan con la suya de siempre en la pantalla.
+            service: { select: { family: { select: { name: true } } } },
+          },
+        },
         balanceMovements: { where: { type: "BALANCE_USED" }, select: { amountCents: true } },
       },
       orderBy: { createdAt: "desc" },
-      take: 200,
+      take: VENTAS_CARGADAS,
     }),
     prisma.customer.findMany({
       where: { clinicId: clinic.id, active: true },
@@ -76,6 +95,8 @@ export default async function SalesPage() {
       currentUserId={session?.userId ?? null}
       cashOpen={cashOpen}
       pinRequired={conPin > 0}
+      // Si la consulta ha llegado al tope, hay ventas más antiguas fuera.
+      hayVentasSinCargar={sales.length === VENTAS_CARGADAS}
     />
   )
 }

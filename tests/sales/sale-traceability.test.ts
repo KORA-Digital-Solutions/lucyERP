@@ -125,6 +125,24 @@ describe("createSale · profesional en todas las líneas", () => {
     expect(p.stock).toBe(20)
   })
 
+  it("acepta la tarjeta regalo sin profesional: la vende quien cobra", async () => {
+    // La tarjeta va sola en su ticket y no la presta nadie: quien la vendió es
+    // quien se identificó para cobrar, y ya queda guardado en la venta.
+    const lineas: SaleLineInput[] = [{
+      type: "GIFT_CARD", description: "Tarjeta regalo", quantity: 1,
+      unitPriceCents: 5000, discountPercent: 0, totalCents: 5000, workerId: null,
+    }]
+    const res = await createSale(customerId, "GIFT_CARD", "CASH", lineas, null, customerId)
+    expect(res.ok).toBe(true)
+
+    const venta = await prisma.sale.findUniqueOrThrow({
+      where: { id: res.id },
+      include: { lines: true },
+    })
+    expect(venta.userId).toBe(cobra)
+    expect(venta.lines[0].workerId).toBeNull()
+  })
+
   it("guarda el profesional de cada línea, y puede no ser quien cobra", async () => {
     const lineas: SaleLineInput[] = [
       { type: "SERVICE", serviceId, description: "Servicio trazable", quantity: 1, unitPriceCents: 5000, discountPercent: 0, totalCents: 5000, workerId: cobra },

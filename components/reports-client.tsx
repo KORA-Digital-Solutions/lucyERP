@@ -43,9 +43,13 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { fmtEur } from "@/components/client-profile-view"
 import {
-  PERIODOS, horasLegibles,
+  Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle,
+} from "@/components/ui/dialog"
+import { fmtEur } from "@/components/client-profile-view"
+import { WorkerReportView } from "@/components/worker-report-view"
+import {
+  PERIODOS, aValorDeInput, horasLegibles,
   type FilaDeCliente, type FilaDeCobro, type FilaDeConcepto, type FilaDeDeuda,
   type FilaDeFamilia, type FilaDeHoras, type FilaDeInactivo, type FilaDeOcupacion,
   type MesDeEvolucion, type PeriodoId, type ResumenDeCaptacion, type ResumenDeCitas,
@@ -499,7 +503,7 @@ function PestanaIngresos({
         totalCents={resumen.totalCents}
         saldoVendidoCents={resumen.saldoVendidoCents}
         bonosVendidosCents={resumen.bonosVendidosCents}
-        periodo={periodo.etiqueta}
+        periodo={periodo}
       />
       <LoMasVendido servicios={datos.servicios} productos={datos.productos} />
       <IngresosPorFamilia filas={datos.familias} totalCents={resumen.totalCents} />
@@ -1436,8 +1440,12 @@ function HorasTrabajadas({ filas, anio }: { filas: FilaDeHoras[]; anio: number }
 
 function SelectorDePeriodo({ periodo }: { periodo: ReportsClientProps["periodo"] }) {
   const router = useRouter()
-  const [desde, setDesde] = useState(periodo.desde.slice(0, 10))
-  const [hasta, setHasta] = useState(periodo.hasta.slice(0, 10))
+  // Por el día local, no por los diez primeros caracteres del ISO: el ISO va
+  // en UTC y en España el 1 de septiembre a las 00:00 es el 31 de agosto a las
+  // 22:00Z. Las casillas salían con un día de menos y cada "Aplicar" corría el
+  // período otro día hacia atrás.
+  const [desde, setDesde] = useState(aValorDeInput(new Date(periodo.desde)))
+  const [hasta, setHasta] = useState(aValorDeInput(new Date(periodo.hasta)))
   const personalizado = periodo.id === "personalizado"
 
   return (
@@ -1504,13 +1512,16 @@ function FacturacionPorEmpleada({
   totalCents: number
   saldoVendidoCents: number
   bonosVendidosCents: number
-  periodo: string
+  periodo: ReportsClientProps["periodo"]
 }) {
   const maximo = Math.max(1, ...filas.map((f) => f.totalCents))
+  // La empleada cuyo detalle se está mirando. Se guarda la fila entera y no el
+  // id porque el diálogo necesita el nombre para titularse.
+  const [detalle, setDetalle] = useState<FilaDeEmpleadaConNombre | null>(null)
 
   return (
     <Card>
-      <CardHeader className="flex flex-row items-start justify-between gap-3 pb-2">
+      <CardHeader className="pb-2">
         <div className="flex items-center gap-2">
           <div className="rounded-lg bg-accent p-2">
             <Star className="h-4 w-4 text-accent-foreground" />
@@ -1518,17 +1529,11 @@ function FacturacionPorEmpleada({
           <div>
             <CardTitle className="text-base font-medium">Facturación por empleada</CardTitle>
             <p className="text-xs text-muted-foreground">
-              Servicios y venta de producto · {periodo}
+              Servicios y venta de producto · {periodo.etiqueta} · pulsa una fila para ver
+              qué ha hecho
             </p>
           </div>
         </div>
-        {/* El detalle de qué ha hecho cada una vive en su ficha, y es una
-            pantalla entera: se va allí a propósito y no de un clic al vuelo. */}
-        <Button asChild variant="outline" size="sm" className="shrink-0 gap-1.5">
-          <Link href="/workers">
-            Para ver el detalle, ir a Usuarios <ChevronRight className="h-4 w-4" />
-          </Link>
-        </Button>
       </CardHeader>
       <CardContent className="space-y-4">
         <Table>
@@ -1544,8 +1549,15 @@ function FacturacionPorEmpleada({
           </TableHeader>
           <TableBody>
             {filas.map((w) => {
+              // La fila de "Sin asignar" no es de nadie: no hay informe que
+              // abrir y no se ilumina al pasar por encima.
+              const conDetalle = w.workerId !== null
               return (
-                <TableRow key={w.workerId ?? "sin-asignar"} className={SIN_HOVER}>
+                <TableRow
+                  key={w.workerId ?? "sin-asignar"}
+                  className={cn(conDetalle ? "cursor-pointer" : SIN_HOVER)}
+                  onClick={conDetalle ? () => setDetalle(w) : undefined}
+                >
                   <TableCell className="font-medium">
                     <span className="flex items-center gap-2">
                       <span
@@ -1555,6 +1567,9 @@ function FacturacionPorEmpleada({
                       {w.nombre}
                       {!w.activa && w.workerId && (
                         <Badge variant="secondary" className="py-0 text-[10px]">Baja</Badge>
+                      )}
+                      {conDetalle && (
+                        <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                       )}
                     </span>
                   </TableCell>
@@ -1606,6 +1621,45 @@ function FacturacionPorEmpleada({
           </p>
         )}
       </CardContent>
+
+      {/* El detalle de una empleada: línea a línea, lo que ha hecho. Se abre
+          encima del informe y no en otra pantalla porque se mira para entender
+          una fila de esta tabla, y al cerrarlo se sigue con la siguiente. */}
+      <Dialog open={detalle !== null} onOpenChange={(v) => { if (!v) setDetalle(null) }}>
+        {/* Ancho de informe, pero sin salirse de la pantalla: la tabla de dentro
+            trae ocho columnas y en el ancho de diálogo de serie no se lee. */}
+        <DialogContent
+          style={{ maxWidth: "min(80rem, calc(100% - 2rem))" }}
+          className="max-h-[88vh] overflow-y-auto"
+        >
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              {detalle && (
+                <span
+                  className="inline-block h-3 w-3 shrink-0 rounded-full"
+                  style={{ backgroundColor: detalle.color }}
+                />
+              )}
+              Actividad de {detalle?.nombre}
+            </DialogTitle>
+            <DialogDescription>
+              Servicios realizados y productos vendidos, línea a línea. Empieza acotado a
+              {" "}{periodo.etiqueta}, pero los filtros llegan a todo su histórico.
+            </DialogDescription>
+          </DialogHeader>
+          {detalle?.workerId && (
+            // La key remonta el informe al cambiar de empleada o de período:
+            // los filtros de dentro arrancan del período y no deben heredarse
+            // de la anterior.
+            <WorkerReportView
+              key={`${detalle.workerId}:${periodo.desde}:${periodo.hasta}`}
+              workerId={detalle.workerId}
+              desdeInicial={aValorDeInput(new Date(periodo.desde))}
+              hastaInicial={aValorDeInput(new Date(periodo.hasta))}
+            />
+          )}
+        </DialogContent>
+      </Dialog>
     </Card>
   )
 }

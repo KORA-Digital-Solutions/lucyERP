@@ -9,15 +9,19 @@
  * ocupaba la pantalla entera desde un botón de 16px, y el PIN y la contraseña
  * vivían en dos diálogos cuyas explicaciones solo se leían si los abrías.
  *
- * Las tres pestañas responden a las tres preguntas que se le hacen a una
- * empleada: quién es (Datos), qué hace (Actividad) y cómo entra (Acceso).
+ * Las dos pestañas responden a las dos preguntas que se le hacen aquí a una
+ * empleada: quién es (Datos) y cómo entra (Acceso). Lo que ha hecho —el
+ * informe de actividad— se mira en Informes, junto al resto de números del
+ * centro y con el período delante: aquí abajo obligaba a entrar persona a
+ * persona para comparar a dos, y mezclaba la gestión de la ficha con la
+ * lectura de los números.
  */
 
 import { useState } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { toast } from "sonner"
-import { ArrowLeft, Clock, Hash, KeyRound, ShieldCheck, Trash2 } from "lucide-react"
+import { ArrowLeft, BarChart3, Clock, Hash, KeyRound, ShieldCheck, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -30,15 +34,13 @@ import {
 import { cn } from "@/lib/utils"
 import { clearUserPin, deleteWorker, generateUserPin, setUserPassword } from "@/lib/actions"
 import { WorkerForm } from "@/components/worker-form"
-import { WorkerReportView } from "@/components/worker-report-view"
 import type { WorkerRow } from "@/components/workers-client"
 
-export type WorkerTab = "datos" | "actividad" | "acceso"
+export type WorkerTab = "datos" | "acceso"
 
 const TABS: { key: WorkerTab; label: string }[] = [
-  { key: "datos",     label: "Datos" },
-  { key: "actividad", label: "Actividad" },
-  { key: "acceso",    label: "Acceso" },
+  { key: "datos",  label: "Datos" },
+  { key: "acceso", label: "Acceso" },
 ]
 
 export function WorkerProfileView({
@@ -83,11 +85,18 @@ export function WorkerProfileView({
               {worker.phone && <span className="tabular-nums">{worker.phone}</span>}
             </div>
           </div>
-          {/* El horario se gestiona en su propia pantalla; desde aquí al menos
-              se sabe que existe y dónde está. */}
-          <Button asChild variant="outline" size="sm" className="mt-0.5 shrink-0 gap-1.5">
-            <Link href="/horarios?tab=base"><Clock className="h-4 w-4" /> Ver horarios</Link>
-          </Button>
+          {/* Ni el horario ni los números se tocan desde aquí, pero desde aquí
+              al menos se sabe que existen y dónde están. Lo de la actividad es
+              además el sitio al que se fue el informe que vivía en esta ficha:
+              quien lo busque donde estaba encuentra el camino. */}
+          <div className="mt-0.5 flex shrink-0 gap-2">
+            <Button asChild variant="outline" size="sm" className="gap-1.5">
+              <Link href="/horarios?tab=base"><Clock className="h-4 w-4" /> Ver horarios</Link>
+            </Button>
+            <Button asChild variant="outline" size="sm" className="gap-1.5">
+              <Link href="/reports"><BarChart3 className="h-4 w-4" /> Ver actividad</Link>
+            </Button>
+          </div>
         </div>
 
         <div className="flex gap-0 px-6">
@@ -110,7 +119,6 @@ export function WorkerProfileView({
 
       <div className="flex-1 overflow-y-auto px-6 py-4">
         {tab === "datos" && <DatosTab worker={worker} domain={domain} onDeleted={onBack} />}
-        {tab === "actividad" && <WorkerReportView worker={worker} />}
         {tab === "acceso" && <AccesoTab worker={worker} />}
       </div>
     </div>

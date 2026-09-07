@@ -1,149 +1,129 @@
-# Despliegue LucyERP — Guía de referencia
+# Despliegue — lado del desarrollo
 
-App Next.js con SQLite desplegada localmente en el PC de la clínica.
-Sin servidor externo, sin Docker. Los datos viven en `prisma/dev.db`.
+Cómo se construye el paquete que se lleva al PC del centro. Las instrucciones
+que van **dentro** del paquete, las que sigue quien instala, están en
+[INSTALAR.md](INSTALAR.md).
 
----
-
-## Setup inicial (una sola vez en el PC de la clínica)
-
-### Prerrequisitos a preparar en tu máquina antes de ir
-
-1. Añadir `output: 'standalone'` al `next.config.mjs`:
-   ```js
-   const nextConfig = {
-     output: 'standalone',
-     // ...resto de opciones
-   }
-   ```
-2. Construir la app: `npm run build`
-3. Descargar **Node.js** portable (zip, sin instalador) desde nodejs.org — extraer `node.exe`
-4. Descargar **NSSM** desde nssm.cc — extraer `nssm.exe`
-5. Preparar el fichero `.env` con las variables de entorno (ver sección de Variables)
-
-### Carpeta que se copia al PC de la clínica
-
-```
-lucy-erp/
-├── node.exe                  ← Node.js portátil
-├── nssm.exe                  ← Para crear los servicios de Windows
-├── .next/standalone/         ← Build autónomo (sin npm install)
-├── .next/static/             ← Assets estáticos
-├── public/                   ← Imágenes y recursos
-├── prisma/                   ← Carpeta con dev.db (la base de datos)
-├── scripts/reminder-worker.js ← Worker compilado
-└── .env                      ← Variables de entorno
-```
-
-### En el PC de la clínica
-
-6. Crear los dos servicios de Windows desde una terminal como Administrador:
-
-   ```cmd
-   nssm install LucyERP-Web node.exe C:\lucy-erp\.next\standalone\server.js
-   nssm set LucyERP-Web AppDirectory C:\lucy-erp
-   nssm set LucyERP-Web Start SERVICE_AUTO_START
-
-   nssm install LucyERP-Worker node.exe C:\lucy-erp\scripts\reminder-worker.js
-   nssm set LucyERP-Worker AppDirectory C:\lucy-erp
-   nssm set LucyERP-Worker Start SERVICE_AUTO_START
-   ```
-
-   > El worker solo es necesario cuando WhatsApp esté activo. Se puede omitir hasta entonces.
-
-7. Iniciar los servicios:
-   ```cmd
-   net start LucyERP-Web
-   net start LucyERP-Worker
-   ```
-
-8. Crear acceso directo en el escritorio apuntando a `http://localhost:3000`
-
-9. Verificar que la app arranca al encender el PC abriendo el navegador en `http://localhost:3000`
+LucyERP se despliega en el PC de la clínica y ya: sin servidor externo, sin
+Docker y sin internet. Los datos son un único fichero SQLite.
 
 ---
 
-## Construir una nueva versión (en tu máquina de desarrollo)
+## Construir el paquete
 
 ```bash
-npm run build
+npm run release
 ```
 
-Carpetas que genera el build y hay que copiar en cada actualización:
+Hace `next build` (con `output: "standalone"`) y luego
+`scripts/build-release.mjs`, que deja todo montado en `release/lucy-erp-v1/`:
 
 ```
-.next/standalone/    ← el servidor autónomo
-.next/static/        ← assets estáticos
-public/              ← solo si hay cambios en imágenes o recursos
+release/lucy-erp-v1/
+├── server.js                 ← servidor autónomo de Next
+├── .next/  node_modules/  public/
+├── prisma/                   ← esquema y migraciones (para actualizar la base)
+├── data/lucyerp.db           ← base de datos ya creada y sembrada
+├── .env                      ← DATABASE_URL + SESSION_SECRET nuevo
+├── iniciar-lucyerp.cmd       ← arranque a mano
+├── instalar-servicio.cmd     ← servicio de Windows (NSSM)
+├── copia-seguridad.cmd       ← copia fechada de la base
+└── INSTALAR.md
 ```
 
-> La base de datos `prisma/dev.db` nunca se toca en una actualización.
+Son unos 190 MB. En el PC del centro solo hace falta **Node.js 20.9+**: las
+dependencias van dentro, así que allí no se ejecuta `npm install` nunca.
+
+Los `.cmd` no se generan: viven en `deploy/` y se copian tal cual. Si hay que
+tocarlos, se tocan ahí.
+
+Para llevárselo en un USB o mandarlo, comprimir la carpeta:
+
+```powershell
+Compress-Archive -Path release\lucy-erp-v1 -DestinationPath release\lucy-erp-v1.zip
+```
+
+### Lo que el script hace y conviene saber
+
+- **El motor de Prisma.** Es un binario nativo (`query_engine-windows.dll.node`)
+  y el trazado de Next se lo deja fuera a veces. El script comprueba que está y
+  lo copia a mano si falta; si no puede, aborta. También tira las copias a
+  medias (`…dll.node.tmp1234`) que deja `prisma generate` cuando el fichero
+  estaba bloqueado por un `next dev` abierto: son 20 MB cada una.
+- **La base de datos se crea aquí, no allí.** El script aplica las migraciones
+  y ejecuta `prisma/seed-produccion.ts` contra el `.db` del paquete. Así en el
+  centro no hace falta ni la CLI de Prisma.
+- **El `SESSION_SECRET` se genera nuevo en cada paquete.** Firma las cookies de
+  sesión, así que no puede ir escrito en el repositorio.
 
 ---
 
-## Desplegar una actualización en el PC de la clínica
+## La base de datos inicial
 
-1. Construir la nueva versión en tu máquina (`npm run build`)
-2. Conectarte al PC de la clínica por **TeamViewer / AnyDesk**
-3. Parar los servicios:
-   ```cmd
-   net stop LucyERP-Web
-   net stop LucyERP-Worker
-   ```
-4. Reemplazar en el PC las carpetas `.next/standalone/` y `.next/static/`
-5. Si hay **migraciones de base de datos** nuevas (cambios en `prisma/schema.prisma`), ejecutarlas:
-   ```cmd
-   node.exe node_modules\.bin\prisma migrate deploy
-   ```
-   > Hacer siempre backup del `dev.db` antes de aplicar migraciones (ver Backups).
-6. Arrancar los servicios:
-   ```cmd
-   net start LucyERP-Web
-   net start LucyERP-Worker
-   ```
-7. Abrir `http://localhost:3000` y verificar que todo funciona
+`prisma/seed-produccion.ts` (`npm run db:seed-prod`) es el seed del centro, no
+el de demo. Deja lo justo para empezar a trabajar: el centro con su horario, la
+administradora (Lucía Martínez), dos cabinas, seis servicios en cuatro
+familias, dos productos sin existencias, dos bonos de ejemplo y los festivos.
+**Ni clientes, ni citas, ni ventas, ni cajas.**
+
+A diferencia de `prisma/seed.ts`, **no borra nada**: si la base ya tiene datos
+se planta. Para empezar de cero hay que borrar el `.db` a mano.
+
+Credenciales de arranque, las dos de un solo uso (la aplicación obliga a
+cambiarlas al entrar por cada puerta):
+
+```
+Gestión del centro    lucia.martinez / lucia2026
+Mostrador             PIN 100001
+```
 
 ---
 
-## Backups de la base de datos
+## Desplegar una actualización
 
-El único fichero con todos los datos es:
+1. `npm run release` en local.
+2. Conectarse al PC del centro por TeamViewer / AnyDesk.
+3. Hacer copia de seguridad allí (`copia-seguridad.cmd`) y **traérsela**.
+4. Parar: `net stop LucyERP` (como administrador) o cerrar la ventana negra.
+5. Sustituir `.next/`, `node_modules/`, `public/`, `prisma/` y `server.js`.
+   **No tocar `data/`, `backups/` ni `.env`.**
+6. Si hay migraciones nuevas, aplicarlas (ver abajo).
+7. Arrancar: `net start LucyERP`.
 
-```
-prisma/dev.db
-```
+### Migraciones en el PC del centro
 
-- Copiar ese fichero periódicamente a un USB o carpeta en la nube (OneDrive, Google Drive)
-- Hacer siempre backup previo antes de cualquier actualización con migraciones
-- Para restaurar: parar los servicios, reemplazar el `dev.db`, arrancar los servicios
+El paquete no lleva la CLI de Prisma. Las opciones, de menos a más incómoda:
 
----
+- **Traerse el `.db`**, aplicar las migraciones en local (`npx prisma migrate
+  deploy` con `DATABASE_URL` apuntando a ese fichero), devolverlo y sustituirlo
+  con el servicio parado. Es lo más seguro: si algo sale mal, el original sigue
+  intacto en el centro.
+- **Llevar `node_modules/prisma` y `node_modules/.bin`** en un USB y ejecutar
+  `prisma migrate deploy` allí, con `DATABASE_URL` apuntando al `.db` del PC.
 
-## Variables de entorno (`.env`)
-
-El fichero `.env` debe estar en la raíz de la carpeta en el PC de la clínica:
-
-```env
-DATABASE_URL="file:./prisma/dev.db"
-
-# WhatsApp Business Cloud API — dejar vacío hasta que se active
-WHATSAPP_API_VERSION=v21.0
-WHATSAPP_PHONE_NUMBER_ID=
-WHATSAPP_BUSINESS_ACCOUNT_ID=
-WHATSAPP_ACCESS_TOKEN=
-WHATSAPP_WEBHOOK_VERIFY_TOKEN=
-```
-
-> El worker carga `.env`. Un único fichero sirve para ambos procesos.
-
-Si `WHATSAPP_ACCESS_TOKEN` está vacío, el worker corre en **modo simulado** sin enviar mensajes reales.
-El toggle de WhatsApp en Settings también debe estar activo para que el worker procese recordatorios.
+En cualquier caso: **copia de seguridad antes**, siempre.
 
 ---
 
-## Activar recordatorios WhatsApp (cuando se decida)
+## Restablecer la contraseña de la administradora
 
-1. Crear cuenta Meta Business verificada con el template `appointment_reminder_es` aprobado
-2. Rellenar las variables de entorno de WhatsApp en el `.env` del PC de la clínica
-3. Reiniciar el servicio `LucyERP-Worker`
-4. Activar el toggle de WhatsApp en la pantalla de Settings de la app
+No hay recuperación desde la aplicación (es local y no manda correos). Si se
+pierde: traerse el `.db`, actualizar el `passwordHash` con un `bcrypt.hash(…,
+12)` y `mustChangePassword: true`, y devolverlo.
+
+---
+
+## WhatsApp
+
+v1 sale con WhatsApp desactivado (`whatsappEnabled` a `false` y las variables
+vacías) y **sin el worker de recordatorios**, que se ejecuta con `tsx` y no
+entra en el paquete autónomo.
+
+Para activarlo más adelante hacen falta las tres cosas: cuenta de Meta Business
+verificada con la plantilla `appointment_reminder_es` aprobada, las variables
+`WHATSAPP_*` en el `.env` del centro, y una forma de correr
+`scripts/reminder-worker.ts` allí (segundo servicio de NSSM, con Node y el
+proyecto completo, o compilándolo antes a un único `.js`).
+
+Sin `WHATSAPP_ACCESS_TOKEN` el worker corre en modo simulado: registra los
+mensajes como enviados sin llamar a Meta.

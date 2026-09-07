@@ -190,31 +190,6 @@ export function ClientsClient({
     [rows, search, statusFilter, sexFilter, ageMin, ageMax, inactivityWarningDays],
   )
 
-  // Los contadores de cada desplegable se calculan sobre los clientes que pasan
-  // el RESTO de filtros: así dicen cuántos quedarían al elegir esa opción, en
-  // vez de repetir siempre el total de la clínica.
-  const statusCounts = useMemo(() => {
-    const base = rows.filter((r) =>
-      matchesSearch(r, search) && matchesSex(r, sexFilter) && matchesAge(r, ageMin, ageMax))
-    return {
-      all: base.length,
-      active: base.filter((r) => getActivityStatus(r) === "active").length,
-      inactive: base.filter((r) => getActivityStatus(r) === "inactive").length,
-      warning: base.filter((r) => hasInactivityWarning(r, inactivityWarningDays)).length,
-    }
-  }, [rows, search, sexFilter, ageMin, ageMax, inactivityWarningDays])
-
-  const sexCounts = useMemo(() => {
-    const base = rows.filter((r) =>
-      matchesSearch(r, search) && matchesStatus(r, statusFilter, inactivityWarningDays) && matchesAge(r, ageMin, ageMax))
-    return {
-      all: base.length,
-      FEMALE: base.filter((r) => r.sex === "FEMALE").length,
-      MALE: base.filter((r) => r.sex === "MALE").length,
-      unknown: base.filter((r) => !r.sex).length,
-    }
-  }, [rows, search, statusFilter, ageMin, ageMax, inactivityWarningDays])
-
   const hayFiltro =
     search !== "" || statusFilter !== "all" || sexFilter !== "all" || ageFrom !== "" || ageTo !== ""
 
@@ -322,10 +297,7 @@ export function ClientsClient({
     <div className="flex h-screen flex-col overflow-hidden">
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-card p-6">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Clientes</h1>
-          <p className="text-muted-foreground">{rows.length} clientes registrados</p>
-        </div>
+        <h1 className="text-2xl font-semibold tracking-tight">Clientes</h1>
         <Button onClick={openNew}>
           <Plus className="mr-2 h-4 w-4" /> Nuevo cliente
         </Button>
@@ -349,10 +321,10 @@ export function ClientsClient({
                 <SelectValue placeholder="Estado" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">Todos los estados ({statusCounts.all})</SelectItem>
-                <SelectItem value="active">Activos ({statusCounts.active})</SelectItem>
-                <SelectItem value="inactive">Inactivos ({statusCounts.inactive})</SelectItem>
-                <SelectItem value="warning">Con aviso ({statusCounts.warning})</SelectItem>
+                <SelectItem value="all">Todos los estados</SelectItem>
+                <SelectItem value="active">Activos</SelectItem>
+                <SelectItem value="inactive">Inactivos</SelectItem>
+                <SelectItem value="warning">Con aviso</SelectItem>
               </SelectContent>
             </Select>
             <Select value={sexFilter} onValueChange={(v) => setSexFilter(v as SexFilter)}>
@@ -360,10 +332,10 @@ export function ClientsClient({
                 <SelectValue placeholder="Sexo" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">Todos los sexos ({sexCounts.all})</SelectItem>
-                <SelectItem value="FEMALE">Mujeres ({sexCounts.FEMALE})</SelectItem>
-                <SelectItem value="MALE">Hombres ({sexCounts.MALE})</SelectItem>
-                <SelectItem value="unknown">Sin especificar ({sexCounts.unknown})</SelectItem>
+                <SelectItem value="all">Todos los sexos</SelectItem>
+                <SelectItem value="FEMALE">Mujeres</SelectItem>
+                <SelectItem value="MALE">Hombres</SelectItem>
+                <SelectItem value="unknown">Sin especificar</SelectItem>
               </SelectContent>
             </Select>
             {/* Rango de edad abierto por los dos lados: rellenar solo "Desde"
@@ -394,25 +366,20 @@ export function ClientsClient({
                 onChange={(e) => setAgeTo(e.target.value)}
               />
             </div>
-          </div>
 
-          {/* Cuántos clientes está viendo ahora mismo: con filtros puestos, el
-              número de la cabecera deja de valer y hay que verlo de un vistazo. */}
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border bg-muted/20 px-4 py-3">
-            <span className="flex items-baseline gap-2">
-              <span className="text-2xl font-bold tabular-nums">{sorted.length}</span>
-              <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                {sorted.length === 1 ? "cliente" : "clientes"}{hayFiltro ? " con estos filtros" : ""}
+            {/* Cuántos clientes se están viendo: va en la misma línea de los
+                filtros y en pequeño para no robarle alto a la tabla. */}
+            <div className="ml-auto flex items-center gap-2 text-sm text-muted-foreground">
+              <span>
+                <span className="font-semibold tabular-nums text-foreground">{sorted.length}</span>{" "}
+                {sorted.length === 1 ? "cliente" : "clientes"}{hayFiltro ? ` de ${rows.length}` : ""}
               </span>
-            </span>
-            {hayFiltro && (
-              <span className="text-xs text-muted-foreground">de {rows.length} en total</span>
-            )}
-            {hayFiltro && (
-              <Button variant="ghost" size="sm" onClick={limpiarFiltros} className="ml-auto gap-1.5">
-                <X className="h-3.5 w-3.5" /> Quitar filtros
-              </Button>
-            )}
+              {hayFiltro && (
+                <Button variant="ghost" size="sm" onClick={limpiarFiltros} className="gap-1.5">
+                  <X className="h-3.5 w-3.5" /> Quitar filtros
+                </Button>
+              )}
+            </div>
           </div>
 
           <Card className="overflow-hidden p-0">

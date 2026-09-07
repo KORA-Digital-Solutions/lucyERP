@@ -49,6 +49,10 @@ npx prisma migrate deploy
 # Ruta relativa a prisma/schema.prisma → genera prisma/dev.db
 DATABASE_URL="file:./dev.db"
 
+# Firma las cookies de sesión. En producción es obligatoria y de 32+ caracteres;
+# en desarrollo, si falta, se usa una fija.
+SESSION_SECRET=
+
 # WhatsApp — dejar vacío para modo simulado (no llama a Meta)
 WHATSAPP_ACCESS_TOKEN=
 WHATSAPP_PHONE_NUMBER_ID=
@@ -91,10 +95,19 @@ lib/
 prisma/
   schema.prisma      → Modelo de datos
   seed.ts            → Datos demo
+  seed-produccion.ts → Base mínima para el centro (sin datos inventados)
+deploy/
+  *.cmd              → Arranque, servicio de Windows y copia de seguridad
 scripts/
   reminder-worker.ts → Worker de recordatorios (cron */5 min)
+  build-release.mjs  → Monta el paquete que se lleva al centro
 ```
 
 ## Despliegue en el PC de la clínica
 
-Ver [DEPLOY.md](DEPLOY.md).
+```bash
+npm run release        # deja el paquete en release/lucy-erp-v1/
+```
+
+- [DEPLOY.md](DEPLOY.md) — cómo se construye el paquete y cómo se actualiza (desarrollo).
+- [INSTALAR.md](INSTALAR.md) — instalación paso a paso en el PC del centro (va dentro del paquete).

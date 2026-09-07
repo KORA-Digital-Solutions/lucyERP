@@ -33,3 +33,5 @@ next-env.d.ts
 
 # claude code
 .claude/
+# paquete de release
+/release/

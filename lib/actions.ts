@@ -22,7 +22,8 @@ import {
 } from "@/lib/format"
 import { getSession } from "@/lib/session"
 import {
-  WEEKDAY_LABELS, LEAVE_TYPE_META, HOME_CARE_FAMILY, GIFT_CARD_FAMILY, type LeaveType,
+  WEEKDAY_LABELS, LEAVE_TYPE_META, HOME_CARE_FAMILY, GIFT_CARD_FAMILY, VOUCHER_FAMILY,
+  type LeaveType,
 } from "@/lib/enums"
 import { dayOfWeekFromDateStr } from "@/lib/schedule"
 import { DEFAULT_REMINDER_ALERT_DAYS, isReminderActive, isReminderOverdue } from "@/lib/reminders"
@@ -995,7 +996,7 @@ export async function adjustStock(
 /* --------------------------------- VENTAS -------------------------------- */
 
 export type SaleLineInput = {
-  type: "SERVICE" | "PRODUCT" | "GIFT_CARD"
+  type: "SERVICE" | "PRODUCT" | "GIFT_CARD" | "VOUCHER" | "VOUCHER_SESSION"
   serviceId?: string
   productId?: string
   description: string
@@ -1010,6 +1011,16 @@ export type SaleLineInput = {
   notes?: string | null
   /** La cita que se está cobrando, si la línea sale de la agenda. */
   appointmentId?: string | null
+  /** Solo líneas VOUCHER: el bono del catálogo que se está vendiendo. */
+  voucherTemplateId?: string | null
+  /** Solo líneas VOUCHER_SESSION: el bono ya comprado del que se gasta. */
+  voucherId?: string | null
+  /**
+   * Para comprar un bono y gastarlo en el mismo ticket. La línea del bono se
+   * inventa una referencia y las sesiones que salen de él la repiten: el bono
+   * todavía no existe cuando se monta el ticket, así que no hay id que poner.
+   */
+  newVoucherRef?: string | null
 }
 
 /* --------------- CITAS PENDIENTES DE COBRAR (TPV ← agenda) --------------- */
@@ -1086,6 +1097,125 @@ export async function getBillableAppointments(customerId: string): Promise<Billa
   }))
 }
 
+/** Lo que hace falta copiar de un bono del catálogo al venderlo. */
+type PlantillaDeBono = {
+  id: string
+  name: string
+  services: { serviceId: string; totalSessions: number; basePriceCents: number; discountPercent: number }[]
+}
+
+/** Lo que le queda a un bono, servicio por servicio. */
+type SaldoDeBono = { name: string; libresPorServicio: Map<string, number> }
+
+/**
+ * Comprueba los bonos de un ticket antes de tocar la base de datos, y de paso
+ * deja cargadas las plantillas que hará falta copiar al crearlos.
+ *
+ * Lo que se valida:
+ *  - que haya cliente, porque un bono es siempre de alguien;
+ *  - que el bono que se vende siga en el catálogo;
+ *  - que el bono del que se gasta sea de este cliente y esté activo;
+ *  - que cubra el servicio que se está gastando;
+ *  - y que le queden sesiones DE ESE SERVICIO, contando también las que gasta
+ *    este mismo ticket. El saldo es por servicio: que al bono le queden cinco
+ *    de facial no da derecho a una sexta de láser.
+ */
+async function prepararBonosDelTicket(
+  lines: SaleLineInput[],
+  customerId: string | null,
+  clinicId: string,
+): Promise<{ error: string } | { plantillas: Map<string, PlantillaDeBono> }> {
+  const lineasDeBono = lines.filter((l) => l.type === "VOUCHER")
+  const lineasDeSesion = lines.filter((l) => l.type === "VOUCHER_SESSION")
+  const plantillas = new Map<string, PlantillaDeBono>()
+  if (lineasDeBono.length === 0 && lineasDeSesion.length === 0) return { plantillas }
+
+  // Sin cliente no hay a quién apuntarle el bono, ni ficha donde consultarlo.
+  if (!customerId) {
+    return { error: "Los bonos van siempre a nombre de un cliente. Elige a quién se le vende." }
+  }
+
+  if (lineasDeBono.length > 0) {
+    if (lineasDeBono.some((l) => !l.voucherTemplateId)) {
+      return { error: "Falta saber qué bono se está vendiendo. Vuelve a cargar la pantalla." }
+    }
+    const ids = [...new Set(lineasDeBono.map((l) => l.voucherTemplateId!))]
+    const filas = await prisma.voucherTemplate.findMany({
+      where: { id: { in: ids }, clinicId },
+      select: {
+        id: true, name: true,
+        services: {
+          select: { serviceId: true, totalSessions: true, basePriceCents: true, discountPercent: true },
+        },
+      },
+    })
+    if (filas.length !== ids.length) {
+      return { error: "Alguno de los bonos del ticket ya no está en el catálogo. Vuelve a cargar la pantalla." }
+    }
+    for (const t of filas) plantillas.set(t.id, t)
+  }
+
+  if (lineasDeSesion.length === 0) return { plantillas }
+
+  // Bonos ya comprados de los que se gasta hoy.
+  const saldos = new Map<string, SaldoDeBono>()
+  const idsDeBono = [...new Set(lineasDeSesion.map((l) => l.voucherId).filter((x): x is string => !!x))]
+  if (idsDeBono.length > 0) {
+    const filas = await prisma.customerVoucher.findMany({
+      where: { id: { in: idsDeBono }, clinicId, customerId, status: "ACTIVE" },
+      select: {
+        id: true, name: true,
+        services: { select: { serviceId: true, totalSessions: true } },
+        sessions: { select: { serviceId: true } },
+      },
+    })
+    if (filas.length !== idsDeBono.length) {
+      return { error: "Alguno de los bonos que se quiere gastar ya no está disponible. Vuelve a cargar la pantalla." }
+    }
+    for (const b of filas) {
+      const libresPorServicio = new Map<string, number>()
+      for (const s of b.services) {
+        const gastadas = b.sessions.filter((x) => x.serviceId === s.serviceId).length
+        libresPorServicio.set(s.serviceId, s.totalSessions - gastadas)
+      }
+      saldos.set(b.id, { name: b.name, libresPorServicio })
+    }
+  }
+
+  // Y los que se compran en este mismo ticket, que todavía no existen: se
+  // comprueban contra la plantilla que los va a crear.
+  const saldosNuevos = new Map<string, SaldoDeBono>()
+  for (const l of lineasDeBono) {
+    if (!l.newVoucherRef) continue
+    const t = plantillas.get(l.voucherTemplateId!)!
+    saldosNuevos.set(l.newVoucherRef, {
+      name: t.name,
+      libresPorServicio: new Map(t.services.map((s) => [s.serviceId, s.totalSessions])),
+    })
+  }
+
+  for (const l of lineasDeSesion) {
+    if (!l.serviceId) return { error: `Falta el servicio de "${l.description}".` }
+    const saldo = l.voucherId
+      ? saldos.get(l.voucherId)
+      : l.newVoucherRef ? saldosNuevos.get(l.newVoucherRef) : undefined
+    if (!saldo) return { error: `No se sabe de qué bono sale "${l.description}".` }
+
+    const libres = saldo.libresPorServicio.get(l.serviceId)
+    if (libres === undefined) {
+      return { error: `El bono "${saldo.name}" no cubre "${l.description}".` }
+    }
+    if (libres <= 0) {
+      return { error: `Al bono "${saldo.name}" no le quedan sesiones de "${l.description}".` }
+    }
+    // Se descuenta sobre la marcha para que dos sesiones del mismo servicio en
+    // el mismo ticket no puedan colarse las dos por el último hueco.
+    saldo.libresPorServicio.set(l.serviceId, libres - 1)
+  }
+
+  return { plantillas }
+}
+
 export async function createSale(
   customerId: string | null,
   saleType: "SALE" | "GIFT_CARD",
@@ -1108,11 +1238,23 @@ export async function createSale(
 
     if (lines.length === 0) return { ok: false, error: "La venta debe tener al menos una línea." }
     // Toda línea lleva profesional, también las de producto: es lo que permite
-    // seguir el ticket entero y medir a cada una en el informe de personal.
-    const sinProfesional = lines.find((l) => !l.workerId)
+    // seguir el ticket entero y medir a cada una en el informe de personal. La
+    // excepción es vender un bono, que no lo presta nadie: lo que se atribuye
+    // es cada sesión que se gaste luego, y esas sí llevan profesional.
+    const sinProfesional = lines.find((l) => l.type !== "VOUCHER" && !l.workerId)
     if (sinProfesional) {
       return { ok: false, error: `Asigna un profesional a "${sinProfesional.description}".` }
     }
+
+    // Una sesión de bono ya se pagó el día que se compró el bono. Entra en el
+    // ticket a 0 EUR para que quede constancia de quién la dio, y el importe se
+    // fuerza aquí en vez de fiarlo a lo que mande la pantalla.
+    lines = lines.map((l) => l.type === "VOUCHER_SESSION"
+      ? { ...l, quantity: 1, unitPriceCents: 0, discountPercent: 0, totalCents: 0 }
+      : l)
+
+    const bonos = await prepararBonosDelTicket(lines, customerId, clinicId)
+    if ("error" in bonos) return { ok: false, error: bonos.error }
 
     // Una cita se cobra una sola vez. El índice único de SaleLine.appointmentId
     // ya lo impide pase lo que pase, pero su error no le dice nada a nadie:
@@ -1179,24 +1321,35 @@ export async function createSale(
           totalCents,
           paidCents,
           notes,
-          lines: {
-            create: lines.map((l) => ({
-              type: l.type,
-              serviceId: l.serviceId ?? null,
-              productId: l.productId ?? null,
-              description: l.description,
-              quantity: l.quantity,
-              unitPriceCents: l.unitPriceCents,
-              discountPercent: l.discountPercent,
-              durationMinutes: l.durationMinutes ?? null,
-              totalCents: l.totalCents,
-              workerId: l.workerId ?? null,
-              notes: l.notes ?? null,
-              appointmentId: l.appointmentId ?? null,
-            })),
-          },
         },
       })
+
+      // Las líneas se crean una a una y en orden en vez de anidadas en la
+      // venta, porque hace falta el id de cada una: el bono comprado y la
+      // sesión gastada apuntan a la línea que los generó, y una creación
+      // anidada no devuelve los ids.
+      const idDeLinea: string[] = []
+      for (const l of lines) {
+        const creada = await tx.saleLine.create({
+          data: {
+            saleId: s.id,
+            type: l.type,
+            serviceId: l.serviceId ?? null,
+            productId: l.productId ?? null,
+            description: l.description,
+            quantity: l.quantity,
+            unitPriceCents: l.unitPriceCents,
+            discountPercent: l.discountPercent,
+            durationMinutes: l.durationMinutes ?? null,
+            totalCents: l.totalCents,
+            workerId: l.workerId ?? null,
+            notes: l.notes ?? null,
+            appointmentId: l.appointmentId ?? null,
+          },
+          select: { id: true },
+        })
+        idDeLinea.push(creada.id)
+      }
 
       // Cobrar una cita la da por hecha. Hasta ahora las citas se quedaban en
       // PENDING para siempre porque nadie volvía a la agenda a marcarlas.
@@ -1233,6 +1386,58 @@ export async function createSale(
         }
       }
 
+      // Bonos comprados en este ticket. El bono se queda con su propia copia
+      // del nombre, las sesiones, el precio y los servicios: retocar mañana la
+      // plantilla no puede reescribir lo que se cobró hoy.
+      const bonoPorReferencia = new Map<string, string>()
+      for (let i = 0; i < lines.length; i++) {
+        const l = lines[i]
+        if (l.type !== "VOUCHER") continue
+        const plantilla = bonos.plantillas.get(l.voucherTemplateId!)!
+        const creado = await tx.customerVoucher.create({
+          data: {
+            clinicId,
+            customerId: customerId!,
+            templateId: plantilla.id,
+            name: plantilla.name,
+            // Lo que de verdad se cobró, que puede no ser la suma de las
+            // líneas: en el mostrador el precio del ticket es editable.
+            pricePaidCents: l.totalCents,
+            notes: l.notes ?? null,
+            saleLineId: idDeLinea[i],
+            // Copia de las líneas de la plantilla: sesiones y precios se
+            // congelan aquí, y editar el catálogo mañana no las toca.
+            services: {
+              create: plantilla.services.map((sv) => ({
+                serviceId: sv.serviceId,
+                totalSessions: sv.totalSessions,
+                basePriceCents: sv.basePriceCents,
+                discountPercent: sv.discountPercent,
+              })),
+            },
+          },
+          select: { id: true },
+        })
+        if (l.newVoucherRef) bonoPorReferencia.set(l.newVoucherRef, creado.id)
+      }
+
+      // Sesiones gastadas. Pueden salir de un bono de hace meses o de uno que
+      // se acaba de comprar tres líneas más arriba en este mismo ticket.
+      for (let i = 0; i < lines.length; i++) {
+        const l = lines[i]
+        if (l.type !== "VOUCHER_SESSION") continue
+        const voucherId = l.voucherId ?? bonoPorReferencia.get(l.newVoucherRef ?? "")
+        if (!voucherId) throw new Error(`No se sabe de qué bono sale "${l.description}".`)
+        await tx.voucherSession.create({
+          data: {
+            voucherId,
+            serviceId: l.serviceId!,
+            workerId: l.workerId!,
+            saleLineId: idDeLinea[i],
+          },
+        })
+      }
+
       // Saldo a favor usado (el saldo es solo crédito, nunca negativo).
       // La deuda NO toca el saldo: vive en el estado de la venta (status = DEBT).
       if (customerId && saleType !== "GIFT_CARD" && balanceUsed > 0) {
@@ -1266,6 +1471,7 @@ export async function createSale(
     revalidatePath("/appointments")
     revalidatePath("/stock")
     revalidatePath("/cash-register")
+    revalidatePath("/vouchers")
     return { ok: true, id: sale.id }
   } catch (e) {
     return fallo(e)
@@ -1534,6 +1740,9 @@ export async function getCustomerConsumption(customerId: string): Promise<{
       family:
         l.type === "PRODUCT" ? HOME_CARE_FAMILY :
         l.type === "GIFT_CARD" ? GIFT_CARD_FAMILY :
+        // La venta del bono no es de ninguna familia, que el pack puede cruzar
+        // varias; la sesión gastada sí, que es un servicio concreto.
+        l.type === "VOUCHER" ? VOUCHER_FAMILY :
         l.service?.family?.name ?? "Sin familia",
       description: l.description,
       quantity: l.quantity,

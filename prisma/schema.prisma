@@ -55,6 +55,8 @@ model Clinic {
   workerLeaveBalances     WorkerLeaveBalance[]
   workerLeaves            WorkerLeave[]
   customerReminders CustomerReminder[]
+  voucherTemplates  VoucherTemplate[]
+  customerVouchers  CustomerVoucher[]
 }
 
 // role: "ADMIN" | "WORKER"
@@ -95,6 +97,7 @@ model User {
   customerReminders    CustomerReminder[] @relation("CustomerReminderCreatedBy")
   customerRemindersCompleted CustomerReminder[] @relation("CustomerReminderCompletedBy")
   saleLines            SaleLine[]
+  voucherSessions      VoucherSession[]
 }
 
 model Cabin {
@@ -148,6 +151,7 @@ model Customer {
   sales            Sale[]
   balanceMovements CustomerBalanceMovement[]
   reminders        CustomerReminder[]
+  vouchers         CustomerVoucher[]
 
   @@unique([clinicId, fileNumber])
 }
@@ -186,6 +190,9 @@ model Service {
 
   appointments Appointment[]
   saleLines    SaleLine[]
+  voucherTemplates VoucherTemplateService[]
+  voucherServices  CustomerVoucherService[]
+  voucherSessions  VoucherSession[]
 
   @@index([familyId])
 }
@@ -306,7 +313,7 @@ model Sale {
   @@index([clinicId, customerId])
 }
 
-// type: "SERVICE" | "PRODUCT"
+// type: "SERVICE" | "PRODUCT" | "GIFT_CARD" | "VOUCHER" | "VOUCHER_SESSION"
 model SaleLine {
   id              String   @id @default(cuid())
   saleId          String
@@ -335,6 +342,11 @@ model SaleLine {
   // NULL conviven sin chocar, así que las líneas sueltas no se estorban.
   appointmentId   String?      @unique
   appointment     Appointment? @relation(fields: [appointmentId], references: [id])
+
+  // La línea que vendió un bono, y la que gastó una sesión de bono. Son
+  // relaciones inversas: el bono y la sesión apuntan aquí, no al revés.
+  customerVoucher CustomerVoucher?
+  voucherSession  VoucherSession?
 
   @@index([saleId])
 }
@@ -583,4 +595,124 @@ model CustomerReminder {
 
   @@index([clinicId, completedAt, dueDate])
   @@index([customerId])
+}
+
+/* --------------------------------- BONOS ---------------------------------- */
+
+// Plantilla de bono: el pack que el centro pone a la venta.
+//
+// Un bono son sesiones prepagadas de uno o varios servicios. Cada servicio
+// lleva las suyas, con su tarifa y su descuento (ver VoucherTemplateService),
+// porque un pack que mezcla un láser y un facial no se puede vender a tanto la
+// sesión: cada tratamiento vale lo que vale. El precio del bono es la suma, y
+// aquí no se guarda: se calcula de sus líneas, que son la única verdad.
+//
+// Los bonos no caducan.
+model VoucherTemplate {
+  id        String   @id @default(cuid())
+  clinicId  String
+  clinic    Clinic   @relation(fields: [clinicId], references: [id])
+  name      String
+  active    Boolean  @default(true)
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  services         VoucherTemplateService[]
+  customerVouchers CustomerVoucher[]
+
+  @@index([clinicId])
+}
+
+// Un servicio dentro del bono, con sus sesiones y su precio. La tarifa se
+// propone como precio del servicio x sesiones, pero se guarda escrita: el
+// catálogo sube de precio y lo que se pactó en el bono no tiene por qué.
+model VoucherTemplateService {
+  id              String          @id @default(cuid())
+  templateId      String
+  template        VoucherTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  serviceId       String
+  service         Service         @relation(fields: [serviceId], references: [id])
+  totalSessions   Int
+  basePriceCents  Int
+  discountPercent Int             @default(0)
+
+  @@unique([templateId, serviceId])
+  @@index([serviceId])
+}
+
+// status: "ACTIVE" | "CANCELLED"
+//
+// El bono que se ha llevado una clienta. Se queda con su propia copia de todo
+// —nombre, servicios, sesiones y precios— para que retocar mañana la plantilla
+// no reescriba lo que se cobró hoy.
+model CustomerVoucher {
+  id         String           @id @default(cuid())
+  clinicId   String
+  clinic     Clinic           @relation(fields: [clinicId], references: [id])
+  customerId String
+  customer   Customer         @relation(fields: [customerId], references: [id])
+  // La plantilla de la que salió, solo para poder rastrearlo. Es opcional
+  // porque una plantilla se puede borrar y el bono vendido sigue vivo.
+  templateId String?
+  template   VoucherTemplate? @relation(fields: [templateId], references: [id])
+  name       String
+  // Lo que se cobró de verdad por el pack entero. Puede no coincidir con la
+  // suma de sus líneas: en el mostrador la línea del ticket es editable.
+  pricePaidCents Int
+  status         String        @default("ACTIVE")
+  notes          String?
+  // La línea del ticket que lo vendió. Única: una línea vende un bono y solo
+  // uno. Puede faltar si el bono se dio de alta a mano.
+  saleLineId String?          @unique
+  saleLine   SaleLine?        @relation(fields: [saleLineId], references: [id])
+  createdAt  DateTime         @default(now())
+  updatedAt  DateTime         @updatedAt
+
+  services CustomerVoucherService[]
+  sessions VoucherSession[]
+
+  @@index([clinicId, customerId])
+  @@index([customerId, status])
+}
+
+// El saldo vive aquí, línea a línea: a este bono le quedan 2 de láser y 5 de
+// facial, no "7 sesiones". Los precios son copia de la plantilla en el momento
+// de la venta.
+model CustomerVoucherService {
+  id              String          @id @default(cuid())
+  voucherId       String
+  voucher         CustomerVoucher @relation(fields: [voucherId], references: [id], onDelete: Cascade)
+  serviceId       String
+  service         Service         @relation(fields: [serviceId], references: [id])
+  totalSessions   Int
+  basePriceCents  Int
+  discountPercent Int             @default(0)
+
+  @@unique([voucherId, serviceId])
+  @@index([serviceId])
+}
+
+// Cada sesión gastada. El saldo se cuenta sobre esta tabla y no sobre un
+// contador guardado en el bono: así una sesión anulada cuadra sola y no hay dos
+// verdades que se puedan desincronizar.
+model VoucherSession {
+  id        String          @id @default(cuid())
+  voucherId String
+  voucher   CustomerVoucher @relation(fields: [voucherId], references: [id], onDelete: Cascade)
+  serviceId String
+  service   Service         @relation(fields: [serviceId], references: [id])
+  // Quien atendió. La venta del bono no lleva profesional, pero la sesión sí:
+  // es lo que permite medirla en el informe de personal.
+  workerId  String
+  worker    User            @relation(fields: [workerId], references: [id])
+  // La línea del ticket con la que se apuntó el consumo, a 0 EUR. Única: una
+  // línea gasta una sesión y solo una.
+  saleLineId String?        @unique
+  saleLine   SaleLine?      @relation(fields: [saleLineId], references: [id])
+  usedAt     DateTime       @default(now())
+  createdAt  DateTime       @default(now())
+
+  @@index([voucherId])
+  @@index([voucherId, serviceId])
 }

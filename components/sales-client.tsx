@@ -4,13 +4,17 @@ import { useState, useMemo, useRef, useEffect } from "react"
 import {
   ArrowLeft, Plus, Search, CreditCard, Banknote, AlertCircle,
   Trash2, Gift, ShoppingCart, X, Clock, Wallet, Scissors, Package, CalendarDays, Receipt, UserPlus,
-  FileText, ChevronDown, ChevronRight,
+  FileText,
   Bell, CheckCircle2, Pin, CalendarClock, Ticket,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent } from "@/components/ui/card"
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import {
+  useTableSort, SortableTableHead, byText, byNumber, type SortRule,
+} from "@/components/sortable-table-head"
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from "@/components/ui/dialog"
@@ -226,19 +230,7 @@ const STATUS_META: Record<string, { label: string; cls: string }> = {
 }
 const PAYMENT_LABELS: Record<string, string> = { CARD: "Tarjeta", CASH: "Efectivo", BALANCE: "Saldo", DEBT: "Deuda" }
 
-/* ─── Tipos y familias de las líneas ─────────────────────────────────────── */
-
-/**
- * Qué es cada línea, dicho como se dice en el mostrador. El orden es el de las
- * pestañas del TPV, para que el desplegable se lea igual que se vendió.
- */
-const LINE_TYPE_LABELS: { id: LineType; label: string }[] = [
-  { id: "SERVICE",         label: "Servicios" },
-  { id: "PRODUCT",         label: "Productos" },
-  { id: "VOUCHER",         label: "Bonos vendidos" },
-  { id: "VOUCHER_SESSION", label: "Sesiones de bono" },
-  { id: "GIFT_CARD",       label: "Tarjetas regalo" },
-]
+/* ─── Familias de las líneas ─────────────────────────────────────────────── */
 
 /**
  * La familia de una línea, con el mismo criterio que el histórico del cliente
@@ -253,7 +245,6 @@ function familiaDeLinea(l: SaleLine): string {
   return l.service?.family.name ?? "Sin familia"
 }
 
-const TODOS_LOS_TIPOS = "ALL"
 const TODAS_LAS_FAMILIAS_FILTRO = "ALL"
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -269,48 +260,116 @@ function localDateStr(d: Date) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
 }
 
-/** Cuántas ventas caben en una pantalla del histórico sin marear. */
-const VENTAS_POR_PAGINA = 15
+/** Cuántas líneas caben en una pantalla del histórico sin marear. */
+const LINEAS_POR_PAGINA = 25
+
+/**
+ * Una línea de venta con todo lo que hace falta para leerla suelta: lo suyo
+ * —qué se hizo, a qué precio, con qué descuento y quién lo hizo— y lo de su
+ * ticket —cuándo, a quién, cómo se pagó y quién lo cobró—.
+ *
+ * El listado enseña líneas, no tickets. Lo que se pregunta mirando ventas es
+ * qué se le ha hecho a la clienta, cuánto se le cobró por ello y quién se lo
+ * hizo, y eso vive en la línea; el ticket es solo la forma en que se cobraron
+ * varias cosas a la vez. Los datos del ticket se repiten en cada una de sus
+ * líneas para que la fila se entienda sola, se pueda ordenar por cualquier
+ * columna y no dependa de la fila de arriba.
+ */
+type LineaDeVenta = {
+  key: string
+  saleId: string
+  line: SaleLine
+  fechaMs: number
+  cliente: string
+  concepto: string
+  familia: string
+  /** Quien hizo el servicio. Vacío en bonos y tarjetas, que no los da nadie. */
+  atendio: string
+  /** Quien hizo el movimiento de la venta, es decir, quien cobró el ticket. */
+  cobro: string
+  paymentMethod: string
+  status: string
+  totalCents: number
+  /** Su ticket lleva más líneas: se marcan para que se vean como lo que son. */
+  enTicketCompartido: boolean
+}
+
+const LINEA_SORTERS = {
+  fecha:    byNumber<LineaDeVenta>((r) => r.fechaMs),
+  cliente:  byText<LineaDeVenta>((r) => r.cliente),
+  concepto: byText<LineaDeVenta>((r) => r.concepto),
+  atendio:  byText<LineaDeVenta>((r) => r.atendio),
+  cobro:    byText<LineaDeVenta>((r) => r.cobro),
+  total:    byNumber<LineaDeVenta>((r) => r.totalCents),
+}
+type LineaSortKey = keyof typeof LINEA_SORTERS
+
+/** Lo último vendido primero, que es por donde se empieza a mirar. */
+const LINEA_SORT_INICIAL: SortRule<LineaSortKey>[] = [{ key: "fecha", dir: "desc" }]
+
+function nombreDe(p: { name: string; lastName: string | null } | null): string {
+  return p ? `${p.name} ${p.lastName ?? ""}`.trim() : ""
+}
 
 export function SalesClient({ sales, customers, services, products, workers, voucherTemplates, currentUserId, cashOpen, pinRequired, hayVentasSinCargar }: Props) {
   const [mode, setMode] = useState<"list" | "pos">("list")
   const [showNoCashDialog, setShowNoCashDialog] = useState(false)
-  const [clientSearch, setClientSearch] = useState("")
-  const [workerFilter, setWorkerFilter] = useState("ALL")
+  const [search, setSearch] = useState("")
+  /** Quien cobró el ticket. */
+  const [cobroFilter, setCobroFilter] = useState("ALL")
+  /** Quien hizo el servicio de la línea, que muchas veces no es la misma. */
+  const [atendioFilter, setAtendioFilter] = useState("ALL")
   const [paymentFilter, setPaymentFilter] = useState("ALL")
-  const [typeFilter, setTypeFilter] = useState<string>(TODOS_LOS_TIPOS)
   const [familyFilter, setFamilyFilter] = useState<string>(TODAS_LAS_FAMILIAS_FILTRO)
   const [dateMode, setDateMode] = useState<"today" | "week" | "custom">("today")
   const [customFrom, setCustomFrom] = useState(todayStr())
   const [customTo, setCustomTo] = useState(todayStr())
-  // Los tickets que se han abierto. Se empieza con todos plegados: el listado
-  // se lee primero de un vistazo —qué día, quién, cuánto— y el detalle se pide
-  // del que interesa. Con todo abierto de entrada, quince tickets con sus
-  // líneas no caben en la pantalla y no hay listado que ojear.
-  const [desplegadas, setDesplegadas] = useState<Set<string>>(new Set())
+  // El ticket que se está mirando entero. La fila ya cuenta lo suyo; esto es
+  // para lo que solo existe en el ticket y no se puede repartir por líneas:
+  // qué más se cobró a la vez, el saldo que se aplicó y lo que quedó a deber.
+  const [ticketAbierto, setTicketAbierto] = useState<string | null>(null)
   const [pagina, setPagina] = useState(0)
 
-  // Unique workers derived from sales for filter dropdown
-  const saleWorkers = useMemo(() => {
-    const map = new Map<string, string>()
-    sales.forEach((s) => {
-      const key = `${s.user.name} ${s.user.lastName ?? ""}`.trim()
-      map.set(key, key)
-    })
-    return Array.from(map.keys()).sort()
-  }, [sales])
+  // Las ventas llegan por tickets, con sus líneas dentro; aquí se estiran a
+  // una fila por línea, cada una con lo suyo y lo de su ticket ya resuelto.
+  const lineas = useMemo<LineaDeVenta[]>(() => sales.flatMap((s) => {
+    const cliente = s.customer ? customerLabel(s.customer) : ""
+    const cobro = nombreDe(s.user)
+    const fechaMs = new Date(s.createdAt).getTime()
+    const compartido = s.lines.length > 1
+    return s.lines.map((l) => ({
+      key: l.id,
+      saleId: s.id,
+      line: l,
+      fechaMs,
+      cliente,
+      concepto: l.description,
+      familia: familiaDeLinea(l),
+      atendio: nombreDe(l.worker),
+      cobro,
+      paymentMethod: s.paymentMethod,
+      status: s.status,
+      totalCents: l.totalCents,
+      enTicketCompartido: compartido,
+    }))
+  }), [sales])
 
-  // Las familias que se pueden pedir salen de lo que se ha vendido: ofrecer
-  // familias del catálogo que nadie ha tocado es mandar a un listado vacío.
-  // Sin contar cuántas líneas hay de cada una: ese número es de líneas y el
-  // listado enseña ventas, así que no cuadraba con nada de lo que se ve luego.
-  const saleFamilies = useMemo(() => {
-    const acc = new Set<string>()
-    for (const s of sales) {
-      for (const l of s.lines) acc.add(familiaDeLinea(l))
-    }
-    return [...acc].sort((a, b) => a.localeCompare(b, "es"))
-  }, [sales])
+  // Quién sale en cada desplegable lo dice lo vendido, no la plantilla:
+  // ofrecer gente que no ha tocado ninguna de estas ventas es mandar a un
+  // listado vacío. Y son dos listas distintas porque son dos preguntas
+  // distintas: en el mostrador cobra una y atiende otra.
+  const cobradoPor = useMemo(
+    () => [...new Set(lineas.map((r) => r.cobro).filter(Boolean))].sort((a, b) => a.localeCompare(b, "es")),
+    [lineas],
+  )
+  const atendidoPor = useMemo(
+    () => [...new Set(lineas.map((r) => r.atendio).filter(Boolean))].sort((a, b) => a.localeCompare(b, "es")),
+    [lineas],
+  )
+  const saleFamilies = useMemo(
+    () => [...new Set(lineas.map((r) => r.familia))].sort((a, b) => a.localeCompare(b, "es")),
+    [lineas],
+  )
 
   const { dateFrom, dateTo } = useMemo(() => {
     const today = todayStr()
@@ -326,68 +385,58 @@ export function SalesClient({ sales, customers, services, products, workers, vou
   }, [dateMode, customFrom, customTo])
 
   const filtered = useMemo(() => {
-    const q = normalize(clientSearch)
-    const from = dateFrom ? new Date(dateFrom + "T00:00:00") : null
-    const to = dateTo ? new Date(dateTo + "T23:59:59") : null
-    return sales.filter((s) => {
-      if (q) {
-        const name = s.customer
-          ? normalize(`${s.customer.firstName} ${s.customer.lastName ?? ""} ${s.customer.lastName2 ?? ""}`)
-          : ""
-        if (!name.includes(q)) return false
-      }
-      if (workerFilter !== "ALL") {
-        const wName = `${s.user.name} ${s.user.lastName ?? ""}`.trim()
-        if (wName !== workerFilter) return false
-      }
-      if (paymentFilter !== "ALL" && s.paymentMethod !== paymentFilter) return false
-      // El tipo y la familia son de la línea, no del ticket: se pide "las
-      // ventas con algo de láser" y sale el ticket entero, que es la unidad
-      // con la que se cobra y con la que se mira.
-      if (typeFilter !== TODOS_LOS_TIPOS || familyFilter !== TODAS_LAS_FAMILIAS_FILTRO) {
-        const hay = s.lines.some((l) =>
-          (typeFilter === TODOS_LOS_TIPOS || l.type === typeFilter) &&
-          (familyFilter === TODAS_LAS_FAMILIAS_FILTRO || familiaDeLinea(l) === familyFilter))
-        if (!hay) return false
-      }
-      const createdAt = new Date(s.createdAt)
-      if (from && createdAt < from) return false
-      if (to && createdAt > to) return false
+    const q = normalize(search)
+    const desde = dateFrom ? new Date(dateFrom + "T00:00:00").getTime() : null
+    const hasta = dateTo ? new Date(dateTo + "T23:59:59").getTime() : null
+    return lineas.filter((r) => {
+      // Una sola caja para cliente y concepto: en un listado de líneas se
+      // busca igual "García" que "láser", y con dos cajas hay que acertar en
+      // cuál se teclea cada cosa.
+      if (q && !normalize(`${r.cliente} ${r.concepto} ${r.familia}`).includes(q)) return false
+      if (cobroFilter !== "ALL" && r.cobro !== cobroFilter) return false
+      if (atendioFilter !== "ALL" && r.atendio !== atendioFilter) return false
+      if (paymentFilter !== "ALL" && r.paymentMethod !== paymentFilter) return false
+      // La familia ahora filtra la fila, no el ticket: se pide "Depilación" y
+      // salen las líneas de depilación, no los tickets que llevaban algo de
+      // depilación con todo lo demás detrás.
+      if (familyFilter !== TODAS_LAS_FAMILIAS_FILTRO && r.familia !== familyFilter) return false
+      if (desde !== null && r.fechaMs < desde) return false
+      if (hasta !== null && r.fechaMs > hasta) return false
       return true
     })
-  }, [sales, clientSearch, workerFilter, paymentFilter, typeFilter, familyFilter, dateFrom, dateTo])
+  }, [lineas, search, cobroFilter, atendioFilter, paymentFilter, familyFilter, dateFrom, dateTo])
+
+  const { sort, sorted, toggleSort } = useTableSort<LineaDeVenta, LineaSortKey>(
+    filtered, LINEA_SORTERS, LINEA_SORT_INICIAL,
+  )
+
+  // De cuántos tickets salen estas líneas y cuánto suman. La suma es la de las
+  // líneas que se están viendo: coincide con la de los tickets cuando entran
+  // enteros, y con un filtro puesto dice lo que de verdad se ha filtrado.
+  const resumen = useMemo(() => ({
+    tickets: new Set(filtered.map((r) => r.saleId)).size,
+    importeCents: filtered.reduce((a, r) => a + r.totalCents, 0),
+  }), [filtered])
 
   // Al cambiar cualquier filtro se vuelve a la primera página: quedarse en la
   // cuarta de un listado que ahora tiene dos deja la pantalla en blanco.
   useEffect(() => {
     setPagina(0)
-  }, [clientSearch, workerFilter, paymentFilter, typeFilter, familyFilter, dateFrom, dateTo])
+  }, [search, cobroFilter, atendioFilter, paymentFilter, familyFilter, dateFrom, dateTo])
 
-  const paginas = Math.max(1, Math.ceil(filtered.length / VENTAS_POR_PAGINA))
+  const paginas = Math.max(1, Math.ceil(sorted.length / LINEAS_POR_PAGINA))
   const paginaActual = Math.min(pagina, paginas - 1)
-  const desdeFila = paginaActual * VENTAS_POR_PAGINA
-  const visibles = filtered.slice(desdeFila, desdeFila + VENTAS_POR_PAGINA)
-  const algunaAbierta = visibles.some((s) => desplegadas.has(s.id))
+  const desdeFila = paginaActual * LINEAS_POR_PAGINA
+  const visibles = sorted.slice(desdeFila, desdeFila + LINEAS_POR_PAGINA)
 
-  function toggleTicket(id: string) {
-    setDesplegadas((prev) => {
-      const next = new Set(prev)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
-      return next
-    })
-  }
+  const hayFiltro = search !== "" || cobroFilter !== "ALL" || atendioFilter !== "ALL"
+    || paymentFilter !== "ALL" || familyFilter !== TODAS_LAS_FAMILIAS_FILTRO
+    || dateMode !== "today"
 
-  /** Abre todo lo que se está viendo, o lo vuelve a plegar. */
-  function togglePagina() {
-    setDesplegadas((prev) => {
-      const next = new Set(prev)
-      for (const s of visibles) {
-        if (algunaAbierta) next.delete(s.id)
-        else next.add(s.id)
-      }
-      return next
-    })
+  function limpiarFiltros() {
+    setSearch(""); setCobroFilter("ALL"); setAtendioFilter("ALL"); setPaymentFilter("ALL")
+    setFamilyFilter(TODAS_LAS_FAMILIAS_FILTRO)
+    setDateMode("today"); setCustomFrom(todayStr()); setCustomTo(todayStr())
   }
 
   // La venta más antigua que se ha traído: hasta ahí llega lo que se puede
@@ -395,6 +444,8 @@ export function SalesClient({ sales, customers, services, products, workers, vou
   const masAntigua = sales.length > 0 ? sales[sales.length - 1].createdAt : null
   const filtroFueraDeAlcance = hayVentasSinCargar && masAntigua !== null
     && dateFrom < localDateStr(new Date(masAntigua))
+
+  const saleAbierta = ticketAbierto ? sales.find((s) => s.id === ticketAbierto) ?? null : null
 
   if (mode === "pos") {
     return <POSView sales={sales} customers={customers} services={services} products={products} workers={workers} voucherTemplates={voucherTemplates} currentUserId={currentUserId} pinRequired={pinRequired} onBack={() => setMode("list")} />
@@ -405,9 +456,9 @@ export function SalesClient({ sales, customers, services, products, workers, vou
       <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-card p-6">
         {/* Sin subtítulo: lo que ponía era cuántas ventas se habían traído de
             la base (el tope de la consulta), un número que no contesta ninguna
-            pregunta y que además se confundía con "ventas que hay". Cuántas
-            salen con los filtros puestos se dice junto a los filtros, y de que
-            hay más antiguas sin cargar avisa el pie de la tabla. */}
+            pregunta y que además se confundía con "ventas que hay". Lo que
+            sale con los filtros puestos se dice junto a los filtros, y de que
+            hay más antiguas sin cargar avisa el aviso de debajo. */}
         <h1 className="text-2xl font-semibold tracking-tight">Ventas</h1>
         <Button size="lg" onClick={() => cashOpen ? setMode("pos") : setShowNoCashDialog(true)}>
           <Plus className="mr-2 h-4 w-4" /> Nueva venta
@@ -420,7 +471,7 @@ export function SalesClient({ sales, customers, services, products, workers, vou
           <div className="flex flex-wrap gap-3 items-center">
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input className="pl-9 w-52" placeholder="Buscar cliente…" value={clientSearch} onChange={(e) => setClientSearch(e.target.value)} />
+              <Input className="pl-9 w-64" placeholder="Buscar cliente o concepto…" value={search} onChange={(e) => setSearch(e.target.value)} />
             </div>
             <div className="flex items-center gap-1">
               <Button
@@ -462,18 +513,53 @@ export function SalesClient({ sales, customers, services, products, workers, vou
                 />
               </div>
             )}
-            <span className="text-sm text-muted-foreground ml-auto">
-              {filtered.length} {filtered.length === 1 ? "venta" : "ventas"}
+            {/* Qué hay delante, dicho de una vez: cuántas líneas, de cuántos
+                tickets salen y cuánto suman. Antes solo se decía el número de
+                ventas, que no contesta a "cuánto se ha hecho hoy". */}
+            <span className="ml-auto flex items-baseline gap-2 text-sm text-muted-foreground">
+              <span>
+                {filtered.length} {filtered.length === 1 ? "línea" : "líneas"}
+                {" · "}
+                {resumen.tickets} {resumen.tickets === 1 ? "ticket" : "tickets"}
+              </span>
+              <span className="font-semibold tabular-nums text-foreground">{fmtEur(resumen.importeCents)}</span>
             </span>
           </div>
           <div className="flex flex-wrap gap-3 items-center">
+            {/* Por qué se vendió va primero: es la pregunta que más se hace y
+                la que más recorta el listado. Ya no hay filtro de tipo aparte,
+                porque la familia lo dice igual —el producto, el bono y la
+                tarjeta regalo tienen la suya— y eran dos desplegables para
+                partir lo mismo. */}
             <select
-              value={workerFilter}
-              onChange={(e) => setWorkerFilter(e.target.value)}
+              value={familyFilter}
+              onChange={(e) => setFamilyFilter(e.target.value)}
+              className="h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground"
+            >
+              <option value={TODAS_LAS_FAMILIAS_FILTRO}>Todas las familias</option>
+              {saleFamilies.map((f) => (
+                <option key={f} value={f}>{f}</option>
+              ))}
+            </select>
+            {/* Las dos personas de una venta, cada una con su filtro y los dos
+                iguales: quien hizo el servicio y quien hizo el movimiento.
+                Antes solo se podía pedir por la segunda, que es la que menos
+                se pregunta. */}
+            <select
+              value={atendioFilter}
+              onChange={(e) => setAtendioFilter(e.target.value)}
+              className="h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground"
+            >
+              <option value="ALL">Atendido por: todas</option>
+              {atendidoPor.map((w) => <option key={w} value={w}>{w}</option>)}
+            </select>
+            <select
+              value={cobroFilter}
+              onChange={(e) => setCobroFilter(e.target.value)}
               className="h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground"
             >
               <option value="ALL">Cobrado por: todas</option>
-              {saleWorkers.map((w) => <option key={w} value={w}>{w}</option>)}
+              {cobradoPor.map((w) => <option key={w} value={w}>{w}</option>)}
             </select>
             <select
               value={paymentFilter}
@@ -485,46 +571,9 @@ export function SalesClient({ sales, customers, services, products, workers, vou
               <option value="CARD">Tarjeta</option>
               <option value="DEBT">Deuda</option>
             </select>
-            {/* Qué se vendió, no cómo se cobró: estos dos miran dentro del
-                ticket, y sacan la venta entera si alguna de sus líneas
-                encaja. */}
-            <select
-              value={typeFilter}
-              onChange={(e) => setTypeFilter(e.target.value)}
-              className="h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground"
-            >
-              <option value={TODOS_LOS_TIPOS}>Todos los tipos</option>
-              {LINE_TYPE_LABELS.map((t) => (
-                <option key={t.id} value={t.id}>{t.label}</option>
-              ))}
-            </select>
-            <select
-              value={familyFilter}
-              onChange={(e) => setFamilyFilter(e.target.value)}
-              className="h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground"
-            >
-              <option value={TODAS_LAS_FAMILIAS_FILTRO}>Todas las familias</option>
-              {saleFamilies.map((f) => (
-                <option key={f} value={f}>{f}</option>
-              ))}
-            </select>
-            {(clientSearch || workerFilter !== "ALL" || paymentFilter !== "ALL"
-              || typeFilter !== TODOS_LOS_TIPOS || familyFilter !== TODAS_LAS_FAMILIAS_FILTRO
-              || dateMode !== "today") && (
-              <Button variant="ghost" size="sm" className="text-muted-foreground" onClick={() => {
-                setClientSearch(""); setWorkerFilter("ALL"); setPaymentFilter("ALL")
-                setTypeFilter(TODOS_LOS_TIPOS); setFamilyFilter(TODAS_LAS_FAMILIAS_FILTRO)
-                setDateMode("today"); setCustomFrom(todayStr()); setCustomTo(todayStr())
-              }}>
+            {hayFiltro && (
+              <Button variant="ghost" size="sm" className="text-muted-foreground" onClick={limpiarFiltros}>
                 Limpiar filtros
-              </Button>
-            )}
-            {filtered.length > 0 && (
-              <Button variant="ghost" size="sm" className="ml-auto text-muted-foreground gap-1.5"
-                onClick={togglePagina}>
-                {algunaAbierta
-                  ? <><ChevronDown className="h-3.5 w-3.5" /> Plegar todo</>
-                  : <><ChevronRight className="h-3.5 w-3.5" /> Desplegar todo</>}
               </Button>
             )}
           </div>
@@ -543,77 +592,128 @@ export function SalesClient({ sales, customers, services, products, workers, vou
 
         <Card>
           <CardContent className="p-0">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b text-muted-foreground">
-                  <th className="w-8 px-2 py-3" />
-                  <th className="px-4 py-3 text-left font-medium">Fecha</th>
-                  <th className="px-4 py-3 text-left font-medium">Cliente</th>
-                  <th className="px-4 py-3 text-left font-medium">Pago</th>
-                  <th className="px-4 py-3 text-right font-medium">Total</th>
-                  <th className="px-4 py-3 text-left font-medium">Estado</th>
-                  {/* Quien cobró el ticket, que no tiene por qué ser quien hizo
-                      lo que hay dentro: eso va línea a línea, ahí debajo. */}
-                  <th className="px-4 py-3 text-left font-medium">Cobrado por</th>
-                </tr>
-              </thead>
-              {filtered.length === 0 && (
-                <tbody>
-                  <tr><td colSpan={7} className="py-12 text-center text-muted-foreground">No hay ventas para los filtros aplicados.</td></tr>
-                </tbody>
-              )}
-              {visibles.map((s) => {
-                const st = STATUS_META[s.status] ?? STATUS_META.PAID
-                const abierta = desplegadas.has(s.id)
-                return (
-                  // Un tbody por venta: la cabecera del ticket y su detalle son
-                  // la misma fila para el navegador aunque se pinten en dos.
-                  <tbody key={s.id} className="border-b last:border-0">
-                    <tr
-                      className="cursor-pointer transition-colors hover:bg-muted/40"
-                      onClick={() => toggleTicket(s.id)}
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <SortableTableHead sortKey="fecha" sort={sort} onToggle={toggleSort}>Fecha</SortableTableHead>
+                  <SortableTableHead sortKey="cliente" sort={sort} onToggle={toggleSort}>Cliente</SortableTableHead>
+                  <SortableTableHead sortKey="concepto" sort={sort} onToggle={toggleSort}>Concepto</SortableTableHead>
+                  {/* El informe de personal mide por quien atiende, no por
+                      quien cobra: aquí se ven las dos, una al lado de la otra. */}
+                  <SortableTableHead sortKey="atendio" sort={sort} onToggle={toggleSort}>Atendió</SortableTableHead>
+                  <TableHead className="px-2 py-3 text-right font-medium text-muted-foreground">Precio</TableHead>
+                  <TableHead className="px-2 py-3 text-right font-medium text-muted-foreground">Dto.</TableHead>
+                  <SortableTableHead sortKey="total" sort={sort} onToggle={toggleSort} className="text-right">Total</SortableTableHead>
+                  <SortableTableHead sortKey="cobro" sort={sort} onToggle={toggleSort}>Cobró</SortableTableHead>
+                  <TableHead className="px-2 py-3 font-medium text-muted-foreground">Pago</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {visibles.map((r, i) => {
+                  const l = r.line
+                  const brutoCents = l.unitPriceCents * l.quantity
+                  const fecha = new Date(r.fechaMs)
+                  // La de debajo es del mismo ticket: se les quita la raya de
+                  // en medio y las dos quedan como un bloque. Se mira la fila
+                  // que de verdad va debajo, así que sigue valiendo con
+                  // cualquier ordenación.
+                  const sigueElTicket = visibles[i + 1]?.saleId === r.saleId
+                  return (
+                    <TableRow
+                      key={r.key}
+                      // Toda la fila abre su ticket: solo hay una cosa que
+                      // pueda pasar al pinchar, así que no hace falta botón.
+                      onClick={() => setTicketAbierto(r.saleId)}
+                      title="Ver el ticket completo"
+                      className={cn("cursor-pointer", sigueElTicket && "border-b-0")}
                     >
-                      <td className="px-2 py-3 text-muted-foreground">
-                        {abierta ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-                      </td>
-                      <td className="px-4 py-3 whitespace-nowrap text-muted-foreground">
-                        {new Date(s.createdAt).toLocaleDateString("es-ES", { day: "2-digit", month: "short", year: "numeric" })}
-                        <span className="ml-2 tabular-nums">
-                          {new Date(s.createdAt).toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" })}
+                      <TableCell className={cn(
+                        "whitespace-nowrap px-2 text-muted-foreground border-l-2",
+                        // Las líneas que se cobraron juntas llevan una barra
+                        // fina a la izquierda: puestas seguidas se unen y se
+                        // ve de un vistazo que son el mismo ticket. El borde
+                        // transparente de las demás mantiene la alineación.
+                        //
+                        // Va en la celda y no en la fila porque la tabla apaga
+                        // los bordes de la última fila entera, y ahí la barra
+                        // desaparecía justo en la de abajo.
+                        r.enTicketCompartido ? "border-l-primary/30" : "border-l-transparent",
+                      )}>
+                        {fecha.toLocaleDateString("es-ES", { day: "2-digit", month: "short", year: "numeric" })}
+                        {/* La hora debajo y no al lado: la fila ya tiene dos
+                            renglones por la familia, así que ahí no estorba y
+                            la columna ocupa la mitad. */}
+                        <span className="block text-xs tabular-nums">
+                          {fecha.toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" })}
                         </span>
-                      </td>
-                      <td className="px-4 py-3 font-medium">
-                        {s.customer ? customerLabel(s.customer) : "—"}
-                      </td>
-                      <td className="px-4 py-3 text-muted-foreground">{PAYMENT_LABELS[s.paymentMethod] ?? s.paymentMethod}</td>
-                      <td className="px-4 py-3 text-right font-medium tabular-nums">{fmtEur(s.totalCents)}</td>
-                      <td className="px-4 py-3">
-                        <span className={`rounded-full border px-2 py-0.5 text-xs ${st.cls}`}>{st.label}</span>
-                      </td>
-                      <td className="px-4 py-3 text-muted-foreground">
-                        {`${s.user.name} ${s.user.lastName ?? ""}`.trim()}
-                      </td>
-                    </tr>
-                    {abierta && (
-                      <tr>
-                        <td colSpan={7} className="bg-muted/20 px-4 pb-4 pt-1">
-                          <TicketDetalle sale={s} />
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                )
-              })}
-            </table>
+                      </TableCell>
+                      <TableCell className="px-2 font-medium">{r.cliente || "—"}</TableCell>
+                      <TableCell className="px-2">
+                        {l.description}
+                        {/* Las unidades pegadas al concepto y solo cuando hay
+                            varias: una columna entera de unos no dice nada. */}
+                        {l.quantity > 1 && <span className="text-muted-foreground"> ×{l.quantity}</span>}
+                        <span className="block text-xs text-muted-foreground">
+                          {r.familia}
+                          {l.durationMinutes ? ` · ${l.durationMinutes} min` : ""}
+                          {LINE_TAG[l.type] && ` · ${LINE_TAG[l.type]}`}
+                          {l.notes && ` · ${l.notes}`}
+                        </span>
+                      </TableCell>
+                      <TableCell className="whitespace-nowrap px-2">
+                        {/* El bono y la tarjeta regalo no los da nadie: se
+                            cuentan a quien cobró, dos columnas más allá. */}
+                        {r.atendio || <span className="text-muted-foreground">—</span>}
+                      </TableCell>
+                      <TableCell className="whitespace-nowrap px-2 text-right tabular-nums text-muted-foreground">
+                        {fmtEur(l.unitPriceCents)}
+                      </TableCell>
+                      {/* El descuento, en su columna: el porcentaje y lo que
+                          son en euros, que es lo que se acaba preguntando. */}
+                      <TableCell className="whitespace-nowrap px-2 text-right tabular-nums">
+                        {l.discountPercent > 0
+                          ? <span className="text-[#B31412]">
+                              −{l.discountPercent} %
+                              {/* Lo que son en euros debajo del porcentaje, no
+                                  al lado: es la mitad de columna y la fila ya
+                                  tiene dos renglones. */}
+                              <span className="block text-xs">−{fmtEur(brutoCents - l.totalCents)}</span>
+                            </span>
+                          : <span className="text-muted-foreground">—</span>}
+                      </TableCell>
+                      <TableCell className="px-2 text-right font-medium tabular-nums">{fmtEur(l.totalCents)}</TableCell>
+                      <TableCell className="whitespace-nowrap px-2 text-muted-foreground">{r.cobro}</TableCell>
+                      <TableCell className="whitespace-nowrap px-2 text-muted-foreground">
+                        {PAYMENT_LABELS[r.paymentMethod] ?? r.paymentMethod}
+                        {/* "Pagado" no se dice: es lo normal, y repetirlo en
+                            cada línea es ruido. Lo que hay que ver es lo que
+                            quedó a deber, y eso sí salta. */}
+                        {r.status === "DEBT" && (
+                          <span className={`ml-2 rounded-full border px-2 py-0.5 text-xs ${STATUS_META.DEBT.cls}`}>
+                            {STATUS_META.DEBT.label}
+                          </span>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  )
+                })}
+                {visibles.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={9} className="py-12 text-center text-muted-foreground">
+                      No hay ventas para los filtros aplicados.
+                    </TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+            </Table>
           </CardContent>
         </Card>
 
-        {/* Paginación. El histórico entero no cabe de una vez, y cargarlo en
-            una sola página con todos los tickets abiertos no se lee. */}
-        {filtered.length > VENTAS_POR_PAGINA && (
+        {/* Paginación. El histórico entero no cabe de una vez. */}
+        {sorted.length > LINEAS_POR_PAGINA && (
           <div className="flex flex-wrap items-center justify-between gap-3">
             <span className="text-sm text-muted-foreground">
-              Ventas {desdeFila + 1}–{Math.min(desdeFila + VENTAS_POR_PAGINA, filtered.length)} de {filtered.length}
+              Líneas {desdeFila + 1}–{Math.min(desdeFila + LINEAS_POR_PAGINA, sorted.length)} de {sorted.length}
             </span>
             <div className="flex items-center gap-2">
               <Button variant="outline" size="sm" disabled={paginaActual === 0}
@@ -629,6 +729,31 @@ export function SalesClient({ sales, customers, services, products, workers, vou
               </Button>
             </div>
           </div>
+        )}
+
+        {/* El ticket entero, para lo que no cabe en una fila: qué más se cobró
+            en el mismo movimiento, el saldo que se aplicó y lo que quedó a
+            deber. */}
+        {saleAbierta && (
+          <Dialog open onOpenChange={() => setTicketAbierto(null)}>
+            <DialogContent style={{ maxWidth: "46rem" }}>
+              <DialogHeader>
+                <DialogTitle>
+                  Ticket del {new Date(saleAbierta.createdAt).toLocaleDateString("es-ES", { day: "numeric", month: "long", year: "numeric" })}
+                  {", "}
+                  {new Date(saleAbierta.createdAt).toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" })}
+                </DialogTitle>
+                <DialogDescription>
+                  {saleAbierta.customer ? customerLabel(saleAbierta.customer) : "Sin cliente"}
+                  {" · "}
+                  {PAYMENT_LABELS[saleAbierta.paymentMethod] ?? saleAbierta.paymentMethod}
+                  {" · "}
+                  Cobrado por {nombreDe(saleAbierta.user)}
+                </DialogDescription>
+              </DialogHeader>
+              <TicketDetalle sale={saleAbierta} />
+            </DialogContent>
+          </Dialog>
         )}
 
         {/* No cash register dialog */}

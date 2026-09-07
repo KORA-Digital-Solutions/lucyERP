@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import {
-  Plus, Search, Check, X, AlertTriangle,
+  Plus, Search, Check, X, AlertTriangle, Ticket,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
@@ -60,6 +60,9 @@ const CLIENT_SORTERS = {
     if (vb == null) return -1
     return vb - va
   },
+  // Por sesiones libres, no por número de bonos: entre dos clientas con un
+  // bono cada una, la que más tiene por delante es la que interesa.
+  bonos: byNumber<ClientRow>((r) => r.voucherSessionsLeft),
   saldo: byNumber<ClientRow>((r) => r.balanceCents),
   deuda: byNumber<ClientRow>((r) => r.debtCents),
   estado: byBoolean<ClientRow>((r) => r.active),
@@ -79,6 +82,7 @@ function hasInactivityWarning(row: ClientRow, threshold: number): boolean {
 
 type StatusFilter = "all" | ActivityStatus | "warning"
 type SexFilter = "all" | CustomerSex | "unknown"
+type VoucherFilter = "all" | "with" | "without"
 
 /* Cada filtro es una función suelta para poder aplicarlos por separado: así
    los contadores de un desplegable se calculan con los DEMÁS filtros puestos
@@ -108,6 +112,16 @@ function matchesStatus(row: ClientRow, filter: StatusFilter, warningDays: number
   if (filter === "all") return true
   if (filter === "warning") return hasInactivityWarning(row, warningDays)
   return getActivityStatus(row) === filter
+}
+
+/**
+ * Quién tiene bono a medias. Vale lo mismo que en el mostrador: el bono cuenta
+ * mientras esté activo y le quede alguna sesión por dar, que es justo cuando
+ * la clienta puede venir a gastarlo.
+ */
+function matchesVouchers(row: ClientRow, filter: VoucherFilter): boolean {
+  if (filter === "all") return true
+  return filter === "with" ? row.activeVouchers > 0 : row.activeVouchers === 0
 }
 
 function matchesSex(row: ClientRow, filter: SexFilter): boolean {
@@ -150,6 +164,7 @@ export function ClientsClient({
   const [search, setSearch] = useState("")
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all")
   const [sexFilter, setSexFilter] = useState<SexFilter>("all")
+  const [voucherFilter, setVoucherFilter] = useState<VoucherFilter>("all")
   const [ageFrom, setAgeFrom] = useState("")
   const [ageTo, setAgeTo] = useState("")
   const [panelOpen, setPanelOpen] = useState(false)
@@ -184,17 +199,20 @@ export function ClientsClient({
     () => rows.filter((r) =>
       matchesSearch(r, search) &&
       matchesStatus(r, statusFilter, inactivityWarningDays) &&
+      matchesVouchers(r, voucherFilter) &&
       matchesSex(r, sexFilter) &&
       matchesAge(r, ageMin, ageMax)
     ),
-    [rows, search, statusFilter, sexFilter, ageMin, ageMax, inactivityWarningDays],
+    [rows, search, statusFilter, voucherFilter, sexFilter, ageMin, ageMax, inactivityWarningDays],
   )
 
   const hayFiltro =
-    search !== "" || statusFilter !== "all" || sexFilter !== "all" || ageFrom !== "" || ageTo !== ""
+    search !== "" || statusFilter !== "all" || voucherFilter !== "all"
+    || sexFilter !== "all" || ageFrom !== "" || ageTo !== ""
 
   function limpiarFiltros() {
-    setSearch(""); setStatusFilter("all"); setSexFilter("all"); setAgeFrom(""); setAgeTo("")
+    setSearch(""); setStatusFilter("all"); setVoucherFilter("all")
+    setSexFilter("all"); setAgeFrom(""); setAgeTo("")
   }
 
   const { sort, sorted, toggleSort } = useTableSort<ClientRow, ClientSortKey>(
@@ -327,6 +345,18 @@ export function ClientsClient({
                 <SelectItem value="warning">Con aviso</SelectItem>
               </SelectContent>
             </Select>
+            {/* Quién tiene bono a medias. Antes no había forma de saberlo sin
+                abrir las fichas de una en una. */}
+            <Select value={voucherFilter} onValueChange={(v) => setVoucherFilter(v as VoucherFilter)}>
+              <SelectTrigger className="w-48">
+                <SelectValue placeholder="Bonos" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Con y sin bono</SelectItem>
+                <SelectItem value="with">Con bono activo</SelectItem>
+                <SelectItem value="without">Sin bono activo</SelectItem>
+              </SelectContent>
+            </Select>
             <Select value={sexFilter} onValueChange={(v) => setSexFilter(v as SexFilter)}>
               <SelectTrigger className="w-48">
                 <SelectValue placeholder="Sexo" />
@@ -392,6 +422,7 @@ export function ClientsClient({
                   <SortableTableHead sortKey="nacimiento" sort={sort} onToggle={toggleSort}>Nacimiento</SortableTableHead>
                   <SortableTableHead sortKey="whatsapp" sort={sort} onToggle={toggleSort}>WhatsApp</SortableTableHead>
                   <SortableTableHead sortKey="ultimaCita" sort={sort} onToggle={toggleSort}>Última cita</SortableTableHead>
+                  <SortableTableHead sortKey="bonos" sort={sort} onToggle={toggleSort}>Bonos</SortableTableHead>
                   <SortableTableHead sortKey="saldo" sort={sort} onToggle={toggleSort}>Saldo</SortableTableHead>
                   <SortableTableHead sortKey="deuda" sort={sort} onToggle={toggleSort}>Deuda</SortableTableHead>
                   <SortableTableHead sortKey="estado" sort={sort} onToggle={toggleSort}>Estado</SortableTableHead>
@@ -443,6 +474,26 @@ export function ClientsClient({
                         )}
                       </TableCell>
                       <TableCell>
+                        {/* Lo que de verdad se pregunta es cuántas sesiones le
+                            quedan; cuántos bonos son solo importa cuando hay
+                            más de uno. */}
+                        {r.activeVouchers > 0 ? (
+                          <>
+                            <Badge variant="secondary" className="gap-1">
+                              <Ticket className="h-3 w-3" />
+                              {r.voucherSessionsLeft} {r.voucherSessionsLeft === 1 ? "sesión" : "sesiones"}
+                            </Badge>
+                            {r.activeVouchers > 1 && (
+                              <span className="mt-0.5 block text-xs text-muted-foreground">
+                                {r.activeVouchers} bonos
+                              </span>
+                            )}
+                          </>
+                        ) : (
+                          <span className="text-sm text-muted-foreground">—</span>
+                        )}
+                      </TableCell>
+                      <TableCell>
                         {r.balanceCents > 0 ? (
                           <span className="text-sm font-medium tabular-nums text-green-700">+{fmtEur(r.balanceCents)}</span>
                         ) : (
@@ -466,7 +517,7 @@ export function ClientsClient({
                 })}
                 {sorted.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={9} className="py-8 text-center text-muted-foreground">Sin resultados.</TableCell>
+                    <TableCell colSpan={10} className="py-8 text-center text-muted-foreground">Sin resultados.</TableCell>
                   </TableRow>
                 )}
               </TableBody>

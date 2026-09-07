@@ -47,6 +47,37 @@ export function voucherRemainingSessions(totalSessions: number, usedSessions: nu
   return Math.max(0, totalSessions - usedSessions)
 }
 
+/** Un bono con lo justo para saber si todavía se puede gastar. */
+export type VoucherStock = {
+  status: string
+  services: { serviceId: string; totalSessions: number }[]
+  sessions: { serviceId: string }[]
+}
+
+/**
+ * Cuántos bonos le quedan vivos a un cliente y cuántas sesiones suman.
+ *
+ * Vivo es lo mismo que en el mostrador (ver getRedeemableVouchers): que esté
+ * activo y que le quede algo por gastar. El saldo se cuenta servicio por
+ * servicio, no restando totales, porque un bono puede tener gastadas todas las
+ * sesiones de láser y ninguna de facial.
+ */
+export function activeVoucherStock(vouchers: VoucherStock[]): { vouchers: number; sessions: number } {
+  let bonos = 0
+  let sesiones = 0
+  for (const v of vouchers) {
+    if (v.status !== "ACTIVE") continue
+    const libres = v.services.reduce((n, s) => n + voucherRemainingSessions(
+      s.totalSessions,
+      v.sessions.filter((x) => x.serviceId === s.serviceId).length,
+    ), 0)
+    if (libres <= 0) continue
+    bonos += 1
+    sesiones += libres
+  }
+  return { vouchers: bonos, sessions: sesiones }
+}
+
 /** El bono entero: lo que suman todas sus líneas. */
 export function voucherTotals(lines: VoucherLine[]): {
   totalSessions: number

@@ -2,6 +2,7 @@ import { prisma } from "@/lib/db"
 import { getActiveClinic } from "@/lib/clinic"
 import { getSession } from "@/lib/session"
 import { ClientsClient, type ClientRow } from "@/components/clients-client"
+import { activeVoucherStock } from "@/lib/vouchers"
 
 export const dynamic = "force-dynamic"
 
@@ -25,6 +26,28 @@ export default async function ClientsPage() {
       },
     },
   })
+
+  // Los bonos vivos de todo el centro, de una vez y no cliente a cliente: son
+  // pocos y así el listado no dispara una consulta por fila. Solo se traen los
+  // activos; los ya cerrados no pintan nada aquí.
+  const vouchers = await prisma.customerVoucher.findMany({
+    where: { clinicId: clinic.id, status: "ACTIVE" },
+    select: {
+      customerId: true,
+      status: true,
+      services: { select: { serviceId: true, totalSessions: true } },
+      sessions: { select: { serviceId: true } },
+    },
+  })
+  const porCliente = new Map<string, typeof vouchers>()
+  for (const v of vouchers) {
+    const suyos = porCliente.get(v.customerId)
+    if (suyos) suyos.push(v)
+    else porCliente.set(v.customerId, [v])
+  }
+  const bonosPorCliente = new Map(
+    [...porCliente].map(([customerId, suyos]) => [customerId, activeVoucherStock(suyos)]),
+  )
 
   const now = new Date()
 
@@ -62,6 +85,8 @@ export default async function ClientsPage() {
         ? lastApptDate.toLocaleString("es-ES", { day: "2-digit", month: "short", year: "numeric" })
         : null,
       daysSinceLastAppt: daysSince,
+      activeVouchers: bonosPorCliente.get(c.id)?.vouchers ?? 0,
+      voucherSessionsLeft: bonosPorCliente.get(c.id)?.sessions ?? 0,
     }
   })
 

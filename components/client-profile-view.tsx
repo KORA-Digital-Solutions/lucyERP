@@ -71,6 +71,9 @@ export interface ClientRow {
   debtCents: number
   lastAppointment: string | null
   daysSinceLastAppt: number | null
+  /** Bonos que le quedan vivos, y sesiones libres que suman entre todos. */
+  activeVouchers: number
+  voucherSessionsLeft: number
 }
 
 export type ActivityStatus = "active" | "inactive"

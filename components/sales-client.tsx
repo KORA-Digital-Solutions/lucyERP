@@ -63,6 +63,8 @@ type SaleLine = {
   worker: { name: string; lastName: string | null } | null
   /** Solo las líneas de servicio y las sesiones de bono la traen. */
   service: { family: { name: string } } | null
+  /** Solo las sesiones de bono: de qué bono se está gastando. */
+  voucherSession: { voucher: { name: string } } | null
 }
 type Sale = {
   id: string; saleType: string; status: string; paymentMethod: string
@@ -656,7 +658,7 @@ export function SalesClient({ sales, customers, services, products, workers, vou
                         <span className="block text-xs text-muted-foreground">
                           {r.familia}
                           {l.durationMinutes ? ` · ${l.durationMinutes} min` : ""}
-                          {LINE_TAG[l.type] && ` · ${LINE_TAG[l.type]}`}
+                          {etiquetaDeLinea(l) && ` · ${etiquetaDeLinea(l)}`}
                           {l.notes && ` · ${l.notes}`}
                         </span>
                       </TableCell>
@@ -666,7 +668,11 @@ export function SalesClient({ sales, customers, services, products, workers, vou
                         {r.atendio || <span className="text-muted-foreground">—</span>}
                       </TableCell>
                       <TableCell className="whitespace-nowrap px-2 text-right tabular-nums text-muted-foreground">
-                        {fmtEur(l.unitPriceCents)}
+                        {/* La sesión de bono no tiene tarifa propia guardada:
+                            se apunta a 0 EUR porque ya se pagó en su día. Un
+                            0,00 EUR aquí la haría pasar por un servicio
+                            regalado. */}
+                        {esSesionDeBono(l) ? "—" : fmtEur(l.unitPriceCents)}
                       </TableCell>
                       {/* El descuento, en su columna: el porcentaje y lo que
                           son en euros, que es lo que se acaba preguntando. */}
@@ -681,7 +687,11 @@ export function SalesClient({ sales, customers, services, products, workers, vou
                             </span>
                           : <span className="text-muted-foreground">—</span>}
                       </TableCell>
-                      <TableCell className="px-2 text-right font-medium tabular-nums">{fmtEur(l.totalCents)}</TableCell>
+                      <TableCell className="px-2 text-right font-medium tabular-nums">
+                        {esSesionDeBono(l)
+                          ? <span className="font-normal text-muted-foreground">Bono</span>
+                          : fmtEur(l.totalCents)}
+                      </TableCell>
                       <TableCell className="whitespace-nowrap px-2 text-muted-foreground">{r.cobro}</TableCell>
                       <TableCell className="whitespace-nowrap px-2 text-muted-foreground">
                         {PAYMENT_LABELS[r.paymentMethod] ?? r.paymentMethod}
@@ -786,9 +796,24 @@ export function SalesClient({ sales, customers, services, products, workers, vou
  * etiqueta que dice lo mismo repetía la palabra dos veces seguidas. La sesión,
  * en cambio, va en la familia del servicio que se da, y sin esto no se
  * distingue de un servicio cobrado suelto a 0 EUR.
+ *
+ * Y se dice de qué bono sale, que es la otra mitad de la explicación: no es
+ * que no se cobrara, es que ya estaba pagado en ese bono.
  */
-const LINE_TAG: Record<string, string> = {
-  VOUCHER_SESSION: "Sesión de bono",
+function etiquetaDeLinea(l: SaleLine): string | null {
+  if (l.type !== "VOUCHER_SESSION") return null
+  const bono = l.voucherSession?.voucher.name
+  return bono ? `Sesión de bono: ${bono}` : "Sesión de bono"
+}
+
+/**
+ * Lo que va en la columna del importe. Una sesión de bono no se cobra —ya se
+ * pagó el día que se compró el bono—, así que su línea no lleva ni tarifa ni
+ * descuento y su total es cero. Escribirlo con números la hacía parecer un
+ * servicio regalado; con la palabra queda dicho por qué no hay dinero.
+ */
+function esSesionDeBono(l: SaleLine): boolean {
+  return l.type === "VOUCHER_SESSION"
 }
 
 /**
@@ -837,7 +862,7 @@ function TicketDetalle({ sale }: { sale: Sale }) {
                     {/* La familia va en cada línea: es por lo que se filtra
                         arriba, y sin verla no se sabe por qué salió el ticket. */}
                     {familiaDeLinea(l)}
-                    {LINE_TAG[l.type] && ` · ${LINE_TAG[l.type]}`}
+                    {etiquetaDeLinea(l) && ` · ${etiquetaDeLinea(l)}`}
                     {l.notes && ` · ${l.notes}`}
                   </span>
                 </td>
@@ -849,7 +874,9 @@ function TicketDetalle({ sale }: { sale: Sale }) {
                     : <span className="text-muted-foreground">—</span>}
                 </td>
                 <td className="py-1.5 text-right tabular-nums">{l.quantity}</td>
-                <td className="py-1.5 text-right tabular-nums text-muted-foreground">{fmtEur(l.unitPriceCents)}</td>
+                <td className="py-1.5 text-right tabular-nums text-muted-foreground">
+                  {esSesionDeBono(l) ? "—" : fmtEur(l.unitPriceCents)}
+                </td>
                 <td className="py-1.5 text-right tabular-nums">
                   {l.discountPercent > 0
                     ? <span className="text-[#B31412]">
@@ -857,7 +884,11 @@ function TicketDetalle({ sale }: { sale: Sale }) {
                       </span>
                     : <span className="text-muted-foreground">—</span>}
                 </td>
-                <td className="py-1.5 text-right font-medium tabular-nums">{fmtEur(l.totalCents)}</td>
+                <td className="py-1.5 text-right font-medium tabular-nums">
+                  {esSesionDeBono(l)
+                    ? <span className="font-normal text-muted-foreground">Bono</span>
+                    : fmtEur(l.totalCents)}
+                </td>
               </tr>
             )
           })}

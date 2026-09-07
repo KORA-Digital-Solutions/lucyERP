@@ -33,6 +33,9 @@ export default async function SalesPage() {
             // ella. El producto, la tarjeta y el bono no tienen familia
             // propia: se agrupan con la suya de siempre en la pantalla.
             service: { select: { family: { select: { name: true } } } },
+            // De qué bono sale la sesión que se gasta. Sin esto, en el
+            // listado una sesión es un servicio a 0 EUR y no se sabe por qué.
+            voucherSession: { select: { voucher: { select: { name: true } } } },
           },
         },
         balanceMovements: { where: { type: "BALANCE_USED" }, select: { amountCents: true } },

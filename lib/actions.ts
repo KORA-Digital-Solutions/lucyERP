@@ -27,6 +27,7 @@ import {
 } from "@/lib/enums"
 import { dayOfWeekFromDateStr } from "@/lib/schedule"
 import { DEFAULT_REMINDER_ALERT_DAYS, isReminderActive, isReminderOverdue } from "@/lib/reminders"
+import { activeVoucherStock } from "@/lib/vouchers"
 
 export type ActionResult = {
   ok: boolean
@@ -1610,9 +1611,20 @@ export async function getClientRow(customerId: string) {
         where: { status: "DEBT" },
         select: { totalCents: true, paidCents: true },
       },
+      // Los bonos que le quedan vivos, igual que en el listado de clientes.
+      vouchers: {
+        where: { status: "ACTIVE" },
+        select: {
+          status: true,
+          services: { select: { serviceId: true, totalSessions: true } },
+          sessions: { select: { serviceId: true } },
+        },
+      },
     },
   })
   if (!c) return null
+
+  const bonos = activeVoucherStock(c.vouchers)
 
   const lastApptDate = c.appointments[0]?.startAt ?? null
   const daysSince = lastApptDate
@@ -1646,6 +1658,8 @@ export async function getClientRow(customerId: string) {
       ? lastApptDate.toLocaleString("es-ES", { day: "2-digit", month: "short", year: "numeric" })
       : null,
     daysSinceLastAppt: daysSince,
+    activeVouchers: bonos.vouchers,
+    voucherSessionsLeft: bonos.sessions,
   }
 }
 

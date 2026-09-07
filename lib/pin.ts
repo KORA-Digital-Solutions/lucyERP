@@ -62,14 +62,20 @@ export function nombreCompleto(u: { name: string; lastName: string | null }): st
 }
 
 /**
- * Freno a la fuerza bruta, escalado: 1 minuto, luego 5, luego 15.
+ * Freno a la fuerza bruta: cinco fallos, un minuto de espera. Siempre el mismo
+ * minuto, sin escalar.
  *
- * Un millón de combinaciones sin freno se prueban solas. Vive en memoria del
- * proceso, que es donde vive también esta aplicación (ver DEPLOY.md: un único
- * servicio en el PC del centro). Si algún día corre en varias instancias hay
- * que moverlo a la base.
+ * Un millón de combinaciones a un intento por minuto son dos años, así que un
+ * minuto ya frena a quien lo intente a ciegas. Escalar a 5 y a 15 no añadía
+ * nada contra eso y sí dejaba el mostrador parado un cuarto de hora: el
+ * contador es del proceso entero, así que los fallos de una empleada bloquean
+ * a todas, y con clientas esperando eso no es seguridad, es el negocio parado.
+ *
+ * Vive en memoria del proceso, que es donde vive también esta aplicación (ver
+ * DEPLOY.md: un único servicio en el PC del centro). Si algún día corre en
+ * varias instancias hay que moverlo a la base.
  */
-const ESPERAS_MS = [60_000, 5 * 60_000, 15 * 60_000]
+const ESPERA_MS = 60_000
 const FALLOS_ANTES_DE_ESPERAR = 5
 const intentos = { fallos: 0, bloqueadoHasta: 0 }
 
@@ -80,11 +86,7 @@ export function bloqueoRestanteMs(): number {
 export function apuntarFalloDePin() {
   intentos.fallos++
   if (intentos.fallos % FALLOS_ANTES_DE_ESPERAR === 0) {
-    const tramo = Math.min(
-      Math.floor(intentos.fallos / FALLOS_ANTES_DE_ESPERAR) - 1,
-      ESPERAS_MS.length - 1,
-    )
-    intentos.bloqueadoHasta = Date.now() + ESPERAS_MS[tramo]
+    intentos.bloqueadoHasta = Date.now() + ESPERA_MS
   }
 }
 

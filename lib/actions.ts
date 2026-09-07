@@ -1505,7 +1505,24 @@ export async function payDebt(saleId: string, paymentMethod: "CARD" | "CASH"): P
       if (pending <= 0) return
 
       // Pagar la deuda cierra la venta y entra en caja. El saldo a favor no se toca.
-      await tx.sale.update({ where: { id: saleId }, data: { status: "PAID", paidCents: sale.totalCents, paymentMethod } })
+      //
+      // La venta pasa a nombre de quien cobra. El PIN ya se pedía aquí arriba
+      // y se tiraba: el dinero entraba en la caja de hoy a nombre de quien
+      // vendió, semanas antes, y al descuadrar no había a quién preguntar.
+      //
+      // Se pisa el userId en vez de guardarlo aparte: lo que se quiere saber
+      // de una venta cobrada es quién tocó el dinero, y es lo que enseña la
+      // columna "Cobró". A cambio deja de constar quién la vendió y aceptó
+      // dejarla a deber; createdAt sigue siendo el día de la venta.
+      await tx.sale.update({
+        where: { id: saleId },
+        data: {
+          status: "PAID",
+          paidCents: sale.totalCents,
+          paymentMethod,
+          userId: operator.userId,
+        },
+      })
 
       const today = new Date().toISOString().slice(0, 10)
       const existingCash = await tx.cashRegister.findUnique({ where: { clinicId_date: { clinicId, date: today } } })

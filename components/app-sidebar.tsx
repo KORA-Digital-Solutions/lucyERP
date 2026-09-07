@@ -18,6 +18,7 @@ import {
   Clock,
   BarChart3,
   Ticket,
+  KeyRound,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { LuciaMark } from "@/components/lucia-logo"
@@ -35,9 +36,11 @@ import type { SessionMode } from "@/lib/session"
  * pantallas para no poder hacer nada en ellas: quien gestiona no entra a mirar
  * la agenda, y para tocarla hay que bajar al mostrador de todas formas.
  *
- * Quitarlas del menú no las cierra: siguen abriéndose por URL y allí avisa
- * ReadOnlyBanner. Quien manda es requireCounter() en el servidor (ver
- * lib/auth.ts); esconder un botón nunca fue garantía de nada.
+ * Quitarlas del menú tampoco bastaba: seguían abriéndose por URL. Eso lo corta
+ * ahora COUNTER_ONLY_PAGES en proxy.ts, que debe ir a la par de NAV_DIA_A_DIA
+ * —salvo /sales, que la gestión sí consulta—. Quien manda de verdad es
+ * requireCounter() en el servidor (ver lib/auth.ts): esconder un botón nunca
+ * fue garantía de nada.
  */
 
 interface NavItem {
@@ -202,22 +205,45 @@ export function AppSidebar({ name, lastName, mode, clinicName }: Props) {
           // hace cada cosa se identifica con su PIN en el momento. Poner el
           // nombre de quien lo abrió es justo la idea equivocada.
           //
-          // Y el botón es solo la flecha, no la fila entera: con toda la fila
-          // pulsable, un clic de más en la esquina cierra el mostrador.
-          <div className="flex items-center gap-3 px-3 py-2.5">
-            <span className="min-w-0 flex-1">
-              <span className="block truncate text-sm font-medium">Mostrador abierto</span>
-              <span className="block truncate text-xs text-sidebar-muted">Cerrar y volver al PIN</span>
-            </span>
-            <button
-              type="button"
-              onClick={handleLogout}
-              className="rounded-lg p-2 text-sidebar-muted transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground"
-              aria-label="Cerrar el mostrador"
-              title="Cerrar el mostrador"
+          // Y el botón de cerrar es solo la flecha, no la fila entera: con
+          // toda la fila pulsable, un clic de más en la esquina cierra el
+          // mostrador.
+          //
+          // Cambiar el PIN va aquí y no en el menú de arriba: aquel es el
+          // trabajo del día —agenda, ventas, caja— y esto no se hace nunca,
+          // se hace una vez. Este pie es el único rincón del mostrador que
+          // habla de ti y no de lo que hay que hacer hoy, así que es donde se
+          // busca.
+          //
+          // Va en su propia línea y con su nombre escrito, no de icono suelto
+          // al lado de la flecha: ahí estrangulaba el texto de debajo y, sobre
+          // todo, una llave sin etiqueta junto a una puerta se adivina mal
+          // —y las dos cosas que hay aquí son "salir" y "cambiar el PIN", que
+          // conviene no confundir. La pantalla pide el PIN actual y enseña de
+          // quién es, así que desde aquí no hace falta saber quién lo pulsa.
+          <div className="space-y-1">
+            <Link
+              href="/cambiar-pin"
+              className="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-sidebar-muted transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground"
             >
-              <LogOut className="h-4 w-4" />
-            </button>
+              <KeyRound className="h-4 w-4 shrink-0" />
+              Cambiar mi PIN
+            </Link>
+            <div className="flex items-center gap-3 px-3 py-2.5">
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-sm font-medium">Mostrador abierto</span>
+                <span className="block truncate text-xs text-sidebar-muted">Cerrar y volver al PIN</span>
+              </span>
+              <button
+                type="button"
+                onClick={handleLogout}
+                className="rounded-lg p-2 text-sidebar-muted transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground"
+                aria-label="Cerrar el mostrador"
+                title="Cerrar el mostrador"
+              >
+                <LogOut className="h-4 w-4" />
+              </button>
+            </div>
           </div>
         )}
       </div>

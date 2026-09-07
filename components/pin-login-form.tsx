@@ -29,19 +29,29 @@ export function PinLoginForm({ clinicName, slogan }: {
   const [estado, formAction, enviando] = useActionState(loginWithPinAction, {})
   const [pin, setPin] = useState("")
   const formRef = useRef<HTMLFormElement>(null)
-
-  // Un PIN rechazado se borra para poder teclear otro sin darle a nada.
-  useEffect(() => {
-    if (estado.error) setPin("")
-  }, [estado.error])
+  // Qué PIN se mandó ya. Sin esto el envío automático se repite solo: al
+  // volver la respuesta, el PIN de ese render todavía tiene seis dígitos.
+  const enviado = useRef<string | null>(null)
 
   // El envío va en un efecto y no en el propio onComplete: el PIN viaja en un
   // campo oculto, y cuando se pulsa el último dígito React todavía no ha
   // repintado ese campo — se enviaría el PIN de antes, con un dígito de menos.
   // El efecto corre después del repintado, así que ahí ya está el valor bueno.
   useEffect(() => {
-    if (pin.length === PIN_LENGTH && !enviando) formRef.current?.requestSubmit()
+    if (pin.length !== PIN_LENGTH || enviando) return
+    if (enviado.current === pin) return
+    enviado.current = pin
+    formRef.current?.requestSubmit()
   }, [pin, enviando])
+
+  // Un PIN rechazado se borra para poder teclear otro sin darle a nada. La
+  // dependencia es el estado entero y no su texto: dos fallos seguidos traen
+  // el mismo mensaje, y mirando el texto el efecto no volvía a correr — el
+  // PIN se quedaba puesto y se reenviaba solo, quemando los cinco intentos.
+  useEffect(() => {
+    setPin("")
+    enviado.current = null
+  }, [estado])
 
   return (
     <div className="flex min-h-screen flex-col items-center justify-center gap-8 p-6">

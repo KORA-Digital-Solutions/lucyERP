@@ -8,7 +8,7 @@ import { createSession, setSessionCookie, type SessionMode } from "@/lib/session
 import { clearOperatorCookie } from "@/lib/operator"
 import {
   PIN_LENGTH, apuntarFalloDePin, bloqueoRestanteMs, esPinBienFormado, hashearPin,
-  mensajeDeBloqueo, olvidarFallosDePin, usuariaDelPin,
+  mensajeDeBloqueo, nombreCompleto, olvidarFallosDePin, usuariaDelPin,
 } from "@/lib/pin"
 
 /**
@@ -220,19 +220,68 @@ export async function loginWithPinAction(
 }
 
 /**
- * La trabajadora elige su propio PIN la primera vez que entra. El que le dio
- * la administradora era de un solo uso: lo ha dicho en voz alta y puede
- * haberlo oído media sala.
+ * Quién hay detrás de un PIN, para la pantalla de cambiarlo.
+ *
+ * El PIN es lo único que identifica a nadie en el mostrador, así que antes de
+ * dejar cambiarlo hay que pedirlo: sin esto, la sesión abierta bastaba —quien
+ * se sentara en la silla de otra podía cambiarle el PIN, salir sabiéndolo y
+ * firmar ventas a su nombre.
+ *
+ * Devuelve el nombre para poder enseñarlo: quien lo teclea tiene que ver a
+ * quién va a cambiarle el PIN antes de elegir uno nuevo.
+ *
+ * Pasa por el mismo freno de fuerza bruta que la puerta de entrada: si no,
+ * esta pantalla sería una segunda puerta sin cerradura para ir probando PINes.
+ */
+export async function verificarPinActualAction(
+  pin: string,
+): Promise<{ ok: boolean; nombre?: string; error?: string }> {
+  try {
+    await requireSession()
+
+    const espera = bloqueoRestanteMs()
+    if (espera > 0) return { ok: false, error: mensajeDeBloqueo(espera) }
+
+    if (!esPinBienFormado(pin)) return { ok: false, error: PIN_MAL }
+
+    const dueña = await usuariaDelPin(pin)
+    if (!dueña) {
+      apuntarFalloDePin()
+      return { ok: false, error: PIN_MAL }
+    }
+    olvidarFallosDePin()
+
+    return { ok: true, nombre: nombreCompleto(dueña) }
+  } catch (e) {
+    if (e instanceof AuthError) return { ok: false, error: e.message }
+    console.error("[verificar-pin]", e)
+    return { ok: false, error: "Error interno. Vuelve a intentarlo." }
+  }
+}
+
+/**
+ * Cambiar el PIN propio: se teclea el actual y se elige otro.
+ *
+ * De quién es el PIN lo decide **el PIN actual**, no la sesión. En el
+ * mostrador la sesión no es de nadie —la abre por la mañana quien llega
+ * primero y la comparten todas—, así que mirarla habría significado dos cosas
+ * malas a la vez: que cualquiera podía cambiarle el PIN a quien abrió, y que
+ * las demás no podían cambiar el suyo en todo el día.
+ *
+ * El PIN actual se vuelve a comprobar aquí aunque la pantalla ya lo haya
+ * verificado para enseñar el nombre: lo de antes es para la vista, esto es la
+ * cerradura.
  */
 export async function changeOwnPinAction(
   _previo: EstadoFormulario,
   formData: FormData,
 ): Promise<EstadoFormulario> {
+  const actual = formData.get("currentPin")
   const nuevo = formData.get("newPin")
   const repetido = formData.get("confirmPin")
 
-  if (typeof nuevo !== "string" || typeof repetido !== "string") {
-    return { error: "Rellena los dos campos." }
+  if (typeof actual !== "string" || typeof nuevo !== "string" || typeof repetido !== "string") {
+    return { error: "Rellena los campos." }
   }
   if (nuevo !== repetido) {
     return { error: "Los dos PIN no coinciden." }
@@ -242,18 +291,28 @@ export async function changeOwnPinAction(
   }
 
   try {
-    // De quién es el PIN lo decide la sesión, nunca el formulario.
-    const session = await requireSession()
+    await requireSession()
+
+    const espera = bloqueoRestanteMs()
+    if (espera > 0) return { error: mensajeDeBloqueo(espera) }
+
+    if (!esPinBienFormado(actual)) return { error: PIN_MAL }
+    const dueña = await usuariaDelPin(actual)
+    if (!dueña) {
+      apuntarFalloDePin()
+      return { error: PIN_MAL }
+    }
+    olvidarFallosDePin()
 
     // Dos personas con el mismo PIN significa cobrar a nombre de quien no
     // toca: el sistema no puede distinguirlas.
-    const dueña = await usuariaDelPin(nuevo)
-    if (dueña && dueña.id !== session.userId) {
+    const yaEsDeOtra = await usuariaDelPin(nuevo)
+    if (yaEsDeOtra && yaEsDeOtra.id !== dueña.id) {
       return { error: "Ese PIN ya está en uso. Elige otro." }
     }
 
     await prisma.user.update({
-      where: { id: session.userId },
+      where: { id: dueña.id },
       data: { pinHash: await hashearPin(nuevo), mustChangePin: false },
     })
   } catch (e) {

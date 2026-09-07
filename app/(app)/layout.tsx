@@ -1,6 +1,5 @@
 import React from "react"
 import { AppSidebar } from "@/components/app-sidebar"
-import { ReadOnlyBanner } from "@/components/read-only-banner"
 import { prisma } from "@/lib/db"
 import { getSession } from "@/lib/session"
 import { redirect } from "next/navigation"
@@ -38,7 +37,6 @@ export default async function AppLayout({
         clinicName={clinic?.name ?? "Centro de Estética"}
       />
       <main className="pl-64">
-        {session.mode === "MANAGEMENT" && <ReadOnlyBanner />}
         <div className="min-h-screen">{children}</div>
       </main>
     </div>

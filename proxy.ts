@@ -29,6 +29,19 @@ const MANAGEMENT_ONLY_PAGES = ["/workers", "/services", "/cabins", "/settings", 
 const MANAGEMENT_ONLY_API = ["/api/workers", "/api/services", "/api/cabins"]
 
 /**
+ * Páginas del mostrador. Desde la gestión no existen: el día a día se toca
+ * donde se sabe quién eres, y el menú ya no las enseña — pero la URL seguía
+ * funcionando, así que una administradora con /sales en favoritos montaba la
+ * venta entera y solo al registrarla le decía el servidor que no.
+ *
+ * Deben coincidir con NAV_DIA_A_DIA en components/app-sidebar.tsx, salvo
+ * /sales: es el único sitio de toda la aplicación donde se ve quién cobró cada
+ * ticket —ningún informe lo enseña— y es la administradora la única que lo
+ * miraría. Con /clients no pasa: la gestión ya tiene sus informes de clientes.
+ */
+const COUNTER_ONLY_PAGES = ["/dashboard", "/agenda", "/clients", "/cash-register", "/stock"]
+
+/**
  * Renueva la cookie de sesión sobre la respuesta que ya se va a devolver.
  *
  * Aquí no vale setSessionCookie(): next/headers no está disponible en el
@@ -77,6 +90,13 @@ export async function proxy(req: NextRequest) {
       const url = req.nextUrl.clone()
       // A la portada del mostrador, que es donde se aterriza al entrar.
       url.pathname = "/dashboard"
+      return conSesionRenovada(NextResponse.redirect(url), session)
+    }
+  } else {
+    if (COUNTER_ONLY_PAGES.some((p) => pathname.startsWith(p))) {
+      const url = req.nextUrl.clone()
+      // A la portada de la gestión, que es donde se aterriza al entrar.
+      url.pathname = "/reports"
       return conSesionRenovada(NextResponse.redirect(url), session)
     }
   }

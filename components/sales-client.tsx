@@ -90,6 +90,18 @@ interface Props {
   pinRequired: boolean
   /** La consulta llegó a su tope: hay ventas más antiguas que no están aquí. */
   hayVentasSinCargar: boolean
+  /**
+   * Desde la gestión del centro esta pantalla solo se mira.
+   *
+   * Es la única del día a día a la que llega la gestión (ver COUNTER_ONLY_PAGES
+   * en proxy.ts): aquí está la columna "Cobró", que no sale en ningún informe.
+   * Pero cobrar se cobra en el mostrador, donde se sabe quién eres, así que no
+   * se ofrece empezar una venta que el servidor va a rechazar al registrarla.
+   *
+   * El TPV no es una ruta aparte —es estado de esta pantalla—, así que el
+   * proxy no puede distinguirlo: la puerta se quita aquí.
+   */
+  soloLectura: boolean
 }
 
 type ReminderAlert = Awaited<ReturnType<typeof getCustomerReminderAlerts>>[number]
@@ -226,11 +238,16 @@ function searchCustomers(customers: Customer[], query: string): Customer[] {
 
 /* ─── Status/payment labels ──────────────────────────────────────────────── */
 
-const STATUS_META: Record<string, { label: string; cls: string }> = {
-  PAID:    { label: "Pagado",  cls: "bg-green-100 text-green-800 border-green-200" },
-  DEBT:    { label: "Debido",  cls: "bg-red-100 text-red-800 border-red-200" },
+/**
+ * Debe cubrir todo lo que puede haber en Sale.paymentMethod: lo que falte se
+ * pinta crudo, en mayúsculas y en inglés. GIFT_CARD faltaba, y por eso en el
+ * listado salía "GIFT_CARD" donde los informes ya decían "Saldo de tarjeta
+ * regalo" (ETIQUETA_DE_COBRO en lib/reports.ts, que es la lista buena).
+ */
+const PAYMENT_LABELS: Record<string, string> = {
+  CARD: "Tarjeta", CASH: "Efectivo", BALANCE: "Saldo",
+  GIFT_CARD: "Saldo de tarjeta regalo", DEBT: "Deuda",
 }
-const PAYMENT_LABELS: Record<string, string> = { CARD: "Tarjeta", CASH: "Efectivo", BALANCE: "Saldo", DEBT: "Deuda" }
 
 /* ─── Familias de las líneas ─────────────────────────────────────────────── */
 
@@ -313,7 +330,7 @@ function nombreDe(p: { name: string; lastName: string | null } | null): string {
   return p ? `${p.name} ${p.lastName ?? ""}`.trim() : ""
 }
 
-export function SalesClient({ sales, customers, services, products, workers, voucherTemplates, currentUserId, cashOpen, pinRequired, hayVentasSinCargar }: Props) {
+export function SalesClient({ sales, customers, services, products, workers, voucherTemplates, currentUserId, cashOpen, pinRequired, hayVentasSinCargar, soloLectura }: Props) {
   const [mode, setMode] = useState<"list" | "pos">("list")
   const [showNoCashDialog, setShowNoCashDialog] = useState(false)
   const [search, setSearch] = useState("")
@@ -462,9 +479,11 @@ export function SalesClient({ sales, customers, services, products, workers, vou
             sale con los filtros puestos se dice junto a los filtros, y de que
             hay más antiguas sin cargar avisa el aviso de debajo. */}
         <h1 className="text-2xl font-semibold tracking-tight">Ventas</h1>
-        <Button size="lg" onClick={() => cashOpen ? setMode("pos") : setShowNoCashDialog(true)}>
-          <Plus className="mr-2 h-4 w-4" /> Nueva venta
-        </Button>
+        {!soloLectura && (
+          <Button size="lg" onClick={() => cashOpen ? setMode("pos") : setShowNoCashDialog(true)}>
+            <Plus className="mr-2 h-4 w-4" /> Nueva venta
+          </Button>
+        )}
       </div>
 
       <div className="p-8 space-y-6">
@@ -678,7 +697,7 @@ export function SalesClient({ sales, customers, services, products, workers, vou
                           son en euros, que es lo que se acaba preguntando. */}
                       <TableCell className="whitespace-nowrap px-2 text-right tabular-nums">
                         {l.discountPercent > 0
-                          ? <span className="text-[#B31412]">
+                          ? <span className="text-primary">
                               −{l.discountPercent} %
                               {/* Lo que son en euros debajo del porcentaje, no
                                   al lado: es la mitad de columna y la fila ya
@@ -693,16 +712,14 @@ export function SalesClient({ sales, customers, services, products, workers, vou
                           : fmtEur(l.totalCents)}
                       </TableCell>
                       <TableCell className="whitespace-nowrap px-2 text-muted-foreground">{r.cobro}</TableCell>
+                      {/* Solo la forma de pago. Aquí iba además una etiqueta
+                          roja "Debido", y decía dos veces lo mismo: el estado
+                          DEBT solo se da cuando la forma de pago ya es Deuda
+                          (ver createSale en lib/actions.ts), así que la
+                          columna ya lo contaba. Y era la única fila con
+                          adorno, lo que la hacía saltar más que su contenido. */}
                       <TableCell className="whitespace-nowrap px-2 text-muted-foreground">
                         {PAYMENT_LABELS[r.paymentMethod] ?? r.paymentMethod}
-                        {/* "Pagado" no se dice: es lo normal, y repetirlo en
-                            cada línea es ruido. Lo que hay que ver es lo que
-                            quedó a deber, y eso sí salta. */}
-                        {r.status === "DEBT" && (
-                          <span className={`ml-2 rounded-full border px-2 py-0.5 text-xs ${STATUS_META.DEBT.cls}`}>
-                            {STATUS_META.DEBT.label}
-                          </span>
-                        )}
                       </TableCell>
                     </TableRow>
                   )
@@ -879,7 +896,7 @@ function TicketDetalle({ sale }: { sale: Sale }) {
                 </td>
                 <td className="py-1.5 text-right tabular-nums">
                   {l.discountPercent > 0
-                    ? <span className="text-[#B31412]">
+                    ? <span className="text-primary">
                         −{l.discountPercent} % · −{fmtEur(brutoCents - l.totalCents)}
                       </span>
                     : <span className="text-muted-foreground">—</span>}
@@ -907,7 +924,10 @@ function TicketDetalle({ sale }: { sale: Sale }) {
               <div className="text-muted-foreground">
                 Subtotal <span className="ml-2 tabular-nums">{fmtEur(subtotalCents)}</span>
               </div>
-              <div className="text-[#B31412]">
+              {/* En azul y no en rojo: el rojo de esta pantalla es lo que se
+                  debe —"Pendiente", aquí debajo—, y un descuento leído en rojo
+                  parecía un descubierto. */}
+              <div className="text-primary">
                 Descuento <span className="ml-2 tabular-nums">−{fmtEur(descuentoCents)}</span>
               </div>
             </>

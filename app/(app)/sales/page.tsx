@@ -100,6 +100,7 @@ export default async function SalesPage() {
       pinRequired={conPin > 0}
       // Si la consulta ha llegado al tope, hay ventas más antiguas fuera.
       hayVentasSinCargar={sales.length === VENTAS_CARGADAS}
+      soloLectura={session?.mode === "MANAGEMENT"}
     />
   )
 }

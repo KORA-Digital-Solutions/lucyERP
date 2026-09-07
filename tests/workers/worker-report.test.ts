@@ -104,7 +104,23 @@ beforeAll(async () => {
     },
   })
 
-  creados.sales.push(viejo.id, nuevo.id, conProfesional.id)
+  // Tarjeta regalo del formato nuevo: sin profesional en la línea. Va sola en
+  // su ticket y la vende quien lo cobra, que aquí es `cobra`.
+  const regalo = await prisma.sale.create({
+    data: {
+      clinicId, customerId: customer.id, userId: cobra, status: "PAID",
+      saleType: "GIFT_CARD",
+      subtotalCents: 4000, discountCents: 0, totalCents: 4000,
+      paidCents: 4000, createdAt: new Date("2026-08-25T10:00:00Z"),
+      lines: {
+        create: [
+          { type: "GIFT_CARD", workerId: null, description: "Tarjeta regalo", quantity: 1, unitPriceCents: 4000, totalCents: 4000 },
+        ],
+      },
+    },
+  })
+
+  creados.sales.push(viejo.id, nuevo.id, conProfesional.id, regalo.id)
 })
 
 afterAll(async () => {
@@ -137,6 +153,20 @@ describe("getWorkerReport", () => {
     expect(otra.lines.some((l) => l.totalCents === 3000)).toBe(false)
   })
 
+  it("cuenta la tarjeta regalo a quien cobró el ticket, no a un profesional", async () => {
+    // La tarjeta no la presta nadie y se vende sola en su ticket: quien la
+    // vendió es quien lo cobró, y la línea ya no guarda profesional.
+    const { lines, giftCardsCents } = await getWorkerReport(cobra)
+    const regalo = lines.find((l) => l.totalCents === 4000)
+    expect(regalo?.type).toBe("GIFT_CARD")
+    expect(giftCardsCents).toBe(4000)
+    // Y no es una aproximación como el producto viejo: es la regla.
+    expect(regalo?.attributedByTicket).toBe(false)
+    // A la otra no se le cuenta.
+    const otra = await getWorkerReport(atiende)
+    expect(otra.lines.some((l) => l.totalCents === 4000)).toBe(false)
+  })
+
   it("rescata el producto antiguo sin profesional atribuyéndolo a quien cobró", async () => {
     // Las ventas de antes del cambio se quedaron sin profesional en la línea:
     // se cuentan a quien cobró y se marcan, para no perderlas del informe.
@@ -160,11 +190,11 @@ describe("getWorkerReport", () => {
   it("no cuenta dos veces ninguna línea entre las dos empleadas", async () => {
     const a = await getWorkerReport(atiende)
     const b = await getWorkerReport(cobra)
-    // Las 6 líneas de los tres tickets se reparten sin solaparse.
-    expect(a.lines.length + b.lines.length).toBe(6)
+    // Las 7 líneas de los cuatro tickets se reparten sin solaparse.
+    expect(a.lines.length + b.lines.length).toBe(7)
     const ids = new Set([...a.lines, ...b.lines].map((l) => l.id))
-    expect(ids.size).toBe(6)
-    expect(a.totalCents + b.totalCents).toBe(10250 + 8250 + 3000)
+    expect(ids.size).toBe(7)
+    expect(a.totalCents + b.totalCents).toBe(10250 + 8250 + 3000 + 4000)
   })
 
   it("devuelve lo más reciente primero", async () => {

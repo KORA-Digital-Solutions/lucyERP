@@ -3,8 +3,8 @@
 import { useState, useMemo, useRef, useEffect } from "react"
 import {
   ArrowLeft, Plus, Search, CreditCard, Banknote, AlertCircle,
-  Trash2, Gift, ShoppingCart, X, Clock, Wallet, Scissors, Package, Eye, CalendarDays, Receipt, UserPlus,
-  FileText,
+  Trash2, Gift, ShoppingCart, X, Clock, Wallet, Scissors, Package, CalendarDays, Receipt, UserPlus,
+  FileText, ChevronDown, ChevronRight,
   Bell, CheckCircle2, Pin, CalendarClock, Ticket,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -30,6 +30,7 @@ import { QuickCustomerDialog } from "@/components/quick-customer-dialog"
 import { ClientProfileDialog } from "@/components/client-profile-dialog"
 import { QuickReminderDialog } from "@/components/quick-reminder-dialog"
 import { customerLabel, capitalizeFirst } from "@/lib/format"
+import { GIFT_CARD_FAMILY, HOME_CARE_FAMILY, VOUCHER_FAMILY } from "@/lib/enums"
 import {
   reminderCompleteLabel, reminderCompletedMessage, REMINDER_ACCENT, REMINDER_TONE,
 } from "@/lib/reminders"
@@ -56,9 +57,12 @@ type SaleLine = {
   unitPriceCents: number; discountPercent: number; totalCents: number
   durationMinutes: number | null; notes: string | null
   worker: { name: string; lastName: string | null } | null
+  /** Solo las líneas de servicio y las sesiones de bono la traen. */
+  service: { family: { name: string } } | null
 }
 type Sale = {
   id: string; saleType: string; status: string; paymentMethod: string
+  subtotalCents: number; discountCents: number
   totalCents: number; paidCents: number; createdAt: string; notes: string | null
   customer: Customer | null
   user: { name: string; lastName: string | null }
@@ -78,6 +82,8 @@ interface Props {
   cashOpen: boolean
   /** Hay PINes repartidos, así que cobrar exige identificarse. */
   pinRequired: boolean
+  /** La consulta llegó a su tope: hay ventas más antiguas que no están aquí. */
+  hayVentasSinCargar: boolean
 }
 
 type ReminderAlert = Awaited<ReturnType<typeof getCustomerReminderAlerts>>[number]
@@ -158,6 +164,35 @@ function calcularBonos(
 
 /* ─── Helpers ────────────────────────────────────────────────────────────── */
 
+/**
+ * Si dos líneas son en realidad la misma cosa vendida dos veces.
+ *
+ * En el mostrador se pincha el mismo servicio o el mismo producto varias veces
+ * seguidas —porque la clienta se lleva dos cremas, o porque no se ha visto que
+ * ya estaba puesto— y el ticket se llenaba de líneas repetidas de una unidad.
+ * La cantidad es lo que existe para eso: se suma en la línea que ya está.
+ *
+ * Solo se juntan las que de verdad se pueden juntar:
+ *
+ *  - Servicios y productos, que son lo que se vende por unidades. Una tarjeta
+ *    regalo lleva su importe y su destinatario, un bono se vende de uno en uno
+ *    y una sesión gastada es una sesión concreta: ninguno se agrupa.
+ *  - Con el mismo profesional y el mismo descuento. Cambiada cualquiera de las
+ *    dos cosas ya no es la misma línea, y sumarle una unidad le aplicaría a la
+ *    nueva un descuento que nadie ha pedido.
+ *  - Ninguna que venga de una cita: la línea guarda de cuál sale y una cita se
+ *    cobra una sola vez, así que no puede acabar mezclada con otra.
+ */
+function mismaLinea(a: DraftLine, b: DraftLine): boolean {
+  if (a.type !== b.type) return false
+  if (a.type !== "SERVICE" && a.type !== "PRODUCT") return false
+  if (a.appointmentId !== null || b.appointmentId !== null) return false
+  return a.itemId === b.itemId
+    && a.workerId === b.workerId
+    && a.discountPercent === b.discountPercent
+    && a.unitPriceCents === b.unitPriceCents
+}
+
 function lineTotal(l: DraftLine) {
   // Una sesión de bono ya se pagó el día que se compró el bono: entra en el
   // ticket para dejar constancia de quién la dio, pero no suma. La línea
@@ -191,6 +226,36 @@ const STATUS_META: Record<string, { label: string; cls: string }> = {
 }
 const PAYMENT_LABELS: Record<string, string> = { CARD: "Tarjeta", CASH: "Efectivo", BALANCE: "Saldo", DEBT: "Deuda" }
 
+/* ─── Tipos y familias de las líneas ─────────────────────────────────────── */
+
+/**
+ * Qué es cada línea, dicho como se dice en el mostrador. El orden es el de las
+ * pestañas del TPV, para que el desplegable se lea igual que se vendió.
+ */
+const LINE_TYPE_LABELS: { id: LineType; label: string }[] = [
+  { id: "SERVICE",         label: "Servicios" },
+  { id: "PRODUCT",         label: "Productos" },
+  { id: "VOUCHER",         label: "Bonos vendidos" },
+  { id: "VOUCHER_SESSION", label: "Sesiones de bono" },
+  { id: "GIFT_CARD",       label: "Tarjetas regalo" },
+]
+
+/**
+ * La familia de una línea, con el mismo criterio que el histórico del cliente
+ * y el informe de personal: lo que no es un servicio se agrupa en su familia
+ * de siempre —el producto en tratamiento domiciliario, la tarjeta y el bono en
+ * la suya— para que en un mismo desplegable se pueda pedir cualquier cosa.
+ */
+function familiaDeLinea(l: SaleLine): string {
+  if (l.type === "PRODUCT") return HOME_CARE_FAMILY
+  if (l.type === "GIFT_CARD") return GIFT_CARD_FAMILY
+  if (l.type === "VOUCHER") return VOUCHER_FAMILY
+  return l.service?.family.name ?? "Sin familia"
+}
+
+const TODOS_LOS_TIPOS = "ALL"
+const TODAS_LAS_FAMILIAS_FILTRO = "ALL"
+
 /* ═══════════════════════════════════════════════════════════════════════════
    Root — lista de ventas
 ═══════════════════════════════════════════════════════════════════════════ */
@@ -204,16 +269,26 @@ function localDateStr(d: Date) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
 }
 
-export function SalesClient({ sales, customers, services, products, workers, voucherTemplates, currentUserId, cashOpen, pinRequired }: Props) {
+/** Cuántas ventas caben en una pantalla del histórico sin marear. */
+const VENTAS_POR_PAGINA = 15
+
+export function SalesClient({ sales, customers, services, products, workers, voucherTemplates, currentUserId, cashOpen, pinRequired, hayVentasSinCargar }: Props) {
   const [mode, setMode] = useState<"list" | "pos">("list")
   const [showNoCashDialog, setShowNoCashDialog] = useState(false)
-  const [detailSale, setDetailSale] = useState<Sale | null>(null)
   const [clientSearch, setClientSearch] = useState("")
   const [workerFilter, setWorkerFilter] = useState("ALL")
   const [paymentFilter, setPaymentFilter] = useState("ALL")
+  const [typeFilter, setTypeFilter] = useState<string>(TODOS_LOS_TIPOS)
+  const [familyFilter, setFamilyFilter] = useState<string>(TODAS_LAS_FAMILIAS_FILTRO)
   const [dateMode, setDateMode] = useState<"today" | "week" | "custom">("today")
   const [customFrom, setCustomFrom] = useState(todayStr())
   const [customTo, setCustomTo] = useState(todayStr())
+  // Los tickets que se han abierto. Se empieza con todos plegados: el listado
+  // se lee primero de un vistazo —qué día, quién, cuánto— y el detalle se pide
+  // del que interesa. Con todo abierto de entrada, quince tickets con sus
+  // líneas no caben en la pantalla y no hay listado que ojear.
+  const [desplegadas, setDesplegadas] = useState<Set<string>>(new Set())
+  const [pagina, setPagina] = useState(0)
 
   // Unique workers derived from sales for filter dropdown
   const saleWorkers = useMemo(() => {
@@ -223,6 +298,18 @@ export function SalesClient({ sales, customers, services, products, workers, vou
       map.set(key, key)
     })
     return Array.from(map.keys()).sort()
+  }, [sales])
+
+  // Las familias que se pueden pedir salen de lo que se ha vendido: ofrecer
+  // familias del catálogo que nadie ha tocado es mandar a un listado vacío.
+  // Sin contar cuántas líneas hay de cada una: ese número es de líneas y el
+  // listado enseña ventas, así que no cuadraba con nada de lo que se ve luego.
+  const saleFamilies = useMemo(() => {
+    const acc = new Set<string>()
+    for (const s of sales) {
+      for (const l of s.lines) acc.add(familiaDeLinea(l))
+    }
+    return [...acc].sort((a, b) => a.localeCompare(b, "es"))
   }, [sales])
 
   const { dateFrom, dateTo } = useMemo(() => {
@@ -254,12 +341,60 @@ export function SalesClient({ sales, customers, services, products, workers, vou
         if (wName !== workerFilter) return false
       }
       if (paymentFilter !== "ALL" && s.paymentMethod !== paymentFilter) return false
+      // El tipo y la familia son de la línea, no del ticket: se pide "las
+      // ventas con algo de láser" y sale el ticket entero, que es la unidad
+      // con la que se cobra y con la que se mira.
+      if (typeFilter !== TODOS_LOS_TIPOS || familyFilter !== TODAS_LAS_FAMILIAS_FILTRO) {
+        const hay = s.lines.some((l) =>
+          (typeFilter === TODOS_LOS_TIPOS || l.type === typeFilter) &&
+          (familyFilter === TODAS_LAS_FAMILIAS_FILTRO || familiaDeLinea(l) === familyFilter))
+        if (!hay) return false
+      }
       const createdAt = new Date(s.createdAt)
       if (from && createdAt < from) return false
       if (to && createdAt > to) return false
       return true
     })
-  }, [sales, clientSearch, workerFilter, paymentFilter, dateFrom, dateTo])
+  }, [sales, clientSearch, workerFilter, paymentFilter, typeFilter, familyFilter, dateFrom, dateTo])
+
+  // Al cambiar cualquier filtro se vuelve a la primera página: quedarse en la
+  // cuarta de un listado que ahora tiene dos deja la pantalla en blanco.
+  useEffect(() => {
+    setPagina(0)
+  }, [clientSearch, workerFilter, paymentFilter, typeFilter, familyFilter, dateFrom, dateTo])
+
+  const paginas = Math.max(1, Math.ceil(filtered.length / VENTAS_POR_PAGINA))
+  const paginaActual = Math.min(pagina, paginas - 1)
+  const desdeFila = paginaActual * VENTAS_POR_PAGINA
+  const visibles = filtered.slice(desdeFila, desdeFila + VENTAS_POR_PAGINA)
+  const algunaAbierta = visibles.some((s) => desplegadas.has(s.id))
+
+  function toggleTicket(id: string) {
+    setDesplegadas((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  /** Abre todo lo que se está viendo, o lo vuelve a plegar. */
+  function togglePagina() {
+    setDesplegadas((prev) => {
+      const next = new Set(prev)
+      for (const s of visibles) {
+        if (algunaAbierta) next.delete(s.id)
+        else next.add(s.id)
+      }
+      return next
+    })
+  }
+
+  // La venta más antigua que se ha traído: hasta ahí llega lo que se puede
+  // mirar, y hay que decirlo si se pide un rango que se sale por debajo.
+  const masAntigua = sales.length > 0 ? sales[sales.length - 1].createdAt : null
+  const filtroFueraDeAlcance = hayVentasSinCargar && masAntigua !== null
+    && dateFrom < localDateStr(new Date(masAntigua))
 
   if (mode === "pos") {
     return <POSView sales={sales} customers={customers} services={services} products={products} workers={workers} voucherTemplates={voucherTemplates} currentUserId={currentUserId} pinRequired={pinRequired} onBack={() => setMode("list")} />
@@ -268,10 +403,12 @@ export function SalesClient({ sales, customers, services, products, workers, vou
   return (
     <div>
       <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-card p-6">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Ventas</h1>
-          <p className="text-muted-foreground">{sales.length} registros</p>
-        </div>
+        {/* Sin subtítulo: lo que ponía era cuántas ventas se habían traído de
+            la base (el tope de la consulta), un número que no contesta ninguna
+            pregunta y que además se confundía con "ventas que hay". Cuántas
+            salen con los filtros puestos se dice junto a los filtros, y de que
+            hay más antiguas sin cargar avisa el pie de la tabla. */}
+        <h1 className="text-2xl font-semibold tracking-tight">Ventas</h1>
         <Button size="lg" onClick={() => cashOpen ? setMode("pos") : setShowNoCashDialog(true)}>
           <Plus className="mr-2 h-4 w-4" /> Nueva venta
         </Button>
@@ -325,7 +462,9 @@ export function SalesClient({ sales, customers, services, products, workers, vou
                 />
               </div>
             )}
-            <span className="text-sm text-muted-foreground ml-auto">{filtered.length} resultado{filtered.length !== 1 ? "s" : ""}</span>
+            <span className="text-sm text-muted-foreground ml-auto">
+              {filtered.length} {filtered.length === 1 ? "venta" : "ventas"}
+            </span>
           </div>
           <div className="flex flex-wrap gap-3 items-center">
             <select
@@ -333,7 +472,7 @@ export function SalesClient({ sales, customers, services, products, workers, vou
               onChange={(e) => setWorkerFilter(e.target.value)}
               className="h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground"
             >
-              <option value="ALL">Todos los trabajadores</option>
+              <option value="ALL">Cobrado por: todas</option>
               {saleWorkers.map((w) => <option key={w} value={w}>{w}</option>)}
             </select>
             <select
@@ -346,14 +485,60 @@ export function SalesClient({ sales, customers, services, products, workers, vou
               <option value="CARD">Tarjeta</option>
               <option value="DEBT">Deuda</option>
             </select>
-            {(clientSearch || workerFilter !== "ALL" || paymentFilter !== "ALL" || dateMode !== "today") && (
+            {/* Qué se vendió, no cómo se cobró: estos dos miran dentro del
+                ticket, y sacan la venta entera si alguna de sus líneas
+                encaja. */}
+            <select
+              value={typeFilter}
+              onChange={(e) => setTypeFilter(e.target.value)}
+              className="h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground"
+            >
+              <option value={TODOS_LOS_TIPOS}>Todos los tipos</option>
+              {LINE_TYPE_LABELS.map((t) => (
+                <option key={t.id} value={t.id}>{t.label}</option>
+              ))}
+            </select>
+            <select
+              value={familyFilter}
+              onChange={(e) => setFamilyFilter(e.target.value)}
+              className="h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground"
+            >
+              <option value={TODAS_LAS_FAMILIAS_FILTRO}>Todas las familias</option>
+              {saleFamilies.map((f) => (
+                <option key={f} value={f}>{f}</option>
+              ))}
+            </select>
+            {(clientSearch || workerFilter !== "ALL" || paymentFilter !== "ALL"
+              || typeFilter !== TODOS_LOS_TIPOS || familyFilter !== TODAS_LAS_FAMILIAS_FILTRO
+              || dateMode !== "today") && (
               <Button variant="ghost" size="sm" className="text-muted-foreground" onClick={() => {
-                setClientSearch(""); setWorkerFilter("ALL"); setPaymentFilter("ALL"); setDateMode("today"); setCustomFrom(todayStr()); setCustomTo(todayStr())
+                setClientSearch(""); setWorkerFilter("ALL"); setPaymentFilter("ALL")
+                setTypeFilter(TODOS_LOS_TIPOS); setFamilyFilter(TODAS_LAS_FAMILIAS_FILTRO)
+                setDateMode("today"); setCustomFrom(todayStr()); setCustomTo(todayStr())
               }}>
                 Limpiar filtros
               </Button>
             )}
+            {filtered.length > 0 && (
+              <Button variant="ghost" size="sm" className="ml-auto text-muted-foreground gap-1.5"
+                onClick={togglePagina}>
+                {algunaAbierta
+                  ? <><ChevronDown className="h-3.5 w-3.5" /> Plegar todo</>
+                  : <><ChevronRight className="h-3.5 w-3.5" /> Desplegar todo</>}
+              </Button>
+            )}
           </div>
+
+          {/* Un rango que se sale de lo cargado devolvería menos ventas de las
+              que hubo, y sin avisar parecería que esos días no se vendió. */}
+          {filtroFueraDeAlcance && masAntigua && (
+            <p className="flex items-start gap-1.5 text-xs text-muted-foreground">
+              <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              El histórico llega hasta el{" "}
+              {new Date(masAntigua).toLocaleDateString("es-ES", { day: "numeric", month: "long", year: "numeric" })}.
+              Las ventas anteriores a esa fecha no salen en esta pantalla.
+            </p>
+          )}
         </div>
 
         <Card>
@@ -361,115 +546,89 @@ export function SalesClient({ sales, customers, services, products, workers, vou
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b text-muted-foreground">
+                  <th className="w-8 px-2 py-3" />
                   <th className="px-4 py-3 text-left font-medium">Fecha</th>
                   <th className="px-4 py-3 text-left font-medium">Cliente</th>
                   <th className="px-4 py-3 text-left font-medium">Pago</th>
                   <th className="px-4 py-3 text-right font-medium">Total</th>
                   <th className="px-4 py-3 text-left font-medium">Estado</th>
-                  <th className="px-4 py-3 text-left font-medium">Trabajador</th>
-                  <th className="px-4 py-3 text-right font-medium">
-                    <div className="flex justify-end text-xs font-normal text-muted-foreground">
-                      <span className="flex w-20 items-center justify-center gap-1"><Eye className="h-3.5 w-3.5" /> Detalle</span>
-                    </div>
-                  </th>
+                  {/* Quien cobró el ticket, que no tiene por qué ser quien hizo
+                      lo que hay dentro: eso va línea a línea, ahí debajo. */}
+                  <th className="px-4 py-3 text-left font-medium">Cobrado por</th>
                 </tr>
               </thead>
-              <tbody>
-                {filtered.length === 0 && (
+              {filtered.length === 0 && (
+                <tbody>
                   <tr><td colSpan={7} className="py-12 text-center text-muted-foreground">No hay ventas para los filtros aplicados.</td></tr>
-                )}
-                {filtered.map((s) => {
-                  const st = STATUS_META[s.status] ?? STATUS_META.PAID
-                  const customerName = s.customer ? customerLabel(s.customer) : "—"
-                  const workerName = `${s.user.name} ${s.user.lastName ?? ""}`.trim()
-                  return (
-                    <tr key={s.id} className="border-b last:border-0 hover:bg-muted/40 transition-colors">
-                      <td className="px-4 py-3 text-muted-foreground">
-                        {new Date(s.createdAt).toLocaleDateString("es-ES", { day: "2-digit", month: "short", year: "numeric" })}
+                </tbody>
+              )}
+              {visibles.map((s) => {
+                const st = STATUS_META[s.status] ?? STATUS_META.PAID
+                const abierta = desplegadas.has(s.id)
+                return (
+                  // Un tbody por venta: la cabecera del ticket y su detalle son
+                  // la misma fila para el navegador aunque se pinten en dos.
+                  <tbody key={s.id} className="border-b last:border-0">
+                    <tr
+                      className="cursor-pointer transition-colors hover:bg-muted/40"
+                      onClick={() => toggleTicket(s.id)}
+                    >
+                      <td className="px-2 py-3 text-muted-foreground">
+                        {abierta ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
                       </td>
-                      <td className="px-4 py-3 font-medium">{customerName}</td>
+                      <td className="px-4 py-3 whitespace-nowrap text-muted-foreground">
+                        {new Date(s.createdAt).toLocaleDateString("es-ES", { day: "2-digit", month: "short", year: "numeric" })}
+                        <span className="ml-2 tabular-nums">
+                          {new Date(s.createdAt).toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" })}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 font-medium">
+                        {s.customer ? customerLabel(s.customer) : "—"}
+                      </td>
                       <td className="px-4 py-3 text-muted-foreground">{PAYMENT_LABELS[s.paymentMethod] ?? s.paymentMethod}</td>
                       <td className="px-4 py-3 text-right font-medium tabular-nums">{fmtEur(s.totalCents)}</td>
                       <td className="px-4 py-3">
                         <span className={`rounded-full border px-2 py-0.5 text-xs ${st.cls}`}>{st.label}</span>
                       </td>
-                      <td className="px-4 py-3 text-muted-foreground">{workerName}</td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center justify-end">
-                          <span className="flex w-20 justify-center">
-                            <Button variant="ghost" size="icon" onClick={() => setDetailSale(s)}>
-                              <Eye className="h-4 w-4" />
-                            </Button>
-                          </span>
-                        </div>
+                      <td className="px-4 py-3 text-muted-foreground">
+                        {`${s.user.name} ${s.user.lastName ?? ""}`.trim()}
                       </td>
                     </tr>
-                  )
-                })}
-              </tbody>
+                    {abierta && (
+                      <tr>
+                        <td colSpan={7} className="bg-muted/20 px-4 pb-4 pt-1">
+                          <TicketDetalle sale={s} />
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                )
+              })}
             </table>
           </CardContent>
         </Card>
 
-        {/* Detail */}
-        {detailSale && (
-          <Dialog open onOpenChange={() => setDetailSale(null)}>
-            <DialogContent style={{ maxWidth: "42rem" }} aria-describedby={undefined}>
-              <DialogHeader><DialogTitle>Detalle de venta</DialogTitle></DialogHeader>
-              <div className="space-y-4 text-sm">
-                <div className="grid grid-cols-2 gap-2 text-muted-foreground">
-                  <div>Cliente: <span className="text-foreground font-medium">{detailSale.customer ? customerLabel(detailSale.customer) : "Sin cliente"}</span></div>
-                  <div>Pago: <span className="text-foreground font-medium">{PAYMENT_LABELS[detailSale.paymentMethod]}</span></div>
-                </div>
-                <table className="w-full">
-                  <thead><tr className="border-b text-muted-foreground text-xs">
-                    <th className="text-left py-1">Descripción</th>
-                    <th className="text-right py-1">Cant.</th>
-                    <th className="text-right py-1">P.U.</th>
-                    <th className="text-right py-1">Dto.</th>
-                    <th className="text-right py-1">Total</th>
-                  </tr></thead>
-                  <tbody>
-                    {detailSale.lines.map((l) => (
-                      <tr key={l.id} className="border-b last:border-0">
-                        <td className="py-1.5">
-                          {l.description}{l.durationMinutes ? ` · ${l.durationMinutes} min` : ""}
-                          {l.worker && (
-                            <span className="block text-xs text-muted-foreground">
-                              {l.type === "GIFT_CARD" ? "Vendida por" : l.type === "PRODUCT" ? "Vendido por" : "Atendido por"} {l.worker.name} {l.worker.lastName ?? ""}
-                            </span>
-                          )}
-                          {l.notes && <span className="block text-xs text-muted-foreground">{l.notes}</span>}
-                        </td>
-                        <td className="text-right tabular-nums py-1.5">{l.quantity}</td>
-                        <td className="text-right tabular-nums py-1.5">{fmtEur(l.unitPriceCents)}</td>
-                        <td className="text-right py-1.5">{l.discountPercent > 0 ? `-${l.discountPercent}%` : "—"}</td>
-                        <td className="text-right tabular-nums py-1.5 font-medium">{fmtEur(l.totalCents)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-                {(() => {
-                  const balanceUsed = detailSale.balanceMovements.reduce((s, m) => s + Math.abs(m.amountCents), 0)
-                  return balanceUsed > 0 ? (
-                    <div className="rounded-lg border border-blue-200 bg-blue-50/60 px-3 py-2 flex items-center justify-between text-sm">
-                      <span className="text-blue-700 font-medium flex items-center gap-1.5">
-                        <Wallet className="h-3.5 w-3.5" /> Saldo del cliente aplicado
-                      </span>
-                      <span className="tabular-nums font-semibold text-blue-700">−{fmtEur(balanceUsed)}</span>
-                    </div>
-                  ) : null
-                })()}
-                <div className="text-right">
-                  <span className="text-muted-foreground mr-2">Total:</span>
-                  <span className="font-semibold text-base tabular-nums">{fmtEur(detailSale.totalCents)}</span>
-                  {detailSale.paidCents < detailSale.totalCents && (
-                    <div className="text-red-600 mt-1">Pendiente: {fmtEur(detailSale.totalCents - detailSale.paidCents)}</div>
-                  )}
-                </div>
-              </div>
-            </DialogContent>
-          </Dialog>
+        {/* Paginación. El histórico entero no cabe de una vez, y cargarlo en
+            una sola página con todos los tickets abiertos no se lee. */}
+        {filtered.length > VENTAS_POR_PAGINA && (
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <span className="text-sm text-muted-foreground">
+              Ventas {desdeFila + 1}–{Math.min(desdeFila + VENTAS_POR_PAGINA, filtered.length)} de {filtered.length}
+            </span>
+            <div className="flex items-center gap-2">
+              <Button variant="outline" size="sm" disabled={paginaActual === 0}
+                onClick={() => setPagina(paginaActual - 1)}>
+                Anteriores
+              </Button>
+              <span className="text-sm text-muted-foreground tabular-nums">
+                {paginaActual + 1} / {paginas}
+              </span>
+              <Button variant="outline" size="sm" disabled={paginaActual >= paginas - 1}
+                onClick={() => setPagina(paginaActual + 1)}>
+                Siguientes
+              </Button>
+            </div>
+          </div>
         )}
 
         {/* No cash register dialog */}
@@ -489,6 +648,129 @@ export function SalesClient({ sales, customers, services, products, workers, vou
             </DialogContent>
           </Dialog>
         )}
+      </div>
+    </div>
+  )
+}
+
+/* ─── Detalle de un ticket ───────────────────────────────────────────────── */
+
+/**
+ * Solo la sesión de bono se etiqueta. El bono vendido y la tarjeta regalo ya
+ * llevan su familia —"Bono", "Tarjeta regalo"—, así que ponerles encima una
+ * etiqueta que dice lo mismo repetía la palabra dos veces seguidas. La sesión,
+ * en cambio, va en la familia del servicio que se da, y sin esto no se
+ * distingue de un servicio cobrado suelto a 0 EUR.
+ */
+const LINE_TAG: Record<string, string> = {
+  VOUCHER_SESSION: "Sesión de bono",
+}
+
+/**
+ * Todo lo que hay dentro de una venta, debajo de su fila.
+ *
+ * Antes esto era un diálogo que había que abrir ticket a ticket, y para
+ * comparar dos ventas había que abrir y cerrar. Aquí se ve de corrido: qué se
+ * vendió, quién hizo cada cosa, qué descuento llevó y qué queda a deber.
+ *
+ * Las dos personas del ticket no son la misma pregunta y por eso se leen en
+ * dos sitios: quien lo cobró —una sola por venta— está en la fila de arriba, y
+ * quién hizo o vendió cada cosa, en la columna Profesional. El informe de
+ * personal mide por esta segunda.
+ */
+function TicketDetalle({ sale }: { sale: Sale }) {
+  // Se calculan sobre las líneas que se están enseñando, no sobre los totales
+  // guardados en la venta: así lo que suma es exactamente lo que se lee.
+  const subtotalCents = sale.lines.reduce((a, l) => a + l.unitPriceCents * l.quantity, 0)
+  const lineasCents = sale.lines.reduce((a, l) => a + l.totalCents, 0)
+  const descuentoCents = subtotalCents - lineasCents
+  const saldoCents = sale.balanceMovements.reduce((a, m) => a + Math.abs(m.amountCents), 0)
+  const pendienteCents = Math.max(0, sale.totalCents - sale.paidCents)
+
+  return (
+    <div className="space-y-3">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="text-xs text-muted-foreground">
+            <th className="py-1 text-left font-medium">Concepto</th>
+            <th className="py-1 text-left font-medium">Profesional</th>
+            <th className="py-1 text-right font-medium">Uds</th>
+            <th className="py-1 text-right font-medium">Precio</th>
+            <th className="py-1 text-right font-medium">Dto.</th>
+            <th className="py-1 text-right font-medium">Total</th>
+          </tr>
+        </thead>
+        <tbody>
+          {sale.lines.map((l) => {
+            const brutoCents = l.unitPriceCents * l.quantity
+            return (
+              <tr key={l.id} className="border-t border-border/60">
+                <td className="py-1.5 pr-3">
+                  {l.description}
+                  {l.durationMinutes ? ` · ${l.durationMinutes} min` : ""}
+                  <span className="block text-xs text-muted-foreground">
+                    {/* La familia va en cada línea: es por lo que se filtra
+                        arriba, y sin verla no se sabe por qué salió el ticket. */}
+                    {familiaDeLinea(l)}
+                    {LINE_TAG[l.type] && ` · ${LINE_TAG[l.type]}`}
+                    {l.notes && ` · ${l.notes}`}
+                  </span>
+                </td>
+                <td className="py-1.5 pr-3">
+                  {l.worker
+                    ? `${l.worker.name} ${l.worker.lastName ?? ""}`.trim()
+                    // El bono y la tarjeta regalo no los presta nadie: se
+                    // cuentan a quien cobró, que ya está en la fila de arriba.
+                    : <span className="text-muted-foreground">—</span>}
+                </td>
+                <td className="py-1.5 text-right tabular-nums">{l.quantity}</td>
+                <td className="py-1.5 text-right tabular-nums text-muted-foreground">{fmtEur(l.unitPriceCents)}</td>
+                <td className="py-1.5 text-right tabular-nums">
+                  {l.discountPercent > 0
+                    ? <span className="text-[#B31412]">
+                        −{l.discountPercent} % · −{fmtEur(brutoCents - l.totalCents)}
+                      </span>
+                    : <span className="text-muted-foreground">—</span>}
+                </td>
+                <td className="py-1.5 text-right font-medium tabular-nums">{fmtEur(l.totalCents)}</td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
+
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <p className="max-w-md text-xs text-muted-foreground">
+          {sale.notes || ""}
+        </p>
+        <div className="ml-auto space-y-0.5 text-right text-sm">
+          {/* El subtotal solo dice algo si hubo descuento: sin él repetiría el
+              total una línea más arriba. */}
+          {descuentoCents > 0 && (
+            <>
+              <div className="text-muted-foreground">
+                Subtotal <span className="ml-2 tabular-nums">{fmtEur(subtotalCents)}</span>
+              </div>
+              <div className="text-[#B31412]">
+                Descuento <span className="ml-2 tabular-nums">−{fmtEur(descuentoCents)}</span>
+              </div>
+            </>
+          )}
+          {saldoCents > 0 && (
+            <div className="flex items-center justify-end gap-1.5 text-blue-700">
+              <Wallet className="h-3.5 w-3.5" /> Saldo del cliente
+              <span className="ml-1 tabular-nums">−{fmtEur(saldoCents)}</span>
+            </div>
+          )}
+          <div className="font-semibold">
+            Total <span className="ml-2 text-base tabular-nums">{fmtEur(sale.totalCents)}</span>
+          </div>
+          {pendienteCents > 0 && (
+            <div className="text-[#B31412]">
+              Pendiente <span className="ml-2 tabular-nums">{fmtEur(pendienteCents)}</span>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   )
@@ -628,10 +910,11 @@ function POSView({ sales, customers, services, products, workers, voucherTemplat
       errs.push("Añade al menos una línea al ticket o selecciona una deuda a cobrar.")
     lines.forEach((l) => {
       // Todas las líneas, también el producto: sin saber quién vende qué no
-      // hay trazabilidad del ticket ni informe de personal que valga. La
-      // excepción es la venta de un bono, que no la presta nadie: lo que se
-      // atribuye es cada sesión que se gaste.
-      if (l.type !== "VOUCHER" && !l.workerId)
+      // hay trazabilidad del ticket ni informe de personal que valga. Se
+      // libran las dos que no presta nadie: la venta de un bono —lo que se
+      // atribuye es cada sesión que se gaste— y la tarjeta regalo, que va sola
+      // en su ticket y se cuenta a quien lo cobró.
+      if (l.type !== "VOUCHER" && l.type !== "GIFT_CARD" && !l.workerId)
         errs.push(`Asigna un profesional a "${l.description}".`)
     })
     if (hasGiftCard && !giftRecipient)
@@ -851,8 +1134,22 @@ function POSView({ sales, customers, services, products, workers, voucherTemplat
     })
   }
 
+  /**
+   * Mete la línea en el ticket, o le suma una unidad a la que ya estaba.
+   *
+   * El bono se mira primero: un servicio que un bono cubre entra como sesión
+   * gastada, y las sesiones no se agrupan —cada una consume la suya, y así
+   * pinchar dos veces gasta dos sesiones, que es lo que se quiere—.
+   */
   function addLine(line: DraftLine) {
-    setLines((prev) => [...prev, { ...conBonoSiLoCubre(line, prev), key: lineKey }])
+    setLines((prev) => {
+      const nueva = conBonoSiLoCubre(line, prev)
+      const yaEsta = prev.findIndex((l) => mismaLinea(l, nueva))
+      if (yaEsta === -1) return [...prev, { ...nueva, key: lineKey }]
+      return prev.map((l, i) => i === yaEsta
+        ? { ...l, quantity: l.quantity + nueva.quantity }
+        : l)
+    })
     setLineKey((k) => k + 1)
   }
 
@@ -1623,9 +1920,6 @@ function AddLinePanel({ services, products, workers, currentUserId, customers, g
   // TODAS_LAS_FAMILIAS = se ha pedido el catálogo entero a propósito.
   const [familyId, setFamilyId] = useState<string | null>(null)
   const [giftAmount, setGiftAmount] = useState("")
-  // Quien vende la tarjeta. Arranca en quien tiene la sesión abierta, que es
-  // lo normal, pero se puede cambiar: en el mostrador cobra una y vende otra.
-  const [giftWorkerId, setGiftWorkerId] = useState<string | null>(null)
   const [giftNote, setGiftNote] = useState("")
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
@@ -1643,10 +1937,6 @@ function AddLinePanel({ services, products, workers, currentUserId, customers, g
       ?? (workers.length === 1 ? workers[0].id : null),
     [currentUserId, workers],
   )
-
-  useEffect(() => {
-    setGiftWorkerId((prev) => prev ?? defaultWorkerId)
-  }, [defaultWorkerId])
 
   // Las familias que tienen algo que ofrecer, en el orden del catálogo: una
   // familia vacía en el desplegable es un callejón sin salida.
@@ -1693,12 +1983,16 @@ function AddLinePanel({ services, products, workers, currentUserId, customers, g
 
   function addGiftCard() {
     const cents = Math.round(Number(giftAmount) * 100)
-    if (!cents || cents <= 0 || !giftWorkerId) return
+    if (!cents || cents <= 0) return
     const recipientName = giftRecipient ? customerLabel(giftRecipient) : ""
     onAdd({
       key: 0, type: "GIFT_CARD", itemId: "gift_card",
       description: recipientName ? `Tarjeta regalo — ${recipientName}` : "Tarjeta regalo",
-      workerId: giftWorkerId, quantity: 1, unitPriceCents: cents, discountPercent: 0,
+      // La tarjeta no la presta nadie, y va sola en su ticket: quien la vende
+      // ya queda guardado en la venta, que es quien se identificó para cobrar.
+      // Pedir además un profesional en la línea era preguntar dos veces lo
+      // mismo, y permitía contestar dos cosas distintas.
+      workerId: null, quantity: 1, unitPriceCents: cents, discountPercent: 0,
       durationMinutes: null, notes: giftNote.trim() || null, appointmentId: null,
       voucherId: null, voucherRef: null,
     })
@@ -1778,30 +2072,15 @@ function AddLinePanel({ services, products, workers, currentUserId, customers, g
               onCreated={onCustomerCreated}
               placeholder="Buscar cliente destinatario…"
             />
-            {/* Importe y profesional */}
-            <div className="flex gap-2">
-              <div className="flex-1 space-y-1">
-                <label className="text-xs text-muted-foreground">Importe (€)</label>
-                <Input
-                  type="number" step="0.01" min="0" placeholder="0,00"
-                  value={giftAmount}
-                  onChange={(e) => setGiftAmount(e.target.value)}
-                  className="tabular-nums"
-                />
-              </div>
-              <div className="flex-1 space-y-1">
-                <label className="text-xs text-muted-foreground">Profesional que la vende</label>
-                <Select value={giftWorkerId ?? ""} onValueChange={setGiftWorkerId}>
-                  <SelectTrigger className={cn("w-full", !giftWorkerId && "border-orange-300 text-orange-600")}>
-                    <SelectValue placeholder="Profesional…" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {workers.map((w) => (
-                      <SelectItem key={w.id} value={w.id}>{w.name} {w.lastName ?? ""}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+            {/* Importe. Quién la vende no se pregunta: va en la venta. */}
+            <div className="space-y-1">
+              <label className="text-xs text-muted-foreground">Importe (€)</label>
+              <Input
+                type="number" step="0.01" min="0" placeholder="0,00"
+                value={giftAmount}
+                onChange={(e) => setGiftAmount(e.target.value)}
+                className="tabular-nums"
+              />
             </div>
 
             {/* La tarjeta es saldo suelto, sin servicio ni producto detrás, así
@@ -1819,7 +2098,7 @@ function AddLinePanel({ services, products, workers, currentUserId, customers, g
             <Button
               className="w-full"
               onClick={addGiftCard}
-              disabled={!giftAmount || Number(giftAmount) <= 0 || !giftRecipient || !giftWorkerId}
+              disabled={!giftAmount || Number(giftAmount) <= 0 || !giftRecipient}
             >
               <Plus className="h-4 w-4 mr-1" /> Añadir
             </Button>
@@ -2096,9 +2375,11 @@ function LineRow({ line, workers, onUpdate, onRemove, bonos, onSetBono, bonoVend
       <td className="px-3 py-2">
         {/* También en el producto: quien lo vende queda guardado en la línea,
             que es lo que permite seguir el ticket entero y medir a cada una.
-            La excepción es la venta de un bono, que no la presta nadie: quien
-            atiende se apunta en cada sesión que se gaste. */}
-        {line.type === "VOUCHER" ? (
+            Las excepciones son las dos cosas que no presta nadie: el bono
+            —quien atiende se apunta en cada sesión que se gaste— y la tarjeta
+            regalo, que se vende sola en su ticket y se cuenta a quien lo
+            cobró. */}
+        {line.type === "VOUCHER" || line.type === "GIFT_CARD" ? (
           <span className="text-muted-foreground text-xs">—</span>
         ) : (
         <Select value={line.workerId ?? ""} onValueChange={(v) => onUpdate({ workerId: v })}>

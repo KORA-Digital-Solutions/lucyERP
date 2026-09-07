@@ -84,7 +84,12 @@ const GRUPOS_GESTION: { titulo: string; items: NavItem[] }[] = [
     items: [
       { icon: Briefcase, label: "Servicios",     href: "/services" },
       { icon: Ticket,    label: "Bonos",         href: "/vouchers" },
-      { icon: Package,   label: "Productos",     href: "/products" },
+      // "Stock", igual que en el mostrador: es el mismo sitio de la cabeza
+      // para quien lleva el centro, aunque aquí se den de alta los productos y
+      // allí solo se muevan existencias. Los dos menús no se ven a la vez —el
+      // de gestión y el del mostrador son excluyentes—, así que la palabra no
+      // choca con nada.
+      { icon: Package,   label: "Stock",         href: "/products" },
       { icon: DoorOpen,  label: "Cabinas",       href: "/cabins" },
       { icon: Settings,  label: "Configuración", href: "/settings" },
     ],

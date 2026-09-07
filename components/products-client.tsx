@@ -194,7 +194,8 @@ export function ProductsClient({ products, suppliers }: { products: ProductRow[]
     <div>
       <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-card p-6">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Productos</h1>
+          {/* Se llama igual que en el menú, que dice "Stock". */}
+          <h1 className="text-2xl font-semibold tracking-tight">Stock</h1>
           <p className="text-muted-foreground">{products.length} productos · {suppliers.length} proveedores</p>
         </div>
         <div className="flex items-center gap-2">

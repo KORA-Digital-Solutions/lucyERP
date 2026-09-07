@@ -10,10 +10,13 @@
  * de lo que se está viendo abajo) y una línea por concepto cobrado, no por
  * ticket, que es como se leen los listados de servicios realizados de siempre.
  *
- * Es el contenido de la pestaña "Actividad" de la ficha de empleada: quién es
- * y cómo se vuelve atrás lo pone la ficha, así que aquí no hay ni cabecera ni
- * botón de volver. Antes esto se abría a pantalla completa desde un icono de
- * la tabla de usuarios y quedaba fuera de todo contexto.
+ * Vive en Informes, colgando de "Facturación por empleada": es el detalle de
+ * la fila que se está mirando y se lee con el mismo período delante. Estuvo un
+ * tiempo en la ficha de empleada, en Usuarios, y era el sitio equivocado: los
+ * números del centro se miran todos juntos y en la misma pantalla, no persona
+ * a persona desde la pantalla en la que se cambia un teléfono o se retira un
+ * PIN. Quién es y cómo se cierra lo pone quien lo abre, así que aquí no hay ni
+ * cabecera ni botón de volver.
  */
 
 import { useEffect, useMemo, useState } from "react"
@@ -31,7 +34,6 @@ import {
 } from "@/components/sortable-table-head"
 import { getWorkerReport, type WorkerReportLine } from "@/lib/actions"
 import { normalizeSearch } from "@/lib/format"
-import type { WorkerRow } from "@/components/workers-client"
 
 type ReportData = Awaited<ReturnType<typeof getWorkerReport>>
 
@@ -60,18 +62,28 @@ const SORT_INICIAL: SortRule<SortKey>[] = [{ key: "fecha", dir: "desc" }]
 const TODOS_TIPOS = "__todos__"
 const TODAS_FAMILIAS = "__todas__"
 
-export function WorkerReportView({ worker }: { worker: WorkerRow }) {
+export function WorkerReportView({ workerId, desdeInicial = "", hastaInicial = "" }: {
+  workerId: string
+  /**
+   * El período desde el que se abre el informe, en formato YYYY-MM-DD. El
+   * informe trae toda la vida de la empleada —los filtros de fecha se aplican
+   * sin volver al servidor—, pero arranca acotado a lo que se estaba mirando:
+   * abrir el detalle de "este mes" y ver de golpe el año entero descuadra.
+   */
+  desdeInicial?: string
+  hastaInicial?: string
+}) {
   const [data, setData] = useState<ReportData | null>(null)
   const [search, setSearch] = useState("")
   const [type, setType] = useState(TODOS_TIPOS)
   const [family, setFamily] = useState(TODAS_FAMILIAS)
-  const [from, setFrom] = useState("")
-  const [to, setTo] = useState("")
+  const [from, setFrom] = useState(desdeInicial)
+  const [to, setTo] = useState(hastaInicial)
 
   useEffect(() => {
     setData(null)
-    getWorkerReport(worker.id).then(setData)
-  }, [worker.id])
+    getWorkerReport(workerId).then(setData)
+  }, [workerId])
 
   const rows = useMemo(() => data?.lines ?? [], [data])
 
@@ -119,20 +131,30 @@ export function WorkerReportView({ worker }: { worker: WorkerRow }) {
     return { services, products, giftCards, total: services + products + giftCards }
   }, [filtered])
 
-  const hayFiltro = search !== "" || type !== TODOS_TIPOS || family !== TODAS_FAMILIAS || from !== "" || to !== ""
+  // Lo que se ve no es el informe entero. Manda sobre los totales: el número
+  // de tickets y el "de X en total" solo valen contra todo el histórico.
+  const hayFiltro = search !== "" || type !== TODOS_TIPOS || family !== TODAS_FAMILIAS
+    || from !== "" || to !== ""
+  // Y esto es otra cosa: si hay algo que quitar. Abriendo desde un período los
+  // filtros de fecha ya vienen puestos, y ofrecer quitarlos de entrada
+  // invitaría a salirse del período que se estaba mirando sin querer.
+  const puedeLimpiar = search !== "" || type !== TODOS_TIPOS || family !== TODAS_FAMILIAS
+    || from !== desdeInicial || to !== hastaInicial
   // El aviso solo sale si hay a la vista alguna línea antigua sin profesional:
   // en un informe de ventas nuevas no pinta nada.
   const hayProductoAproximado = filtered.some((r) => r.attributedByTicket)
 
+  // "Quitar filtros" devuelve al período desde el que se abrió el informe, no
+  // a toda la vida de la empleada: se vino mirando un período y ahí se vuelve.
   function limpiarFiltros() {
-    setSearch(""); setType(TODOS_TIPOS); setFamily(TODAS_FAMILIAS); setFrom(""); setTo("")
+    setSearch(""); setType(TODOS_TIPOS); setFamily(TODAS_FAMILIAS)
+    setFrom(desdeInicial); setTo(hastaInicial)
   }
 
   return (
     <div>
-      <p className="mb-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-        Servicios realizados y productos vendidos
-      </p>
+      {/* Sin cabecera: de quién es el informe y qué contesta lo dice quien lo
+          abre, y repetirlo aquí sería decirlo dos veces seguidas. */}
       <div>
         {!data ? (
           <p className="text-sm text-muted-foreground">Cargando informe…</p>
@@ -183,7 +205,7 @@ export function WorkerReportView({ worker }: { worker: WorkerRow }) {
                 <Label htmlFor="inf-hasta" className="text-xs font-normal text-muted-foreground">Hasta</Label>
                 <Input id="inf-hasta" type="date" className="h-9 w-[9.5rem]" value={to} onChange={(e) => setTo(e.target.value)} />
               </div>
-              {hayFiltro && (
+              {puedeLimpiar && (
                 <Button variant="ghost" size="sm" onClick={limpiarFiltros} className="gap-1.5">
                   <X className="h-3.5 w-3.5" /> Quitar filtros
                 </Button>

@@ -534,7 +534,6 @@ async function generar(prisma: PrismaClient) {
       const destinatario = pick(clientela.filter((x) => x.id !== compra.id))
       const importe = pick([3000, 5000, 8000, 10000])
       const cobra = pick(users)
-      const atiende = pick(users)
       const createdAt = aLaHora(dia, between(abre, cierra - 30))
       const paymentMethod = rnd() < 0.5 ? "CASH" : "CARD"
 
@@ -548,7 +547,8 @@ async function generar(prisma: PrismaClient) {
             create: [{
               type: "GIFT_CARD", description: "Tarjeta regalo", quantity: 1,
               unitPriceCents: importe, discountPercent: 0, totalCents: importe,
-              workerId: atiende.id, notes: "Para un tratamiento facial",
+              // La tarjeta no la presta nadie: se cuenta a quien cobró.
+              workerId: null, notes: "Para un tratamiento facial",
             }],
           },
         },

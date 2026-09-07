@@ -639,15 +639,20 @@ export async function deleteWorker(id: string): Promise<ActionResult> {
 /**
  * Lo que ha hecho una empleada, línea a línea, para el informe de personal.
  *
- * Servicios y tarjetas regalo salen de `SaleLine.workerId`, que es quien
+ * Los servicios y el producto salen de `SaleLine.workerId`, que es quien
  * atiende o vende: en el mostrador cobra una y atiende otra, así que el
  * usuario del ticket no sirve para medir a nadie.
  *
+ * La tarjeta regalo es la excepción y va justo al revés: no la presta nadie y
+ * se vende sola en su ticket, así que se cuenta a quien lo cobró
+ * (`Sale.userId`). Las tarjetas vendidas antes de esto llevan profesional en
+ * la línea y siguen contando por ahí, que es lo que se contestó entonces.
+ *
  * Las ventas anteriores a que el TPV pidiera la profesional en las líneas de
  * producto se quedaron sin ella. Esas se atribuyen a quien cobró el ticket
- * (`Sale.userId`) para no perderlas del informe, y vienen marcadas con
- * `attributedByTicket` para poder avisarlo en pantalla en vez de dar por bueno
- * un número que no lo es. En las ventas nuevas no queda ninguna así.
+ * para no perderlas del informe, y vienen marcadas con `attributedByTicket`
+ * para poder avisarlo en pantalla en vez de dar por bueno un número que no lo
+ * es. En las ventas nuevas no queda ninguna así.
  */
 export type WorkerReportLine = {
   id: string
@@ -683,6 +688,9 @@ export async function getWorkerReport(workerId: string): Promise<{
         // Productos antiguos, sin profesional en la línea: se cuentan a
         // quien cobró el ticket.
         { type: "PRODUCT", workerId: null, sale: { userId: workerId } },
+        // Y las tarjetas regalo, que ya no llevan profesional: se cuentan a
+        // quien cobró el ticket porque es quien la vendió.
+        { type: "GIFT_CARD", workerId: null, sale: { userId: workerId } },
       ],
     },
     select: {
@@ -725,7 +733,9 @@ export async function getWorkerReport(workerId: string): Promise<{
     discountPercent: l.discountPercent,
     totalCents: l.totalCents,
     ticketStatus: l.sale.status,
-    attributedByTicket: l.workerId === null,
+    // Solo el producto viejo es una aproximación. La tarjeta regalo también
+    // sale del ticket, pero ahí es la regla y no un apaño: no se marca.
+    attributedByTicket: l.type === "PRODUCT" && l.workerId === null,
   }))
 
   const sumBy = (type: string) =>
@@ -1238,10 +1248,14 @@ export async function createSale(
 
     if (lines.length === 0) return { ok: false, error: "La venta debe tener al menos una línea." }
     // Toda línea lleva profesional, también las de producto: es lo que permite
-    // seguir el ticket entero y medir a cada una en el informe de personal. La
-    // excepción es vender un bono, que no lo presta nadie: lo que se atribuye
-    // es cada sesión que se gaste luego, y esas sí llevan profesional.
-    const sinProfesional = lines.find((l) => l.type !== "VOUCHER" && !l.workerId)
+    // seguir el ticket entero y medir a cada una en el informe de personal.
+    // Quedan fuera las dos cosas que no presta nadie: vender un bono —lo que
+    // se atribuye es cada sesión que se gaste luego, y esas sí llevan
+    // profesional— y vender una tarjeta regalo, que va sola en su ticket y se
+    // cuenta a quien lo cobró.
+    const sinProfesional = lines.find(
+      (l) => l.type !== "VOUCHER" && l.type !== "GIFT_CARD" && !l.workerId,
+    )
     if (sinProfesional) {
       return { ok: false, error: `Asigna un profesional a "${sinProfesional.description}".` }
     }

@@ -61,6 +61,11 @@ export function CambiarPinForm({ obligatorio }: {
   const [comprobando, setComprobando] = useState(false)
   const [aviso, setAviso] = useState<string | null>(null)
   const formRef = useRef<HTMLFormElement>(null)
+  // Qué PIN se mandó ya, por lo mismo que en la pantalla de entrada: sin esto
+  // el envío se repite solo. Al volver la respuesta los dos efectos corren en
+  // el mismo commit, y el de enviar todavía ve el paso "repetir" con sus seis
+  // dígitos puestos.
+  const enviado = useRef<string | null>(null)
 
   /** Vuelta al principio: el PIN actual sigue valiendo, solo se repite el nuevo. */
   function volverAElegir(motivo: string | null) {
@@ -70,6 +75,25 @@ export function CambiarPinForm({ obligatorio }: {
     setAviso(motivo)
   }
 
+  // El envío va en un efecto y no en el propio onComplete: los PIN viajan en
+  // campos ocultos y, al pulsar el último dígito, React todavía no los ha
+  // repintado. El efecto corre después del repintado.
+  //
+  // Va declarado ANTES del de abajo a propósito: React los corre en ese orden,
+  // así que este ve el `enviado` de antes y se calla, y solo después lo limpia
+  // el otro para que un reintento con el mismo PIN sí vuelva a salir.
+  useEffect(() => {
+    if (paso !== "repetir" || repetido.length !== PIN_LENGTH || guardando) return
+    if (repetido !== nuevo) {
+      volverAElegir("Los dos PIN no coinciden. Empieza otra vez.")
+      return
+    }
+    if (enviado.current === repetido) return
+    enviado.current = repetido
+    setAviso(null)
+    formRef.current?.requestSubmit()
+  }, [paso, repetido, nuevo, guardando])
+
   // Si el servidor rechaza el PIN nuevo (repetido con el de otra, por ejemplo)
   // se vuelve a elegir desde cero: corregir un PIN a ciegas, dígito a dígito,
   // no se puede. El actual no se vuelve a pedir, que ya se comprobó.
@@ -77,21 +101,10 @@ export function CambiarPinForm({ obligatorio }: {
   // La dependencia es el estado entero y no su texto: dos fallos seguidos
   // traen el mismo mensaje, y mirando el texto esto no volvía a correr.
   useEffect(() => {
-    if (estado.error) volverAElegir(null)
+    if (!estado.error) return
+    volverAElegir(null)
+    enviado.current = null
   }, [estado])
-
-  // El envío va en un efecto y no en el propio onComplete: los PIN viajan en
-  // campos ocultos y, al pulsar el último dígito, React todavía no los ha
-  // repintado. El efecto corre después del repintado.
-  useEffect(() => {
-    if (paso !== "repetir" || repetido.length !== PIN_LENGTH || guardando) return
-    if (repetido !== nuevo) {
-      volverAElegir("Los dos PIN no coinciden. Empieza otra vez.")
-      return
-    }
-    setAviso(null)
-    formRef.current?.requestSubmit()
-  }, [paso, repetido, nuevo, guardando])
 
   /** El PIN actual se comprueba contra el servidor: aquí no hay nada que comparar. */
   async function comprobarActual(pin: string) {

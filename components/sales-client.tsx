@@ -775,7 +775,13 @@ export function SalesClient({ sales, customers, services, products, workers, vou
                   {" · "}
                   {PAYMENT_LABELS[saleAbierta.paymentMethod] ?? saleAbierta.paymentMethod}
                   {" · "}
-                  Cobrado por {nombreDe(saleAbierta.user)}
+                  {/* "Movimiento realizado por" y no "Cobrado por": este nombre
+                      es quien hizo el último movimiento del ticket, que no
+                      siempre es quien lo vendió. Al saldar una deuda la venta
+                      pasa a nombre de quien la cobra (ver payDebt en
+                      lib/actions.ts), así que "cobrado" prometía más precisión
+                      de la que hay. */}
+                  Movimiento realizado por {nombreDe(saleAbierta.user)}
                 </DialogDescription>
               </DialogHeader>
               <TicketDetalle sale={saleAbierta} />

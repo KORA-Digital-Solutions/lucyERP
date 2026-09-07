@@ -158,8 +158,9 @@ puerta, así que **hay que hacer esto el primer día, delante del PC**:
 1. Abre `http://localhost:3000`, pulsa en entrar a la **gestión del centro**,
    usuario `lucia.martinez` y contraseña `lucia2026`. Te pedirá una contraseña
    nueva: ponla y apúntala en sitio seguro.
-2. Sal, y en la pantalla del teclado numérico teclea el PIN `100001`. Te pedirá
-   elegir un PIN propio de 6 dígitos.
+2. Sal, y en la pantalla del teclado numérico teclea el PIN `100001`. Te lo
+   volverá a pedir una vez (para saber a quién le está cambiando el PIN) y
+   después te dejará elegir uno propio de 6 dígitos.
 
 > Los dos valores de arriba dejan de servir en cuanto se cambian. Hasta que se
 > cambien, cualquiera que los conozca puede entrar: hazlo el primer día.

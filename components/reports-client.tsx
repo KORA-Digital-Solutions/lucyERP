@@ -498,6 +498,7 @@ function PestanaIngresos({
         filas={datos.empleadas}
         totalCents={resumen.totalCents}
         saldoVendidoCents={resumen.saldoVendidoCents}
+        bonosVendidosCents={resumen.bonosVendidosCents}
         periodo={periodo.etiqueta}
       />
       <LoMasVendido servicios={datos.servicios} productos={datos.productos} />
@@ -1497,11 +1498,12 @@ function SelectorDePeriodo({ periodo }: { periodo: ReportsClientProps["periodo"]
 /* ─── Facturación por empleada ───────────────────────────────────────────── */
 
 function FacturacionPorEmpleada({
-  filas, totalCents, saldoVendidoCents, periodo,
+  filas, totalCents, saldoVendidoCents, bonosVendidosCents, periodo,
 }: {
   filas: FilaDeEmpleadaConNombre[]
   totalCents: number
   saldoVendidoCents: number
+  bonosVendidosCents: number
   periodo: string
 }) {
   const maximo = Math.max(1, ...filas.map((f) => f.totalCents))
@@ -1594,6 +1596,13 @@ function FacturacionPorEmpleada({
           <p className="text-xs text-muted-foreground">
             Las tarjetas regalo no cuentan aquí: se facturan cuando se gastan, no cuando se
             venden. En este período se vendieron {fmtEur(saldoVendidoCents)} en tarjetas.
+          </p>
+        )}
+
+        {bonosVendidosCents > 0 && (
+          <p className="text-xs text-muted-foreground">
+            Los bonos tampoco: se pagan de una vez y se consumen a lo largo de meses. En este
+            período se vendieron {fmtEur(bonosVendidosCents)} en bonos.
           </p>
         )}
       </CardContent>

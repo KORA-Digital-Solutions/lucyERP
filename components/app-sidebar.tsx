@@ -17,6 +17,7 @@ import {
   Wallet,
   Clock,
   BarChart3,
+  Ticket,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { LuciaMark } from "@/components/lucia-logo"
@@ -82,6 +83,7 @@ const GRUPOS_GESTION: { titulo: string; items: NavItem[] }[] = [
     titulo: "El centro",
     items: [
       { icon: Briefcase, label: "Servicios",     href: "/services" },
+      { icon: Ticket,    label: "Bonos",         href: "/vouchers" },
       { icon: Package,   label: "Productos",     href: "/products" },
       { icon: DoorOpen,  label: "Cabinas",       href: "/cabins" },
       { icon: Settings,  label: "Configuración", href: "/settings" },

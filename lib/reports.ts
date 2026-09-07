@@ -15,6 +15,14 @@
  * tratamiento— el mes en que se regalan saldría inflado y el total del año no
  * cuadraría con nada. Se llevan aparte, en `saldoVendidoCents`.
  *
+ * Los bonos, igual, y por lo mismo: el pack se paga al contado y se consume a
+ * lo largo de meses, así que la venta va aparte en `bonosVendidosCents` y las
+ * sesiones que se gastan entran en el ticket a 0 EUR. Ojo con lo que esto
+ * implica: a diferencia de una tarjeta regalo, cuyo saldo acaba pagando un
+ * servicio que sí se factura, el dinero de un bono no llega nunca a la
+ * facturación. Se ve en su tarjeta y no se suma dos veces, pero reconocerlo
+ * sesión a sesión es una decisión que está sin tomar.
+ *
  * Sí entra lo que se queda a deber (`Sale.status = DEBT`): el servicio se ha
  * dado y está facturado, lo que falta es cobrarlo. Quién debe cuánto es otro
  * informe.
@@ -209,7 +217,7 @@ export function rangoLegible(desde: Date, hasta: Date): string {
 /** Una línea de venta, con lo justo para los informes de esta pantalla. */
 export type LineaDeInforme = {
   saleId: string
-  type: string // SERVICE | PRODUCT | GIFT_CARD
+  type: string // SERVICE | PRODUCT | GIFT_CARD | VOUCHER | VOUCHER_SESSION
   quantity: number
   /** Precio de tarifa, antes del descuento. */
   unitPriceCents: number
@@ -237,21 +245,26 @@ export type Totales = {
   totalCents: number
   /** Aparte a propósito: ver la cabecera de este fichero. */
   saldoVendidoCents: number
+  /** Bonos vendidos. Aparte por lo mismo que las tarjetas regalo. */
+  bonosVendidosCents: number
   tickets: number
   ticketMedioCents: number
 }
 
 export function totales(lineas: LineaDeInforme[]): Totales {
-  let servicesCents = 0, productsCents = 0, saldoVendidoCents = 0
+  let servicesCents = 0, productsCents = 0, saldoVendidoCents = 0, bonosVendidosCents = 0
   const tickets = new Set<string>()
   for (const l of lineas) {
     if (l.type === "SERVICE") { servicesCents += l.totalCents; tickets.add(l.saleId) }
     else if (l.type === "PRODUCT") { productsCents += l.totalCents; tickets.add(l.saleId) }
     else if (l.type === "GIFT_CARD") saldoVendidoCents += l.totalCents
+    // Las sesiones gastadas (VOUCHER_SESSION) no suman: entran a 0 EUR, y su
+    // dinero ya se contó el día que se vendió el bono.
+    else if (l.type === "VOUCHER") bonosVendidosCents += l.totalCents
   }
   const totalCents = servicesCents + productsCents
   return {
-    servicesCents, productsCents, totalCents, saldoVendidoCents,
+    servicesCents, productsCents, totalCents, saldoVendidoCents, bonosVendidosCents,
     tickets: tickets.size,
     // Sin tickets no hay media: 0 es una respuesta más honesta que dividir
     // entre cero y escribir "NaN €" en una tarjeta.

@@ -148,3 +148,10 @@ export const REFERRAL_SOURCE_META: Record<ReferralSource, { label: string }> = {
 // los listados del centro, así que aparecen como una familia más.
 export const HOME_CARE_FAMILY = "Tto. domiciliario"
 export const GIFT_CARD_FAMILY = "Tarjeta regalo"
+
+/* --------------------------------- BONOS --------------------------------- */
+
+// Familia con la que se agrupan las líneas de bono en el histórico de consumo,
+// igual que los productos y las tarjetas regalo. Un bono no pertenece a
+// ninguna familia de servicios: es un pack que puede cruzar varias.
+export const VOUCHER_FAMILY = "Bono"

@@ -5,7 +5,7 @@ import {
   ArrowLeft, Plus, Search, CreditCard, Banknote, AlertCircle,
   Trash2, Gift, ShoppingCart, X, Clock, Wallet, Scissors, Package, Eye, CalendarDays, Receipt, UserPlus,
   FileText,
-  Bell, CheckCircle2, Pin, CalendarClock,
+  Bell, CheckCircle2, Pin, CalendarClock, Ticket,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -20,6 +20,11 @@ import {
   getBillableAppointments, forgetOperator,
   type SaleLineInput, type BillableAppointment,
 } from "@/lib/actions"
+import {
+  getRedeemableVouchers,
+  type CustomerVoucherRow, type VoucherTemplateRow,
+} from "@/lib/voucher-actions"
+import { sessionSavingsCents, voucherBalances, type VoucherBalance } from "@/lib/vouchers"
 import { PinDialog } from "@/components/pin-dialog"
 import { QuickCustomerDialog } from "@/components/quick-customer-dialog"
 import { ClientProfileDialog } from "@/components/client-profile-dialog"
@@ -35,6 +40,8 @@ import { cn } from "@/lib/utils"
 
 type Customer = { id: string; firstName: string; lastName: string | null; lastName2: string | null; phone: string; balanceCents: number }
 type Worker   = { id: string; name: string; lastName: string | null; color: string | null }
+/** "Cobrar aparte": Radix no admite la cadena vacía como valor. */
+const SIN_BONO = "__sin_bono__"
 /** Se ha pedido el catálogo entero, en vez de una familia concreta. */
 const TODAS_LAS_FAMILIAS = "__todas__"
 
@@ -65,6 +72,8 @@ interface Props {
   services: Service[]
   products: Product[]
   workers: Worker[]
+  /** Los bonos que están a la venta hoy. */
+  voucherTemplates: VoucherTemplateRow[]
   currentUserId: string | null
   cashOpen: boolean
   /** Hay PINes repartidos, así que cobrar exige identificarse. */
@@ -73,9 +82,13 @@ interface Props {
 
 type ReminderAlert = Awaited<ReturnType<typeof getCustomerReminderAlerts>>[number]
 
-type LineType  = "SERVICE" | "PRODUCT" | "GIFT_CARD"
+type LineType  = "SERVICE" | "PRODUCT" | "GIFT_CARD" | "VOUCHER" | "VOUCHER_SESSION"
 
 type DraftLine = {
+  /**
+   * Según el tipo de línea: el servicio (SERVICE y VOUCHER_SESSION), el
+   * producto (PRODUCT) o el bono del catálogo que se vende (VOUCHER).
+   */
   key: number; type: LineType; itemId: string; description: string
   workerId: string | null; quantity: number; unitPriceCents: number
   discountPercent: number; durationMinutes: number | null
@@ -83,11 +96,73 @@ type DraftLine = {
   notes: string | null
   /** La cita que cobra esta línea, si viene de la agenda. */
   appointmentId: string | null
+  /** Solo VOUCHER_SESSION: el bono ya comprado del que sale la sesión. */
+  voucherId: string | null
+  /**
+   * Para comprar un bono y gastarlo en el mismo ticket. La línea del bono se
+   * inventa una referencia y las sesiones que salen de él la repiten, porque
+   * el bono todavía no existe y no hay id que poner.
+   */
+  voucherRef: string | null
+}
+
+/** Un bono del que se puede gastar hoy, ya venga de antes o de este ticket. */
+type BonoDisponible = VoucherBalance
+
+/**
+ * De qué bonos se puede gastar, con lo que le queda a cada servicio una vez
+ * contadas las sesiones que ya lleva el ticket. Entran tanto los bonos que el
+ * cliente ya tenía como los que se están comprando en esta misma venta.
+ *
+ * Los que ya tenía van primero y de más antiguo a más nuevo: se gasta lo que
+ * lleva tiempo pagado antes que lo que se acaba de llevar hoy.
+ */
+function calcularBonos(
+  vouchers: CustomerVoucherRow[],
+  lines: DraftLine[],
+  voucherTemplates: VoucherTemplateRow[],
+): BonoDisponible[] {
+  // Los que ya tenía van primero y de más antiguo a más nuevo (getCustomerVouchers
+  // los da al revés): se gasta lo que lleva tiempo pagado antes que lo de hoy.
+  const deAntes = [...vouchers].reverse().map((v) => ({
+    key: `bono:${v.id}`,
+    name: v.name,
+    voucherId: v.id as string | null,
+    voucherRef: null,
+    // Aquí ya vienen descontadas las sesiones de otros días; las de este
+    // ticket las descuenta voucherBalances.
+    services: v.services.map((x) => ({ id: x.id, name: x.name, totalSessions: x.remainingSessions })),
+  }))
+
+  const deEsteTicket = lines
+    .filter((l) => l.type === "VOUCHER" && l.voucherRef)
+    .map((l) => {
+      const plantilla = voucherTemplates.find((t) => t.id === l.itemId)
+      return {
+        key: `nuevo:${l.voucherRef}`,
+        name: l.description,
+        voucherId: null,
+        voucherRef: l.voucherRef,
+        services: (plantilla?.services ?? []).map((x) => ({
+          id: x.id, name: x.name, totalSessions: x.totalSessions,
+        })),
+      }
+    })
+
+  const gastadas = lines
+    .filter((l) => l.type === "VOUCHER_SESSION")
+    .map((l) => ({ voucherId: l.voucherId, voucherRef: l.voucherRef, serviceId: l.itemId }))
+
+  return voucherBalances([...deAntes, ...deEsteTicket], gastadas)
 }
 
 /* ─── Helpers ────────────────────────────────────────────────────────────── */
 
 function lineTotal(l: DraftLine) {
+  // Una sesión de bono ya se pagó el día que se compró el bono: entra en el
+  // ticket para dejar constancia de quién la dio, pero no suma. La línea
+  // conserva la tarifa del servicio, que se enseña tachada.
+  if (l.type === "VOUCHER_SESSION") return 0
   return Math.round(l.unitPriceCents * l.quantity * (1 - l.discountPercent / 100))
 }
 
@@ -129,7 +204,7 @@ function localDateStr(d: Date) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
 }
 
-export function SalesClient({ sales, customers, services, products, workers, currentUserId, cashOpen, pinRequired }: Props) {
+export function SalesClient({ sales, customers, services, products, workers, voucherTemplates, currentUserId, cashOpen, pinRequired }: Props) {
   const [mode, setMode] = useState<"list" | "pos">("list")
   const [showNoCashDialog, setShowNoCashDialog] = useState(false)
   const [detailSale, setDetailSale] = useState<Sale | null>(null)
@@ -187,7 +262,7 @@ export function SalesClient({ sales, customers, services, products, workers, cur
   }, [sales, clientSearch, workerFilter, paymentFilter, dateFrom, dateTo])
 
   if (mode === "pos") {
-    return <POSView sales={sales} customers={customers} services={services} products={products} workers={workers} currentUserId={currentUserId} pinRequired={pinRequired} onBack={() => setMode("list")} />
+    return <POSView sales={sales} customers={customers} services={services} products={products} workers={workers} voucherTemplates={voucherTemplates} currentUserId={currentUserId} pinRequired={pinRequired} onBack={() => setMode("list")} />
   }
 
   return (
@@ -423,9 +498,10 @@ export function SalesClient({ sales, customers, services, products, workers, cur
    POS — pantalla completa
 ═══════════════════════════════════════════════════════════════════════════ */
 
-function POSView({ sales, customers, services, products, workers, currentUserId, pinRequired, onBack }: {
+function POSView({ sales, customers, services, products, workers, voucherTemplates, currentUserId, pinRequired, onBack }: {
   sales: Sale[]; customers: Customer[]; services: Service[]; products: Product[]
-  workers: Worker[]; currentUserId: string | null; pinRequired: boolean; onBack: () => void
+  workers: Worker[]; voucherTemplates: VoucherTemplateRow[]
+  currentUserId: string | null; pinRequired: boolean; onBack: () => void
 }) {
   // Clientes dados de alta sin salir del TPV: se añaden a la lista en memoria
   // para poder seleccionarlos al momento (el servidor ya los tiene guardados).
@@ -453,6 +529,9 @@ function POSView({ sales, customers, services, products, workers, currentUserId,
   // vieja no puede pisar a la nueva.
   const [billable, setBillable] = useState<BillableAppointment[]>([])
   const billableRequestFor = useRef<string | null>(null)
+  // Los bonos con sesiones libres del cliente elegido, con el mismo cuidado.
+  const [vouchers, setVouchers] = useState<CustomerVoucherRow[]>([])
+  const vouchersRequestFor = useRef<string | null>(null)
   const [lines, setLines] = useState<DraftLine[]>([])
   const [lineKey, setLineKey] = useState(0)
   const [paymentMethod, setPaymentMethod] = useState<"CASH" | "CARD" | "DEBT">("CASH")
@@ -549,8 +628,10 @@ function POSView({ sales, customers, services, products, workers, currentUserId,
       errs.push("Añade al menos una línea al ticket o selecciona una deuda a cobrar.")
     lines.forEach((l) => {
       // Todas las líneas, también el producto: sin saber quién vende qué no
-      // hay trazabilidad del ticket ni informe de personal que valga.
-      if (!l.workerId)
+      // hay trazabilidad del ticket ni informe de personal que valga. La
+      // excepción es la venta de un bono, que no la presta nadie: lo que se
+      // atribuye es cada sesión que se gaste.
+      if (l.type !== "VOUCHER" && !l.workerId)
         errs.push(`Asigna un profesional a "${l.description}".`)
     })
     if (hasGiftCard && !giftRecipient)
@@ -578,7 +659,7 @@ function POSView({ sales, customers, services, products, workers, currentUserId,
     if (lines.length > 0) {
       const saleLines: SaleLineInput[] = lines.map((l) => ({
         type: l.type,
-        serviceId: l.type === "SERVICE" ? l.itemId : undefined,
+        serviceId: l.type === "SERVICE" || l.type === "VOUCHER_SESSION" ? l.itemId : undefined,
         productId: l.type === "PRODUCT" ? l.itemId : undefined,
         description: l.description,
         quantity: l.quantity,
@@ -589,6 +670,9 @@ function POSView({ sales, customers, services, products, workers, currentUserId,
         workerId: l.workerId,
         notes: l.notes,
         appointmentId: l.appointmentId,
+        voucherTemplateId: l.type === "VOUCHER" ? l.itemId : undefined,
+        voucherId: l.voucherId ?? undefined,
+        newVoucherRef: l.voucherRef ?? undefined,
       }))
 
       const res = await createSale(
@@ -698,6 +782,17 @@ function POSView({ sales, customers, services, products, workers, currentUserId,
     })
   }, [customer])
 
+  useEffect(() => {
+    const id = customer?.id ?? null
+    vouchersRequestFor.current = id
+    setVouchers([])
+    if (!id) return
+    getRedeemableVouchers(id).then((rows) => {
+      if (vouchersRequestFor.current !== id) return
+      setVouchers(rows)
+    })
+  }, [customer])
+
   // Las que ya están en el ticket salen de la lista: si siguieran, se
   // añadirían dos veces y la venta se caería al registrar.
   const citasEnTicket = useMemo(
@@ -706,19 +801,78 @@ function POSView({ sales, customers, services, products, workers, currentUserId,
   )
   const citasPendientes = billable.filter((c) => !citasEnTicket.has(c.id))
 
+  /**
+   * De qué bonos se puede gastar: los que ya tenía el cliente y los que se
+   * están comprando en este mismo ticket. A los dos se les restan las sesiones
+   * que ya lleva el ticket, para que la pantalla no ofrezca gastar más de las
+   * que hay. El servidor lo vuelve a comprobar antes de guardar.
+   */
+  /**
+   * Qué bonos podrían pagar cada línea del ticket.
+   *
+   * El saldo de cada una se calcula como si ella no estuviera: si no, el bono
+   * que la propia línea está gastando aparecería sin sesiones y no habría forma
+   * ni de verlo ni de dejarlo puesto.
+   */
+  const bonosPorLinea = useMemo(() => {
+    const m = new Map<number, BonoDisponible[]>()
+    for (const l of lines) {
+      if (l.type !== "SERVICE" && l.type !== "VOUCHER_SESSION") continue
+      const otras = lines.filter((x) => x.key !== l.key)
+      m.set(l.key, calcularBonos(vouchers, otras, voucherTemplates)
+        .filter((b) => b.services.some((x) => x.id === l.itemId)))
+    }
+    return m
+  }, [vouchers, lines, voucherTemplates])
+
+  /**
+   * Pasa una línea a pagarse con un bono, o la devuelve a cobrarse aparte.
+   *
+   * La línea guarda siempre la tarifa del servicio, gástese o no del bono, así
+   * que ir y volver no pierde el precio: lo único que cambia es de qué tipo es
+   * la línea y de qué bono cuelga.
+   */
+  function setBonoDeLinea(key: number, bono: BonoDisponible | null) {
+    setLines((prev) => prev.map((l) => l.key !== key ? l : bono
+      ? {
+          ...l, type: "VOUCHER_SESSION", quantity: 1, discountPercent: 0,
+          voucherId: bono.voucherId, voucherRef: bono.voucherRef,
+        }
+      : { ...l, type: "SERVICE", voucherId: null, voucherRef: null }))
+  }
+
   function addAppointmentLine(c: BillableAppointment) {
     addLine({
       key: 0, type: "SERVICE", itemId: c.serviceId, description: c.serviceName,
       // La profesional sale de la cita, que es quien de verdad atendió.
       workerId: c.workerId, quantity: 1, unitPriceCents: c.priceCents,
       discountPercent: 0, durationMinutes: c.durationMinutes, notes: null,
-      appointmentId: c.id,
+      appointmentId: c.id, voucherId: null, voucherRef: null,
     })
   }
 
   function addLine(line: DraftLine) {
-    setLines((prev) => [...prev, { ...line, key: lineKey }])
+    setLines((prev) => [...prev, { ...conBonoSiLoCubre(line, prev), key: lineKey }])
     setLineKey((k) => k + 1)
+  }
+
+  /**
+   * Si el cliente tiene un bono con sesiones libres de ese servicio, la línea
+   * entra ya gastándolo.
+   *
+   * Se hace solo a propósito: cobrarle otra vez algo que ya tiene pagado es el
+   * error que la clienta nota, y en el mostrador es facilísimo olvidarse de
+   * mirar. La línea lo dice y se puede pasar a cobrar aparte con un clic.
+   */
+  function conBonoSiLoCubre(line: DraftLine, actuales: DraftLine[]): DraftLine {
+    if (line.type !== "SERVICE") return line
+    const bono = calcularBonos(vouchers, actuales, voucherTemplates)
+      .find((b) => b.services.some((x) => x.id === line.itemId))
+    if (!bono) return line
+    return {
+      ...line, type: "VOUCHER_SESSION", quantity: 1, discountPercent: 0,
+      voucherId: bono.voucherId, voucherRef: bono.voucherRef,
+    }
   }
 
   function handleBack() {
@@ -896,6 +1050,8 @@ function POSView({ sales, customers, services, products, workers, currentUserId,
             onAdd={addLine}
             hasGiftCard={hasGiftCard}
             hasRegularLines={lines.some((l) => l.type !== "GIFT_CARD")}
+            voucherTemplates={voucherTemplates}
+            hasCustomer={!!customer}
           />
 
           {/* Líneas */}
@@ -930,6 +1086,11 @@ function POSView({ sales, customers, services, products, workers, currentUserId,
                         workers={workers}
                         onUpdate={(patch) => setLines((prev) => prev.map((x) => x.key === l.key ? { ...x, ...patch } : x))}
                         onRemove={() => setLines((prev) => prev.filter((x) => x.key !== l.key))}
+                        bonos={bonosPorLinea.get(l.key) ?? []}
+                        onSetBono={(bono) => setBonoDeLinea(l.key, bono)}
+                        bonoVendido={l.type === "VOUCHER"
+                          ? voucherTemplates.find((t) => t.id === l.itemId) ?? null
+                          : null}
                       />
                     ))}
                   </tbody>
@@ -1440,9 +1601,9 @@ function CustomerSelector({ label, customers, selected, onSelect, onClear, onCre
 
 /* ─── Add line panel ─────────────────────────────────────────────────────── */
 
-type AddLineTab = "SERVICE" | "PRODUCT" | "GIFT_CARD"
+type AddLineTab = "SERVICE" | "PRODUCT" | "GIFT_CARD" | "VOUCHER"
 
-function AddLinePanel({ services, products, workers, currentUserId, customers, giftRecipient, onGiftRecipientChange, onCustomerCreated, onAdd, hasGiftCard, hasRegularLines }: {
+function AddLinePanel({ services, products, workers, currentUserId, customers, giftRecipient, onGiftRecipientChange, onCustomerCreated, onAdd, hasGiftCard, hasRegularLines, voucherTemplates, hasCustomer }: {
   services: Service[]; products: Product[]; workers: Worker[]
   currentUserId: string | null
   customers: Customer[]
@@ -1452,6 +1613,9 @@ function AddLinePanel({ services, products, workers, currentUserId, customers, g
   onAdd: (line: DraftLine) => void
   hasGiftCard: boolean
   hasRegularLines: boolean
+  voucherTemplates: VoucherTemplateRow[]
+  /** Un bono va siempre a nombre de alguien; sin cliente no se puede vender. */
+  hasCustomer: boolean
 }) {
   const [tab, setTab] = useState<AddLineTab>("SERVICE")
   const [query, setQuery] = useState("")
@@ -1510,8 +1674,16 @@ function AddLinePanel({ services, products, workers, currentUserId, customers, g
         (!q || normalize(s.name).includes(q)),
       )
     }
+    if (tab === "VOUCHER") {
+      // Se busca por el nombre del pack y por los servicios que lleva dentro:
+      // en el mostrador se pregunta "¿tenéis bono de láser?", no por el nombre
+      // que le pusimos al bono.
+      return voucherTemplates.filter((t) => !q
+        || normalize(t.name).includes(q)
+        || t.services.some((x) => normalize(x.name).includes(q)))
+    }
     return products.filter((p) => !q || normalize(p.name).includes(q))
-  }, [tab, query, services, products, familyId])
+  }, [tab, query, services, products, voucherTemplates, familyId])
 
   // Sin familia elegida y sin teclear, el desplegable enseña las familias: es
   // la entrada para quien no se sabe el nombre del servicio de memoria. En
@@ -1528,14 +1700,34 @@ function AddLinePanel({ services, products, workers, currentUserId, customers, g
       description: recipientName ? `Tarjeta regalo — ${recipientName}` : "Tarjeta regalo",
       workerId: giftWorkerId, quantity: 1, unitPriceCents: cents, discountPercent: 0,
       durationMinutes: null, notes: giftNote.trim() || null, appointmentId: null,
+      voucherId: null, voucherRef: null,
     })
     setGiftAmount("")
     setGiftNote("")
   }
 
+  function addVoucher(t: VoucherTemplateRow) {
+    onAdd({
+      key: 0, type: "VOUCHER", itemId: t.id, description: t.name,
+      // La venta del bono no la presta nadie: el profesional va en la sesión.
+      workerId: null, quantity: 1,
+      // Entra ya a su precio, no a tarifa con un porcentaje: el descuento vive
+      // en cada servicio del bono y puede ser distinto en cada uno, así que no
+      // hay un porcentaje único que poner en la línea sin mentir. Lo que se
+      // ahorra se ve al elegirlo, y la casilla de descuento del ticket sigue
+      // libre por si en el mostrador se quiere hacer un precio aparte.
+      unitPriceCents: t.finalPriceCents, discountPercent: 0,
+      durationMinutes: null, notes: null, appointmentId: null,
+      voucherId: null,
+      // Para poder gastarlo en este mismo ticket, antes de que exista.
+      voucherRef: crypto.randomUUID(),
+    })
+  }
+
   const tabs: { id: AddLineTab; label: string; icon: React.ElementType }[] = [
     { id: "SERVICE",   label: "Servicio",      icon: Scissors },
     { id: "PRODUCT",   label: "Producto",       icon: Package },
+    { id: "VOUCHER",   label: "Bono",           icon: Ticket },
     { id: "GIFT_CARD", label: "Tarjeta regalo", icon: Gift },
   ]
 
@@ -1637,6 +1829,12 @@ function AddLinePanel({ services, products, workers, currentUserId, customers, g
           </div>
         ) : (
           <div ref={ref} className="relative">
+            {tab === "VOUCHER" && !hasCustomer && (
+              <p className="mb-2 flex items-start gap-1.5 text-xs text-muted-foreground">
+                <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                Elige primero el cliente: un bono va siempre a su nombre.
+              </p>
+            )}
             {/* Dónde estás dentro del catálogo. Sin esto, al filtrar por una
                 familia parece que faltan servicios. */}
             {tab === "SERVICE" && familyId && (
@@ -1659,9 +1857,13 @@ function AddLinePanel({ services, products, workers, currentUserId, customers, g
                 className="pl-9 h-11"
                 placeholder={
                   tab === "PRODUCT" ? "Buscar producto…"
+                    : tab === "VOUCHER" ? "Buscar bono por nombre o servicio…"
                     : activeFamily ? `Buscar en ${activeFamily.name}…`
                     : "Buscar servicio por nombre…"
                 }
+                // Un bono va a nombre de alguien: sin cliente no hay nada que
+                // buscar, y dejar teclear para luego no dejar añadir engaña.
+                disabled={tab === "VOUCHER" && !hasCustomer}
                 value={query}
                 onChange={(e) => { setQuery(e.target.value); setOpen(true) }}
                 onFocus={() => setOpen(true)}
@@ -1693,14 +1895,37 @@ function AddLinePanel({ services, products, workers, currentUserId, customers, g
             )}
             {open && !mostrarFamilias && tabItems.length === 0 && (
               <div className="absolute z-40 w-full mt-1 rounded-xl border bg-background p-4 text-sm text-muted-foreground shadow-lg">
-                {activeFamily
-                  ? <>Nada en {activeFamily.name} con ese nombre. <button type="button" className="underline" onClick={() => setFamilyId(TODAS_LAS_FAMILIAS)}>Buscar en todas</button>.</>
-                  : "Sin resultados."}
+                {tab === "VOUCHER" && voucherTemplates.length === 0
+                  ? "No hay bonos a la venta. Se dan de alta en la gestión del centro."
+                  : activeFamily
+                    ? <>Nada en {activeFamily.name} con ese nombre. <button type="button" className="underline" onClick={() => setFamilyId(TODAS_LAS_FAMILIAS)}>Buscar en todas</button>.</>
+                    : "Sin resultados."}
               </div>
             )}
             {open && !mostrarFamilias && tabItems.length > 0 && (
               <div className="absolute z-40 w-full mt-1 bg-background border rounded-xl shadow-lg overflow-hidden max-h-56 overflow-y-auto">
                 {tabItems.slice(0, 10).map((item) => {
+                  if (tab === "VOUCHER") {
+                    const b = item as VoucherTemplateRow
+                    return (
+                      <button key={b.id} type="button"
+                        className="w-full flex items-center justify-between px-4 py-2.5 hover:bg-muted/60 text-left transition-colors text-sm"
+                        onClick={() => { addVoucher(b); setQuery(""); setOpen(false) }}>
+                        <span className="min-w-0 truncate">
+                          <span className="font-medium">{b.name}</span>
+                          {/* Qué lleva dentro y cuántas sesiones de cada cosa.
+                              Lo demás —descuentos, precio por sesión, ahorro—
+                              sale en la línea del ticket, ya elegido. */}
+                          <span className="block truncate text-xs text-muted-foreground">
+                            {bonoLoQueIncluye(b)}
+                          </span>
+                        </span>
+                        <span className="text-muted-foreground tabular-nums ml-3 shrink-0">
+                          {fmtEur(b.finalPriceCents)}
+                        </span>
+                      </button>
+                    )
+                  }
                   const isService = tab === "SERVICE"
                   const s = item as Service
                   const p = item as Product
@@ -1712,6 +1937,7 @@ function AddLinePanel({ services, products, workers, currentUserId, customers, g
                           onAdd({
                             key: 0, type: "SERVICE", itemId: s.id, description: s.name,
                             workerId: defaultWorkerId, notes: null, appointmentId: null,
+                            voucherId: null, voucherRef: null,
                             quantity: 1, unitPriceCents: s.priceCents, discountPercent: 0,
                             durationMinutes: s.pricingType === "PER_MINUTE" ? s.durationMinutes : null,
                           })
@@ -1720,6 +1946,7 @@ function AddLinePanel({ services, products, workers, currentUserId, customers, g
                             key: 0, type: "PRODUCT", itemId: p.id, description: p.name,
                             workerId: defaultWorkerId, quantity: 1, unitPriceCents: p.priceCents, discountPercent: 0,
                             durationMinutes: null, notes: null, appointmentId: null,
+                            voucherId: null, voucherRef: null,
                           })
                         }
                         setQuery(""); setOpen(false)
@@ -1756,14 +1983,74 @@ function AddLinePanel({ services, products, workers, currentUserId, customers, g
   )
 }
 
+/** Qué lleva el bono, en una línea: lo justo para elegirlo en el buscador. */
+function bonoLoQueIncluye(bono: VoucherTemplateRow): string {
+  return bono.services.map((x) => `${x.name} ×${x.totalSessions}`).join(" · ")
+}
+
+/**
+ * El detalle del bono ya elegido, en su línea del ticket: qué descuento lleva
+ * cada servicio y a cuánto le sale la sesión frente a pagarla suelta.
+ *
+ * Vive aquí y no en el buscador a propósito. En el buscador es ruido —se está
+ * eligiendo entre varios— y en cambio hace falta tenerlo delante justo cuando
+ * el bono ya está en el ticket y toca explicárselo a la clienta.
+ */
+function BonoDetalle({ bono }: { bono: VoucherTemplateRow }) {
+  // Lo que costarían esas mismas sesiones sueltas, que es contra lo que se
+  // vende. No es la tarifa del bono: esa se puede haber tocado al darlo de alta.
+  const sueltoCents = bono.services.reduce((n, x) => n + x.servicePriceCents * x.totalSessions, 0)
+  const ahorroCents = sueltoCents - bono.finalPriceCents
+
+  return (
+    <div className="mt-1 space-y-0.5">
+      {bono.services.map((x) => {
+        const ahorroPorSesion = sessionSavingsCents(x.servicePriceCents, x.pricePerSessionCents)
+        return (
+          <p key={x.id} className="text-xs text-muted-foreground">
+            {x.name} ×{x.totalSessions}
+            {/* El descuento es el de este servicio, el que se le puso al dar de
+                alta el bono: cada uno lleva el suyo y no hay uno del pack. */}
+            {x.discountPercent > 0 && (
+              <> · <span className="font-medium text-primary">{x.discountPercent}% dto.</span></>
+            )}
+            {" · "}
+            {ahorroPorSesion > 0 ? (
+              <>
+                de <span className="line-through">{fmtEur(x.servicePriceCents)}</span> a{" "}
+                <span className="font-medium text-primary">{fmtEur(x.pricePerSessionCents)}</span> la sesión
+              </>
+            ) : (
+              <>{fmtEur(x.pricePerSessionCents)} la sesión</>
+            )}
+          </p>
+        )
+      })}
+      {ahorroCents > 0 && (
+        <p className="text-xs font-medium text-primary">
+          Se ahorra {fmtEur(ahorroCents)} sobre pagarlas sueltas
+        </p>
+      )}
+    </div>
+  )
+}
+
 /* ─── Line row ───────────────────────────────────────────────────────────── */
 
-function LineRow({ line, workers, onUpdate, onRemove }: {
+function LineRow({ line, workers, onUpdate, onRemove, bonos, onSetBono, bonoVendido }: {
   line: DraftLine; workers: Worker[]
   onUpdate: (p: Partial<DraftLine>) => void; onRemove: () => void
+  /** Los bonos que podrían pagar esta línea, con el que ya la paga incluido. */
+  bonos: BonoDisponible[]
+  onSetBono: (bono: BonoDisponible | null) => void
+  /** Solo en la línea que vende un bono: el bono del catálogo que es. */
+  bonoVendido: VoucherTemplateRow | null
 }) {
   const total = lineTotal(line)
   const [discountStr, setDiscountStr] = useState(line.discountPercent === 0 ? "" : String(line.discountPercent))
+  const bonoDeLaLinea = line.type === "VOUCHER_SESSION"
+    ? bonos.find((b) => line.voucherId ? b.voucherId === line.voucherId : b.voucherRef === line.voucherRef) ?? null
+    : null
 
   return (
     <tr className="border-b last:border-0 group">
@@ -1779,11 +2066,41 @@ function LineRow({ line, workers, onUpdate, onRemove }: {
         {line.notes && (
           <p className="text-xs text-muted-foreground truncate max-w-[14rem]">{line.notes}</p>
         )}
+        {bonoVendido && <BonoDetalle bono={bonoVendido} />}
+        {/* Un servicio que un bono cubre entra pagado con él, y aquí se ve de
+            cuál sale y se puede pasar a cobrar aparte. Solo aparece cuando hay
+            algún bono que pueda pagarlo: en el resto de líneas no estorba. */}
+        {bonos.length > 0 && (
+          <Select
+            value={bonoDeLaLinea?.key ?? SIN_BONO}
+            onValueChange={(v) => onSetBono(v === SIN_BONO ? null : bonos.find((b) => b.key === v) ?? null)}
+          >
+            <SelectTrigger className={cn(
+              "mt-1 h-7 w-[14rem] text-xs",
+              bonoDeLaLinea && "border-primary/40 text-primary",
+            )}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={SIN_BONO}>Cobrar aparte</SelectItem>
+              {bonos.map((b) => (
+                <SelectItem key={b.key} value={b.key}>
+                  Del bono: {b.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
       </td>
 
       <td className="px-3 py-2">
         {/* También en el producto: quien lo vende queda guardado en la línea,
-            que es lo que permite seguir el ticket entero y medir a cada una. */}
+            que es lo que permite seguir el ticket entero y medir a cada una.
+            La excepción es la venta de un bono, que no la presta nadie: quien
+            atiende se apunta en cada sesión que se gaste. */}
+        {line.type === "VOUCHER" ? (
+          <span className="text-muted-foreground text-xs">—</span>
+        ) : (
         <Select value={line.workerId ?? ""} onValueChange={(v) => onUpdate({ workerId: v })}>
           <SelectTrigger className={cn("h-8 text-xs w-36", !line.workerId && "border-orange-300 text-orange-600")}>
             <SelectValue placeholder="Profesional…" />
@@ -1794,10 +2111,12 @@ function LineRow({ line, workers, onUpdate, onRemove }: {
             ))}
           </SelectContent>
         </Select>
+        )}
       </td>
 
       <td className="px-3 py-2 text-center">
-        {line.type === "GIFT_CARD" ? <span className="text-sm">1</span> : (
+        {line.type === "GIFT_CARD" || line.type === "VOUCHER" || line.type === "VOUCHER_SESSION"
+          ? <span className="text-sm">1</span> : (
           <div className="flex items-center justify-center gap-1">
             <button type="button"
               className="h-7 w-7 rounded border text-muted-foreground hover:bg-muted flex items-center justify-center text-base leading-none"
@@ -1810,10 +2129,15 @@ function LineRow({ line, workers, onUpdate, onRemove }: {
         )}
       </td>
 
-      <td className="px-3 py-2.5 text-right text-sm tabular-nums text-muted-foreground">{fmtEur(line.unitPriceCents)}</td>
+      <td className="px-3 py-2.5 text-right text-sm tabular-nums text-muted-foreground">
+        <span className={cn(line.type === "VOUCHER_SESSION" && "line-through")}>
+          {fmtEur(line.unitPriceCents)}
+        </span>
+      </td>
 
       <td className="px-3 py-2 text-center">
-        {line.type === "GIFT_CARD" ? <span className="text-muted-foreground text-xs">—</span> : (
+        {line.type === "GIFT_CARD" || line.type === "VOUCHER_SESSION"
+          ? <span className="text-muted-foreground text-xs">—</span> : (
           <div className="relative w-24">
             <Input
               type="number" min={0} max={100}

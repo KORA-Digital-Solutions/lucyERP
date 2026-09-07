@@ -6,6 +6,7 @@ import { toast } from "sonner"
 import {
   Plus, Search, Pencil, Trash2, Check, X, UserCheck, UserX, AlertTriangle,
   FileText, Wallet, ShoppingCart, ArrowLeft, Bell, CheckCircle2, RotateCcw, Pin,
+  Ticket,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
@@ -27,6 +28,7 @@ import {
   getCustomerReminders, createCustomerReminder, completeCustomerReminder,
   deleteCustomerReminder, reopenCustomerReminder,
 } from "@/lib/actions"
+import { getCustomerVouchers, type CustomerVoucherRow } from "@/lib/voucher-actions"
 import {
   DEFAULT_PHONE_PREFIX, formatFileNumber, formatPhone, isValidPhone,
   isValidPhonePrefix, joinPhone, normalizeSearch, phoneFields, withNational,
@@ -1067,7 +1069,123 @@ function ClientHomeCareTab({ data }: { data: ConsumptionData | null }) {
   )
 }
 
-type ProfileTab = "datos" | "citas" | "servicios" | "domiciliario" | "recordatorios" | "finanzas"
+/* ─── Bonos ──────────────────────────────────────────────────────────────── */
+
+/**
+ * El saldo de bonos del cliente: qué bonos se ha sacado y cuánto le queda de
+ * cada uno.
+ *
+ * Las sesiones no se descuentan de un contador, se cuentan una a una, así que
+ * cada bono puede enseñar además en qué se han ido: qué servicio, quién lo dio
+ * y cuándo. Es lo que se pregunta en el mostrador cuando alguien dice que le
+ * quedaban más.
+ */
+function ClientVouchersTab({ vouchers }: { vouchers: CustomerVoucherRow[] | null }) {
+  if (vouchers === null) {
+    return <p className="text-sm text-muted-foreground">Cargando…</p>
+  }
+  if (vouchers.length === 0) {
+    return (
+      <p className="text-sm text-muted-foreground">
+        Este cliente no se ha sacado ningún bono todavía.
+      </p>
+    )
+  }
+
+  const activos = vouchers.filter((v) => v.status === "ACTIVE")
+  const sesionesLibres = activos.reduce((n, v) => n + v.remainingSessions, 0)
+
+  return (
+    <div className="max-w-3xl space-y-4 text-sm">
+      <div className={cn(
+        "rounded-xl border p-4",
+        sesionesLibres > 0 ? "border-green-200 bg-green-50/60" : "border-border bg-muted/20",
+      )}>
+        <p className="mb-2 flex items-center gap-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+          <Ticket className="h-3.5 w-3.5" /> Saldo de bonos
+        </p>
+        <p className={cn(
+          "text-3xl font-bold tabular-nums",
+          sesionesLibres > 0 ? "text-green-700" : "text-muted-foreground",
+        )}>
+          {sesionesLibres}
+          <span className="ml-1.5 text-xs font-normal text-muted-foreground">
+            {sesionesLibres === 1 ? "sesión disponible" : "sesiones disponibles"}
+          </span>
+        </p>
+      </div>
+
+      <div className="space-y-3">
+        {vouchers.map((v) => {
+          const agotado = v.remainingSessions === 0
+          const fecha = new Date(v.purchasedAt).toLocaleDateString("es-ES", {
+            day: "2-digit", month: "short", year: "numeric",
+          })
+          return (
+            <div key={v.id} className="rounded-xl border p-4 space-y-3">
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="font-medium">{v.name}</p>
+                  <p className="text-xs text-muted-foreground">
+                    Comprado el {fecha} · {fmtEur(v.pricePaidCents)}
+                  </p>
+                </div>
+                <Badge
+                  variant={v.status !== "ACTIVE" ? "outline" : agotado ? "outline" : "secondary"}
+                  className={v.status !== "ACTIVE" || agotado ? "text-muted-foreground" : ""}
+                >
+                  {v.status !== "ACTIVE" ? "Anulado" : agotado ? "Agotado" : `Quedan ${v.remainingSessions}`}
+                </Badge>
+              </div>
+
+              <div className="space-y-2">
+                {v.services.map((x) => (
+                  <div key={x.id} className="space-y-1">
+                    <div className="flex flex-wrap items-baseline justify-between gap-x-3 text-xs">
+                      <span className="font-medium">{x.name}</span>
+                      <span className="text-muted-foreground">
+                        {x.usedSessions} de {x.totalSessions} usadas ·{" "}
+                        {fmtEur(x.pricePerSessionCents)} por sesión
+                        {x.discountPercent > 0 && ` · ${x.discountPercent}% dto.`}
+                      </span>
+                    </div>
+                    <div className="h-2 overflow-hidden rounded-full bg-muted">
+                      <div
+                        className="h-full rounded-full bg-primary transition-all"
+                        style={{ width: `${x.totalSessions > 0 ? (x.usedSessions / x.totalSessions) * 100 : 0}%` }}
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {v.sessions.length > 0 && (
+                <div className="space-y-1 border-t pt-2">
+                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                    Sesiones gastadas
+                  </p>
+                  {v.sessions.map((ses) => (
+                    <div key={ses.id} className="flex items-center justify-between gap-3 text-xs">
+                      <span className="min-w-0 truncate">{ses.serviceName}</span>
+                      <span className="shrink-0 text-muted-foreground">
+                        {ses.workerName} ·{" "}
+                        {new Date(ses.usedAt).toLocaleDateString("es-ES", {
+                          day: "2-digit", month: "short", year: "numeric",
+                        })}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+type ProfileTab = "datos" | "citas" | "servicios" | "domiciliario" | "bonos" | "recordatorios" | "finanzas"
 
 
 export function ClientProfileView({
@@ -1092,6 +1210,7 @@ export function ClientProfileView({
 }) {
   const [data, setData] = useState<ProfileData | null>(null)
   const [consumption, setConsumption] = useState<ConsumptionData | null>(null)
+  const [vouchers, setVouchers] = useState<CustomerVoucherRow[] | null>(null)
   const [loading, setLoading] = useState(true)
   const [tab, setTab] = useState<ProfileTab>("datos")
   const [reminders, setReminders] = useState<ReminderData>([])
@@ -1113,6 +1232,11 @@ export function ClientProfileView({
   useEffect(() => {
     setConsumption(null)
     getCustomerConsumption(row.id).then(setConsumption)
+  }, [row.id])
+
+  useEffect(() => {
+    setVouchers(null)
+    getCustomerVouchers(row.id).then(setVouchers)
   }, [row.id])
 
   function reloadReminders() {
@@ -1194,6 +1318,10 @@ export function ClientProfileView({
   const permanentReminders = pendingReminders.filter((r) => r.dueDate === null)
   const datedReminders = pendingReminders.filter((r) => r.dueDate !== null)
   const completedReminders = reminders.filter((r) => r.completedAt)
+  // Las sesiones que le quedan por gastar, para verlas sin abrir la pestaña.
+  const sesionesDeBono = (vouchers ?? [])
+    .filter((v) => v.status === "ACTIVE")
+    .reduce((n, v) => n + v.remainingSessions, 0)
 
   const TABS: { key: ProfileTab; label: string }[] = [
     { key: "datos",         label: "Datos de Cliente" },
@@ -1201,6 +1329,7 @@ export function ClientProfileView({
     { key: "citas",         label: `Citas${appointments.length ? ` (${appointments.length})` : ""}` },
     { key: "servicios",     label: "Total Servicios" },
     { key: "domiciliario",  label: "Tto. Domiciliario" },
+    { key: "bonos",         label: `Bonos${sesionesDeBono ? ` (${sesionesDeBono})` : ""}` },
     { key: "finanzas",      label: "Finanzas" },
   ]
 
@@ -1274,6 +1403,9 @@ export function ClientProfileView({
 
           {/* ── Tto. Domiciliario ── */}
           {tab === "domiciliario" && <ClientHomeCareTab data={consumption} />}
+
+          {/* ── Bonos ── */}
+          {tab === "bonos" && <ClientVouchersTab vouchers={vouchers} />}
 
           {/* ── Recordatorios ── */}
           {tab === "recordatorios" && (

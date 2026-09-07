@@ -80,7 +80,7 @@ async function main() {
       name: "Centro de Estética Lucía",
       // Se lee debajo del nombre en la pantalla del PIN, que es lo primero que
       // ve el centro al encender. Se cambia desde Configuración.
-      slogan: "Cuidarte es nuestro oficio",
+      slogan: "Sencillamente… lo que tu piel necesita",
       // Los datos fiscales y de contacto se rellenan desde Configuración el
       // primer día: aquí solo va el correo, porque de él sale el dominio con
       // el que se completa el usuario al entrar en la gestión.

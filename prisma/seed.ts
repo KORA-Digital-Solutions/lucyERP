@@ -87,7 +87,7 @@ async function main() {
       name: "Centro de Estética Lucía",
       // Se lee debajo del nombre en la pantalla de encendido, la del PIN. Sin
       // esto esa pantalla sale a medias, que es como estaba hasta ahora.
-      slogan: "Cuidarte es nuestro oficio",
+      slogan: "Sencillamente… lo que tu piel necesita",
       taxId: "B12345678",
       address: "Calle Mayor 12, 28013 Madrid",
       phone: "+34910000000",

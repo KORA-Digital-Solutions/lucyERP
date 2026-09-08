@@ -192,3 +192,111 @@ justo lo que no conviene mover recién estabilizado el v1 en el centro.
 Retomarlo cuando haya rodaje suficiente para saber si ese desajuste molesta de
 verdad. Si molesta, empezar por la versión reducida (segunda decisión por lo
 barato): resuelve los dos síntomas sin tocar el listado ni los filtros.
+
+---
+
+## Un `actualizar.cmd` que instale la versión nueva él solo
+
+**Estado: propuesto, no implementado. No bloqueado: es trabajo, no dudas.**
+
+Hoy actualizar el PC del centro es copiar carpetas a mano siguiendo una lista
+escrita. Funciona porque hasta ahora lo ha hecho quien escribió la lista. La
+idea es que el paquete nuevo traiga dentro un `.cmd` que haga la actualización
+entera —copia de seguridad, sustitución de ficheros y migraciones— y que la
+persona que está delante del PC solo tenga que descomprimir y hacer doble clic.
+
+### Qué hay hoy
+
+El procedimiento vive en [DEPLOY.md](DEPLOY.md) («Desplegar una actualización»)
+e [INSTALAR.md](INSTALAR.md) («Actualizar a una versión nueva»), y es este:
+parar el servicio, copiar `.next/`, `node_modules/`, `public/`, `prisma/` y
+`server.js` encima de la instalación, **no tocar** `data/`, `backups/` ni
+`.env`, aplicar migraciones si las hay, arrancar.
+
+La separación en la que se apoya sí está bien hecha: el código y los datos
+viven en carpetas distintas, así que sustituir uno sin tocar el otro es
+posible. Lo que falta es que eso lo garantice el código en vez de la vista.
+
+Dos cosas lo hacen más frágil de lo que parece:
+
+- **El paquete lleva su propia `data/lucyerp.db` sembrada**
+  (`scripts/build-release.mjs`, paso 4). Si alguien arrastra la carpeta entera
+  encima de `C:\lucy-erp` en lugar de ir fichero por fichero, machaca la base
+  de producción. Es el fallo más probable de todo el proceso y lo único que lo
+  evita hoy es leer bien el paso 3.
+- **El paquete no lleva la CLI de Prisma**, así que las migraciones no se
+  pueden aplicar allí. Las dos salidas documentadas —traerse el `.db`, migrarlo
+  en local y devolverlo, o llevar `node_modules/prisma` en un USB— son
+  manuales y hay que acordarse de ellas justo cuando hay prisa.
+
+### Qué faltaría
+
+**1. Que el paquete se descomprima al lado, no encima.** El `.zip` se abre en
+`C:\lucy-erp-v2` y nadie copia nada a mano. Es lo que quita de en medio el
+riesgo de machacar `data/`.
+
+**2. `deploy/actualizar.cmd`**, que va dentro del paquete nuevo y hace, por
+orden y parándose al primer fallo:
+
+1. Comprobar que existe `C:\lucy-erp\data\lucyerp.db`. Si no está, avisar y
+   salir: esto es una actualización, no una instalación.
+2. Parar el servicio (`net stop LucyERP`) o detectar que corre en una ventana
+   suelta y pedir que se cierre.
+3. Copia de seguridad fechada del `.db` en `backups\`, reutilizando lo que ya
+   hace `copia-seguridad.cmd`. Si falla, no seguir.
+4. Copiar sus `.next/`, `node_modules/`, `public/`, `prisma/` y `server.js`
+   sobre la instalación. Nunca `data/`, `backups/` ni `.env`.
+5. Aplicar las migraciones pendientes (punto 3).
+6. Arrancar y decir claramente si ha ido bien o mal.
+
+**3. Un aplicador de migraciones sin la CLI.** Es la única pieza con miga. Las
+migraciones son SQL plano contra SQLite, y el `@prisma/client` que ya viaja en
+el paquete sabe ejecutar SQL: leer `prisma/migrations/*/migration.sql`,
+comparar con la tabla `_prisma_migrations` del `.db` del centro y ejecutar en
+orden las que no estén.
+
+El detalle que no se puede improvisar: esa tabla tiene `checksum` **NOT NULL**,
+y Prisma guarda ahí el SHA-256 del fichero `migration.sql`. Si el aplicador
+escribe filas con un checksum inventado, el día que ese `.db` vuelva al
+desarrollo `prisma migrate deploy` lo dará por corrupto. Hay que calcularlo
+igual que lo calcula Prisma, y rellenar también `started_at`, `finished_at` y
+`applied_steps_count`.
+
+**4. Que `build-release.mjs` deje de poner una base sembrada en `data/`.**
+Renombrarla a `data/lucyerp.db.plantilla` y que el instalador de primera vez la
+copie a su sitio. Así el paquete deja de contener un fichero capaz de borrar el
+trabajo del centro.
+
+**5. Versionar el paquete de verdad.** Hoy `VERSION` está escrito a mano en
+`build-release.mjs` (`const VERSION = "v1"`) y no se mira en ningún sitio. Para
+que el actualizador pueda decir «vas de la v1 a la v2» —y negarse a ir hacia
+atrás— hace falta que la versión esté en el paquete y también en la
+instalación.
+
+### Decisiones a tomar antes
+
+- **¿Un paquete o dos?** Instalar por primera vez y actualizar no son lo mismo,
+  y mezclarlos es justo lo que hace peligroso el `.db` sembrado. Puede ser el
+  mismo `.zip` con dos `.cmd` (`instalar.cmd` / `actualizar.cmd`), o dos
+  paquetes distintos. Lo primero es más simple de construir; lo segundo, más
+  difícil de usar mal.
+- **¿Qué hace si el servicio no para?** NSSM a veces tarda, y copiar encima de
+  un `node.exe` vivo falla a medias, que es el peor sitio donde quedarse.
+  Esperar y reintentar, o abortar antes de tocar nada.
+- **¿Y si las migraciones fallan a mitad?** SQLite no da DDL transaccional
+  completo, así que no siempre se puede deshacer. La respuesta razonable es no
+  intentar deshacer: parar, dejar el mensaje y decir que se restaure la copia
+  del paso 3 (que por eso se hace antes que nada). Pero eso hay que decidirlo y
+  escribirlo, no descubrirlo el día que pase.
+
+### Por qué no está hecho ya
+
+Porque hasta ahora ha habido una sola instalación y una sola persona
+actualizándola, y con el manual delante sale bien. El trabajo se justifica
+cuando actualice alguien que no escribió el manual, o cuando haya más de un
+centro — ahí el coste de un despiste deja de ser teórico.
+
+Es media jornada larga: el aplicador de migraciones y el reparto de
+responsabilidades entre `build-release.mjs` y los `.cmd`. No depende de
+requisitos de la clínica, así que se puede hacer en cualquier momento; solo
+hay que querer gastarla.

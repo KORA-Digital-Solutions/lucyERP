@@ -21,6 +21,7 @@ import {
   combineDateTime, dayRange, isValidPhone, isValidPhonePrefix, joinPhone, normalizePhone,
 } from "@/lib/format"
 import { getSession } from "@/lib/session"
+import { hoy } from "@/lib/format"
 import {
   WEEKDAY_LABELS, LEAVE_TYPE_META, HOME_CARE_FAMILY, GIFT_CARD_FAMILY, VOUCHER_FAMILY,
   type LeaveType,
@@ -1463,7 +1464,7 @@ export async function createSale(
       }
 
       // Actualizar caja del día (solo el importe cobrado en efectivo/tarjeta, no el saldo)
-      const today = new Date().toISOString().slice(0, 10)
+      const today = hoy()
       const existingCash = await tx.cashRegister.findUnique({ where: { clinicId_date: { clinicId, date: today } } })
       if (existingCash && existingCash.status === "OPEN") {
         // Para tarjetas regalo el saldo del comprador no se descuenta, así que se cobra el total íntegro
@@ -1524,7 +1525,7 @@ export async function payDebt(saleId: string, paymentMethod: "CARD" | "CASH"): P
         },
       })
 
-      const today = new Date().toISOString().slice(0, 10)
+      const today = hoy()
       const existingCash = await tx.cashRegister.findUnique({ where: { clinicId_date: { clinicId, date: today } } })
       if (existingCash && existingCash.status === "OPEN") {
         await tx.cashRegister.update({
@@ -1554,7 +1555,7 @@ export async function openCashRegister(openingCashCents: number): Promise<Action
     const session = await getSession()
     if (!session) return { ok: false, error: "No autenticado." }
     const clinicId = await getActiveClinicId()
-    const today = new Date().toISOString().slice(0, 10)
+    const today = hoy()
 
     if (!Number.isFinite(openingCashCents) || openingCashCents < 0)
       return { ok: false, error: "El saldo inicial no puede ser negativo." }

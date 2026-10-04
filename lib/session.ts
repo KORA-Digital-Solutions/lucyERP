@@ -12,10 +12,11 @@ const COOKIE = "lucia_session"
  * está trabajando no le molesta nunca, y si nadie toca el equipo se cierra
  * sola. Encima va un tope absoluto para que no se renueve indefinidamente.
  */
-// Cuarto de hora: con el teclado numérico, volver a abrir el mostrador son
-// unos dígitos, así que se puede cerrar agresivamente sin que moleste. Y en
-// las fichas hay alergias y notas clínicas a la vista de quien se siente.
-export const INACTIVITY_MINUTES = 15
+// Una hora: a los 15 minutos la sesión se cerraba a mitad de una acción
+// (cobro, ficha) y se perdía lo escrito. Sigue siendo corta para lo que
+// importa —las fichas tienen alergias y notas clínicas a la vista de quien se
+// siente—, y quién cobra se pide aparte con su PIN (ver lib/operator.ts).
+export const INACTIVITY_MINUTES = 60
 export const MAX_SESSION_HOURS = 12
 
 const COOKIE_MAX_AGE = INACTIVITY_MINUTES * 60

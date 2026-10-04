@@ -1,12 +1,13 @@
 import { prisma } from "@/lib/db"
 import { getActiveClinic } from "@/lib/clinic"
+import { hoy } from "@/lib/format"
 import { CashRegisterClient } from "@/components/cash-register-client"
 
 export const dynamic = "force-dynamic"
 
 export default async function CashRegisterPage() {
   const clinic = await getActiveClinic()
-  const today = new Date().toISOString().slice(0, 10)
+  const today = hoy()
 
   const [todayRegister, history] = await Promise.all([
     prisma.cashRegister.findUnique({

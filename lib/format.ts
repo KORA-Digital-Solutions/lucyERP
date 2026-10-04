@@ -42,6 +42,25 @@ export function toDateInputValue(d: Date): string {
   return `${y}-${m}-${day}`
 }
 
+/** Zona horaria del centro. Es la de `Clinic.timezone` en el seed. */
+export const ZONA_HORARIA_CENTRO = "Europe/Madrid"
+
+/**
+ * "Hoy" como "YYYY-MM-DD" en la zona horaria del centro.
+ *
+ * La caja se indexa por esta fecha. Con `toISOString().slice(0, 10)` el día
+ * cambiaba a medianoche UTC —la 1:00 o las 2:00 en España—, así que una venta
+ * de las 00:30 caía en la caja de ayer. `en-CA` da el formato ISO directamente.
+ */
+export function hoy(ahora: Date = new Date()): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: ZONA_HORARIA_CENTRO,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(ahora)
+}
+
 export function toTimeInputValue(d: Date): string {
   const h = String(d.getHours()).padStart(2, "0")
   const m = String(d.getMinutes()).padStart(2, "0")

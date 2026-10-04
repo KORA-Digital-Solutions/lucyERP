@@ -6,7 +6,7 @@ import { KPICard } from "@/components/kpi-card"
 import { DashboardRemindersCard, type DashboardReminderRow } from "@/components/dashboard-reminders-card"
 import { prisma } from "@/lib/db"
 import { getActiveClinic } from "@/lib/clinic"
-import { dayRange, toDateInputValue, toTimeString } from "@/lib/format"
+import { dayRange, hoy, toDateInputValue, toTimeString } from "@/lib/format"
 import { STATUS_META, type AppointmentStatus } from "@/lib/enums"
 import { isReminderActive, isReminderOverdue } from "@/lib/reminders"
 
@@ -18,9 +18,9 @@ export default async function DashboardPage() {
   const { start, end } = dayRange(today)
   const now = new Date()
 
-  // La caja se indexa por fecha UTC (ver openCashRegister en lib/actions),
-  // no por la fecha local que usa el resto del dashboard.
-  const cashDate = new Date().toISOString().slice(0, 10)
+  // La caja se indexa por la fecha del centro (ver openCashRegister en
+  // lib/actions), la misma que `today` salvo que el servidor esté en otra zona.
+  const cashDate = hoy()
 
   const [todays, failed, upcoming, lowStockProducts, todaySales, activeReminders, todayRegister] = await Promise.all([
     prisma.appointment.findMany({

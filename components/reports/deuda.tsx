@@ -4,9 +4,11 @@
  * Lo que está sin cobrar, y desde cuándo.
  */
 
+import { useMemo } from "react"
 import { AlertTriangle } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { Table, TableBody, TableCell, TableHeader, TableRow } from "@/components/ui/table"
+import { SortableTableHead, byDate, byNumber, byText, useTableSort } from "@/components/sortable-table-head"
 import { fmtEur } from "@/components/client-profile-view"
 import type { ResumenDeDeuda } from "@/lib/reports"
 import { cn } from "@/lib/utils"
@@ -34,7 +36,19 @@ export function InformeDeDeuda({ periodo, deuda }: {
 
 const TOP_DEUDA = 10
 
+const DEUDA_SORTERS = {
+  cliente: byText<FilaDeDeudaEnPantalla>((f) => f.nombre),
+  tickets: byNumber<FilaDeDeudaEnPantalla>((f) => f.tickets),
+  desde: byDate<FilaDeDeudaEnPantalla>((f) => f.desde),
+  debe: byNumber<FilaDeDeudaEnPantalla>((f) => f.deudaCents),
+}
+
 function DeudaPendiente({ resumen }: { resumen: DeudaEnPantalla }) {
+  // Se ordena solo lo que se enseña: los {TOP_DEUDA} que más deben siguen siendo
+  // esos aunque se reordene la tabla.
+  const top = useMemo(() => resumen.filas.slice(0, TOP_DEUDA), [resumen.filas])
+  const { sort, sorted, toggleSort } = useTableSort(top, DEUDA_SORTERS)
+
   return (
     <Card>
       <CardHeader className="pb-2">
@@ -65,14 +79,14 @@ function DeudaPendiente({ resumen }: { resumen: DeudaEnPantalla }) {
           <Table>
             <TableHeader>
               <TableRow className={SIN_HOVER}>
-                <TableHead>Cliente</TableHead>
-                <TableHead className="text-right">Tickets</TableHead>
-                <TableHead className="text-right">Desde</TableHead>
-                <TableHead className="text-right">Debe</TableHead>
+                <SortableTableHead sortKey="cliente" sort={sort} onToggle={toggleSort}>Cliente</SortableTableHead>
+                <SortableTableHead sortKey="tickets" sort={sort} onToggle={toggleSort} className="text-right">Tickets</SortableTableHead>
+                <SortableTableHead sortKey="desde" sort={sort} onToggle={toggleSort} className="text-right">Desde</SortableTableHead>
+                <SortableTableHead sortKey="debe" sort={sort} onToggle={toggleSort} className="text-right">Debe</SortableTableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {resumen.filas.slice(0, TOP_DEUDA).map((f) => (
+              {sorted.map((f) => (
                 <TableRow key={f.customerId ?? "sin-ficha"} className={SIN_HOVER}>
                   <TableCell className="font-medium">{f.nombre}</TableCell>
                   <TableCell className="text-right tabular-nums text-muted-foreground">{f.tickets}</TableCell>

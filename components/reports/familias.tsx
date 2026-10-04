@@ -15,8 +15,9 @@
 import { useState } from "react"
 import { Boxes } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { Table, TableBody, TableCell, TableHeader, TableRow } from "@/components/ui/table"
 import { fmtEur } from "@/components/client-profile-view"
+import { SortableTableHead, byNumber, byText, useTableSort } from "@/components/sortable-table-head"
 import { HOME_CARE_FAMILY } from "@/lib/enums"
 import type { FilaDeConcepto, FilaDeFamilia } from "@/lib/reports"
 import { cn } from "@/lib/utils"
@@ -77,7 +78,17 @@ export function InformeDeFamilias({
 
 /* ─── Lo que hay dentro de una familia ───────────────────────────────────── */
 
+const CONCEPTO_SORTERS = {
+  concepto: byText<FilaDeConcepto>((c) => c.nombre),
+  veces: byNumber<FilaDeConcepto>((c) => c.unidades),
+  importe: byNumber<FilaDeConcepto>((c) => c.totalCents),
+  peso: byNumber<FilaDeConcepto>((c) => c.totalCents),
+}
+
+type ConceptoSortKey = keyof typeof CONCEPTO_SORTERS
+
 function DentroDeLaFamilia({ familia, conceptos }: { familia: string; conceptos: FilaDeConcepto[] }) {
+  const { sort, sorted, toggleSort } = useTableSort<FilaDeConcepto, ConceptoSortKey>(conceptos, CONCEPTO_SORTERS)
   const unidades = conceptos.reduce((a, c) => a + c.unidades, 0)
   const totalCents = conceptos.reduce((a, c) => a + c.totalCents, 0)
 
@@ -101,14 +112,14 @@ function DentroDeLaFamilia({ familia, conceptos }: { familia: string; conceptos:
         <Table>
           <TableHeader>
             <TableRow className={SIN_HOVER}>
-              <TableHead>Concepto</TableHead>
-              <TableHead className="text-right">Veces</TableHead>
-              <TableHead className="text-right">Importe</TableHead>
-              <TableHead className="w-48">Peso en la familia</TableHead>
+              <SortableTableHead sortKey="concepto" sort={sort} onToggle={toggleSort}>Concepto</SortableTableHead>
+              <SortableTableHead sortKey="veces" sort={sort} onToggle={toggleSort} className="text-right">Veces</SortableTableHead>
+              <SortableTableHead sortKey="importe" sort={sort} onToggle={toggleSort} className="text-right">Importe</SortableTableHead>
+              <SortableTableHead sortKey="peso" sort={sort} onToggle={toggleSort} className="w-48">Peso en la familia</SortableTableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {conceptos.map((c) => (
+            {sorted.map((c) => (
               <TableRow key={c.id} className={SIN_HOVER}>
                 <TableCell className="font-medium">{c.nombre}</TableCell>
                 <TableCell className="text-right tabular-nums text-muted-foreground">{c.unidades}</TableCell>
@@ -138,12 +149,22 @@ function DentroDeLaFamilia({ familia, conceptos }: { familia: string; conceptos:
 
 /* ─── Ingresos por familia ───────────────────────────────────────────────── */
 
+const FAMILIA_SORTERS = {
+  familia: byText<FilaDeFamilia>((f) => f.nombre),
+  unidades: byNumber<FilaDeFamilia>((f) => f.unidades),
+  importe: byNumber<FilaDeFamilia>((f) => f.totalCents),
+  peso: byNumber<FilaDeFamilia>((f) => f.totalCents),
+}
+
+type FamiliaSortKey = keyof typeof FAMILIA_SORTERS
+
 function IngresosPorFamilia({ filas, totalCents, seleccionada, onSeleccionar }: {
   filas: FilaDeFamilia[]
   totalCents: number
   seleccionada: string | null
   onSeleccionar: (familia: string) => void
 }) {
+  const { sort, sorted, toggleSort } = useTableSort<FilaDeFamilia, FamiliaSortKey>(filas, FAMILIA_SORTERS)
   const maximo = Math.max(1, ...filas.map((f) => f.totalCents))
 
   return (
@@ -159,14 +180,14 @@ function IngresosPorFamilia({ filas, totalCents, seleccionada, onSeleccionar }: 
         <Table>
           <TableHeader>
             <TableRow className={SIN_HOVER}>
-              <TableHead>Familia</TableHead>
-              <TableHead className="text-right">Uds.</TableHead>
-              <TableHead className="text-right">Importe</TableHead>
-              <TableHead className="w-56">Peso</TableHead>
+              <SortableTableHead sortKey="familia" sort={sort} onToggle={toggleSort}>Familia</SortableTableHead>
+              <SortableTableHead sortKey="unidades" sort={sort} onToggle={toggleSort} className="text-right">Uds.</SortableTableHead>
+              <SortableTableHead sortKey="importe" sort={sort} onToggle={toggleSort} className="text-right">Importe</SortableTableHead>
+              <SortableTableHead sortKey="peso" sort={sort} onToggle={toggleSort} className="w-56">Peso</SortableTableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {filas.map((f) => (
+            {sorted.map((f) => (
               <TableRow
                 key={f.nombre}
                 className={cn(

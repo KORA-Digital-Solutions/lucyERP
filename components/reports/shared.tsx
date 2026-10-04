@@ -12,7 +12,7 @@
 
 import { useState } from "react"
 import Link from "next/link"
-import { usePathname, useRouter } from "next/navigation"
+import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { ArrowLeft, BarChart3 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
@@ -161,6 +161,9 @@ export function SelectorDePeriodo({ periodo }: { periodo: PeriodoEnPantalla }) {
   const router = useRouter()
   // El período no cambia de informe: se queda en el que se está leyendo.
   const aqui = usePathname()
+  // El filtro de origen del informe de clientes sobrevive al cambio de período.
+  const origen = useSearchParams().get("origen")
+  const filtro = origen ? `&origen=${encodeURIComponent(origen)}` : ""
   // Por el día local, no por los diez primeros caracteres del ISO: el ISO va
   // en UTC y en España el 1 de septiembre a las 00:00 es el 31 de agosto a las
   // 22:00Z. Las casillas salían con un día de menos y cada "Aplicar" corría el
@@ -179,8 +182,8 @@ export function SelectorDePeriodo({ periodo }: { periodo: PeriodoEnPantalla }) {
               key={p.id}
               href={
                 p.id === "personalizado"
-                  ? `${aqui}?periodo=personalizado&desde=${desde}&hasta=${hasta}`
-                  : `${aqui}?periodo=${p.id}`
+                  ? `${aqui}?periodo=personalizado&desde=${desde}&hasta=${hasta}${filtro}`
+                  : `${aqui}?periodo=${p.id}${filtro}`
               }
               className={cn(
                 "rounded-lg px-3 py-1.5 text-sm font-medium transition-colors",
@@ -214,7 +217,7 @@ export function SelectorDePeriodo({ periodo }: { periodo: PeriodoEnPantalla }) {
           </div>
           <Button
             size="sm" variant="outline"
-            onClick={() => router.push(`${aqui}?periodo=personalizado&desde=${desde}&hasta=${hasta}`)}
+            onClick={() => router.push(`${aqui}?periodo=personalizado&desde=${desde}&hasta=${hasta}${filtro}`)}
           >
             Aplicar
           </Button>

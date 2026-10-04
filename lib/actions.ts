@@ -885,6 +885,14 @@ export async function saveProduct(id: string | null, fd: FormData): Promise<Acti
       stockMin: int(fd, "stockMin", 0),
       active: bool(fd, "active"),
     }
+    // El código identifica el producto en stock e informes: dos iguales se
+    // confundirían. Se compara sin mayúsculas ni espacios de más.
+    const clave = data.name.trim().toLowerCase()
+    const mismoCodigo = (await prisma.product.findMany({
+      where: { clinicId, ...(id ? { id: { not: id } } : {}) },
+      select: { name: true },
+    })).some((p) => p.name.trim().toLowerCase() === clave)
+    if (mismoCodigo) return { ok: false, error: "Ya hay un producto con ese código." }
     if (id) {
       await prisma.product.update({ where: { id }, data })
     } else {

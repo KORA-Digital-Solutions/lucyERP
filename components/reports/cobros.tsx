@@ -9,7 +9,8 @@
  */
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { Table, TableBody, TableCell, TableHeader, TableRow } from "@/components/ui/table"
+import { SortableTableHead, byNumber, byText, useTableSort } from "@/components/sortable-table-head"
 import { fmtEur } from "@/components/client-profile-view"
 import { ETIQUETA_DE_COBRO, type FilaDeCobro, type ResumenDeDescuentos } from "@/lib/reports"
 import { cn } from "@/lib/utils"
@@ -21,6 +22,22 @@ import {
 /** El descuento con el nombre de quien lo hizo, resuelto en el servidor. */
 export type DescuentosConNombre = Omit<ResumenDeDescuentos, "filas"> & {
   filas: (ResumenDeDescuentos["filas"][number] & { nombre: string })[]
+}
+
+type FilaDeDescuento = DescuentosConNombre["filas"][number]
+
+const COBRO_SORTERS = {
+  via: byText<FilaDeCobro>((f) => f.etiqueta),
+  tickets: byNumber<FilaDeCobro>((f) => f.ventas),
+  importe: byNumber<FilaDeCobro>((f) => f.totalCents),
+  // El % es proporcional al importe, así que ordena igual.
+  porcentaje: byNumber<FilaDeCobro>((f) => f.totalCents),
+}
+
+const DESCUENTO_SORTERS = {
+  quien: byText<FilaDeDescuento>((f) => f.nombre),
+  lineas: byNumber<FilaDeDescuento>((f) => f.lineas),
+  descuento: byNumber<FilaDeDescuento>((f) => f.descuentoCents),
 }
 
 export function InformeDeCobros({ periodo, cobros, descuentos }: {
@@ -46,6 +63,7 @@ export function InformeDeCobros({ periodo, cobros, descuentos }: {
 
 function FormasDeCobro({ filas }: { filas: FilaDeCobro[] }) {
   const total = filas.reduce((a, f) => a + f.totalCents, 0)
+  const { sort, sorted, toggleSort } = useTableSort(filas, COBRO_SORTERS)
 
   return (
     <Card>
@@ -57,14 +75,14 @@ function FormasDeCobro({ filas }: { filas: FilaDeCobro[] }) {
         <Table>
           <TableHeader>
             <TableRow className={SIN_HOVER}>
-              <TableHead>Vía</TableHead>
-              <TableHead className="text-right">Tickets</TableHead>
-              <TableHead className="text-right">Importe</TableHead>
-              <TableHead className="w-16 text-right">%</TableHead>
+              <SortableTableHead sortKey="via" sort={sort} onToggle={toggleSort}>Vía</SortableTableHead>
+              <SortableTableHead sortKey="tickets" sort={sort} onToggle={toggleSort} className="text-right">Tickets</SortableTableHead>
+              <SortableTableHead sortKey="importe" sort={sort} onToggle={toggleSort} className="text-right">Importe</SortableTableHead>
+              <SortableTableHead sortKey="porcentaje" sort={sort} onToggle={toggleSort} className="w-16 text-right">%</SortableTableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {filas.map((f) => (
+            {sorted.map((f) => (
               <TableRow key={f.metodo} className={SIN_HOVER}>
                 <TableCell className={cn("font-medium", f.metodo === "DEBT" && "text-[#B31412]")}>
                   {f.etiqueta}
@@ -92,6 +110,8 @@ function FormasDeCobro({ filas }: { filas: FilaDeCobro[] }) {
 /* ─── Descuentos ─────────────────────────────────────────────────────────── */
 
 function Descuentos({ resumen }: { resumen: DescuentosConNombre }) {
+  const { sort, sorted, toggleSort } = useTableSort(resumen.filas, DESCUENTO_SORTERS)
+
   return (
     <Card>
       <CardHeader className="pb-2">
@@ -116,13 +136,13 @@ function Descuentos({ resumen }: { resumen: DescuentosConNombre }) {
           <Table>
             <TableHeader>
               <TableRow className={SIN_HOVER}>
-                <TableHead>Quien cobra</TableHead>
-                <TableHead className="text-right">Líneas</TableHead>
-                <TableHead className="text-right">Descuento</TableHead>
+                <SortableTableHead sortKey="quien" sort={sort} onToggle={toggleSort}>Quien cobra</SortableTableHead>
+                <SortableTableHead sortKey="lineas" sort={sort} onToggle={toggleSort} className="text-right">Líneas</SortableTableHead>
+                <SortableTableHead sortKey="descuento" sort={sort} onToggle={toggleSort} className="text-right">Descuento</SortableTableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {resumen.filas.map((f) => (
+              {sorted.map((f) => (
                 <TableRow key={f.userId ?? "sin-asignar"} className={SIN_HOVER}>
                   <TableCell className="font-medium">{f.nombre}</TableCell>
                   <TableCell className="text-right tabular-nums text-muted-foreground">{f.lineas}</TableCell>

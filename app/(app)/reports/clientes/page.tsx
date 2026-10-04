@@ -1,5 +1,8 @@
 import { prisma } from "@/lib/db"
-import { nuevasVsRecurrentes, porCliente } from "@/lib/reports"
+import {
+  captacionPorOrigen, coincideOrigen, nuevasVsRecurrentes, porCliente, SIN_ORIGEN,
+} from "@/lib/reports"
+import { REFERRAL_SOURCE } from "@/lib/enums"
 import { fichasDeCliente, lineasDelPeriodo } from "@/lib/reports-data"
 import { InformeDeClientes } from "@/components/reports/clientes"
 
@@ -10,8 +13,13 @@ export const dynamic = "force-dynamic"
 
 export default async function ClientesPage({ searchParams }: { searchParams: ParamsDeInforme }) {
   const { clinic, p, enPantalla } = await abrirInforme(searchParams)
+  // Lo que llegue raro por la URL no filtra: son enlaces que se guardan y se comparten.
+  const { origen: origenPedido } = await searchParams
+  const origen = origenPedido && (origenPedido === SIN_ORIGEN || origenPedido in REFERRAL_SOURCE)
+    ? origenPedido
+    : null
 
-  const [lineas, { nombreDe }, historial] = await Promise.all([
+  const [lineas, { fichas, nombreDe }, historial] = await Promise.all([
     lineasDelPeriodo(clinic.id, p),
     fichasDeCliente(clinic.id),
     // Primera compra y gasto de toda la vida, para saber quién es nueva. Se
@@ -25,7 +33,13 @@ export default async function ClientesPage({ searchParams }: { searchParams: Par
     }),
   ])
 
-  const clientes = porCliente(lineas)
+  const origenDe = new Map(fichas.map((f) => [f.id, f.referralSource]))
+  // El filtro recorta todo el informe menos el desglose por origen, que se
+  // queda entero: es lo que permite comparar un origen con los demás.
+  const todos = porCliente(lineas)
+  const clientes = origen
+    ? porCliente(lineas.filter((l) => l.customerId && coincideOrigen(origenDe.get(l.customerId), origen)))
+    : todos
   const primeraCompraDe = new Map(
     historial
       .filter((h): h is typeof h & { customerId: string } => h.customerId !== null)
@@ -49,6 +63,8 @@ export default async function ClientesPage({ searchParams }: { searchParams: Par
         ultimaCompra: f.ultimaCompra.toISOString(),
       }))}
       captacion={nuevasVsRecurrentes(clientes.filas, primeraCompraDe, p.desde)}
+      origen={origen}
+      desglose={captacionPorOrigen(todos.filas, primeraCompraDe, p.desde, origenDe)}
     />
   )
 }

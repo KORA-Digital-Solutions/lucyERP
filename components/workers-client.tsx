@@ -12,6 +12,7 @@ import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 import { toggleWorkerActive } from "@/lib/actions"
+import { useTableSort, SortableTableHead, byBoolean, byText } from "@/components/sortable-table-head"
 import { WorkerForm } from "@/components/worker-form"
 import { EstadoAcceso, WorkerProfileView, type WorkerTab } from "@/components/worker-profile-view"
 
@@ -96,19 +97,19 @@ export function WorkersClient({
     <div>
       <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-card p-6">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Usuarios</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">Personal del centro</h1>
           <p className="text-muted-foreground">
-            {rows.length} usuarios · pulsa una fila para abrir su ficha
+            {rows.length} {rows.length === 1 ? "persona" : "personas"} · pulsa una fila para abrir su ficha
           </p>
         </div>
         <Button onClick={() => setNuevoOpen(true)}>
-          <Plus className="mr-2 h-4 w-4" /> Nuevo usuario
+          <Plus className="mr-2 h-4 w-4" /> Nueva persona
         </Button>
       </div>
 
       <div className="space-y-6 p-6">
         {rows.length === 0 && (
-          <Card className="p-8 text-center text-muted-foreground">Sin usuarios.</Card>
+          <Card className="p-8 text-center text-muted-foreground">Todavía no hay personal.</Card>
         )}
 
         {admins.length > 0 && (
@@ -151,14 +152,14 @@ export function WorkersClient({
       <Dialog open={nuevoOpen} onOpenChange={setNuevoOpen}>
         <DialogContent aria-describedby={undefined}>
           <DialogHeader>
-            <DialogTitle>Nuevo usuario</DialogTitle>
+            <DialogTitle>Nueva persona</DialogTitle>
           </DialogHeader>
           <WorkerForm
             worker={null}
             domain={domain}
             onDone={() => setNuevoOpen(false)}
             onCancel={() => setNuevoOpen(false)}
-            submitLabel="Crear usuario"
+            submitLabel="Crear"
           />
         </DialogContent>
       </Dialog>
@@ -184,6 +185,17 @@ function GrupoDeUsuarios({ titulo, descripcion, filas, onAbrir, onDesactivada }:
   )
 }
 
+const WORKER_SORTERS = {
+  nombre: byText<WorkerRow>((r) => `${r.lastName ?? ""} ${r.name}`),
+  rol: byText<WorkerRow>((r) => r.role),
+  email: byText<WorkerRow>((r) => r.email),
+  telefono: byText<WorkerRow>((r) => r.phone),
+  acceso: byText<WorkerRow>((r) => resumenAcceso(r).texto),
+  activo: byBoolean<WorkerRow>((r) => r.active),
+}
+
+type WorkerSortKey = keyof typeof WORKER_SORTERS
+
 /**
  * El listado se queda con quién es cada una y cómo está: el resto —informe,
  * PIN, contraseña, editar, borrar— vive dentro de su ficha. Antes eran cinco
@@ -198,6 +210,8 @@ function TablaDeUsuarios({ filas, onAbrir, conRol = false, onDesactivada }: {
   onDesactivada?: () => void
 }) {
   const router = useRouter()
+  // Cada grupo se ordena por su cuenta: son tres tablas y cada una con su criterio.
+  const { sort, sorted, toggleSort } = useTableSort<WorkerRow, WorkerSortKey>(filas, WORKER_SORTERS)
 
   async function onToggle(r: WorkerRow) {
     const res = await toggleWorkerActive(r.id, !r.active)
@@ -215,16 +229,16 @@ function TablaDeUsuarios({ filas, onAbrir, conRol = false, onDesactivada }: {
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead>Nombre</TableHead>
-            {conRol && <TableHead>Rol</TableHead>}
-            <TableHead>Email</TableHead>
-            <TableHead>Teléfono</TableHead>
-            <TableHead>Acceso</TableHead>
+            <SortableTableHead sortKey="nombre" sort={sort} onToggle={toggleSort}>Nombre</SortableTableHead>
+            {conRol && <SortableTableHead sortKey="rol" sort={sort} onToggle={toggleSort}>Rol</SortableTableHead>}
+            <SortableTableHead sortKey="email" sort={sort} onToggle={toggleSort}>Email</SortableTableHead>
+            <SortableTableHead sortKey="telefono" sort={sort} onToggle={toggleSort}>Teléfono</SortableTableHead>
+            <SortableTableHead sortKey="acceso" sort={sort} onToggle={toggleSort}>Acceso</SortableTableHead>
             <TableHead className="w-24 text-center">Activo</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
-          {filas.map((r) => {
+          {sorted.map((r) => {
             const acceso = resumenAcceso(r)
             return (
               <TableRow

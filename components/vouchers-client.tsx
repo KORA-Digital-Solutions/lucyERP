@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import { Plus, Pencil, Trash2, ToggleRight, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { cn } from "@/lib/utils"
 import { Card } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -28,6 +29,19 @@ import {
   suggestedBasePriceCents, suggestedVoucherName,
   voucherFinalPriceCents, voucherPricePerSessionCents, voucherTotals,
 } from "@/lib/vouchers"
+import { useTableSort, SortableTableHead, byBoolean, byNumber, byText } from "@/components/sortable-table-head"
+
+const VOUCHER_SORTERS = {
+  bono: byText<VoucherTemplateRow>((r) => r.name),
+  incluye: byText<VoucherTemplateRow>((r) => r.services.map((s) => s.name).join(", ")),
+  sesiones: byNumber<VoucherTemplateRow>((r) => r.totalSessions),
+  // La tarifa solo se enseña cuando difiere del precio: sin ahorro sale "—".
+  tarifa: byNumber<VoucherTemplateRow>((r) => (r.savingsCents > 0 ? r.basePriceCents : null)),
+  precio: byNumber<VoucherTemplateRow>((r) => r.finalPriceCents),
+  estado: byBoolean<VoucherTemplateRow>((r) => r.active),
+}
+
+type VoucherSortKey = keyof typeof VOUCHER_SORTERS
 
 export interface VoucherServiceOption {
   id: string
@@ -91,6 +105,12 @@ export function VouchersClient({
   const [nameTouched, setNameTouched] = useState(false)
   const [activo, setActivo] = useState(true)
   const [buscadorAbierto, setBuscadorAbierto] = useState(false)
+  // La familia con la que se acota la lista de servicios; vacía, todas. Se
+  // conserva entre servicio y servicio: un bono de láser añade varios seguidos.
+  const [familiaElegida, setFamiliaElegida] = useState("")
+
+  const { sort, sorted: sortedRows, toggleSort } =
+    useTableSort<VoucherTemplateRow, VoucherSortKey>(rows, VOUCHER_SORTERS)
 
   const servicioPorId = useMemo(
     () => new Map(services.map((s) => [s.id, s])),
@@ -103,6 +123,7 @@ export function VouchersClient({
     setName("")
     setNameTouched(false)
     setActivo(true)
+    setFamiliaElegida("")
     setOpen(true)
   }
 
@@ -119,6 +140,7 @@ export function VouchersClient({
     setName(r.name)
     setNameTouched(true)
     setActivo(r.active)
+    setFamiliaElegida("")
     setOpen(true)
   }
 
@@ -271,12 +293,12 @@ export function VouchersClient({
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Bono</TableHead>
-                <TableHead>Qué incluye</TableHead>
-                <TableHead className="text-right">Sesiones</TableHead>
-                <TableHead className="text-right">Tarifa</TableHead>
-                <TableHead className="text-right">Precio</TableHead>
-                <TableHead>Estado</TableHead>
+                <SortableTableHead sortKey="bono" sort={sort} onToggle={toggleSort}>Bono</SortableTableHead>
+                <SortableTableHead sortKey="incluye" sort={sort} onToggle={toggleSort}>Qué incluye</SortableTableHead>
+                <SortableTableHead sortKey="sesiones" sort={sort} onToggle={toggleSort} className="text-right">Sesiones</SortableTableHead>
+                <SortableTableHead sortKey="tarifa" sort={sort} onToggle={toggleSort} className="text-right">Tarifa</SortableTableHead>
+                <SortableTableHead sortKey="precio" sort={sort} onToggle={toggleSort} className="text-right">Precio</SortableTableHead>
+                <SortableTableHead sortKey="estado" sort={sort} onToggle={toggleSort}>Estado</SortableTableHead>
                 <TableHead className="text-right">
                   <div className="flex justify-end text-xs font-normal text-muted-foreground">
                     <span className="flex w-32 items-center justify-center gap-1">
@@ -290,7 +312,7 @@ export function VouchersClient({
               </TableRow>
             </TableHeader>
             <TableBody>
-              {rows.map((r) => (
+              {sortedRows.map((r) => (
                 <TableRow key={r.id}>
                   <TableCell className="font-medium">{r.name}</TableCell>
                   <TableCell>
@@ -375,11 +397,31 @@ export function VouchersClient({
                     </Button>
                   </PopoverTrigger>
                   <PopoverContent className="w-[22rem] p-0" align="end">
+                    {/* La familia va antes que el buscador: con el catálogo
+                        entero dado de alta, elegirla acorta la lista a lo que
+                        se está buscando sin tener que escribir nada. */}
+                    <div className="flex flex-wrap gap-1 border-b p-2">
+                      {[["", "Todas"], ...porFamilia.map(([f]) => [f, f])].map(([valor, etiqueta]) => (
+                        <button
+                          key={valor || "todas"}
+                          type="button"
+                          onClick={() => setFamiliaElegida(valor)}
+                          className={cn(
+                            "rounded-md px-2 py-1 text-xs font-medium transition-colors",
+                            familiaElegida === valor
+                              ? "bg-primary text-primary-foreground"
+                              : "bg-muted text-muted-foreground hover:bg-muted/70",
+                          )}
+                        >
+                          {etiqueta}
+                        </button>
+                      ))}
+                    </div>
                     <Command>
-                      <CommandInput placeholder="Buscar por servicio o familia…" />
+                      <CommandInput placeholder={familiaElegida ? `Buscar en ${familiaElegida}…` : "Buscar por servicio o familia…"} />
                       <CommandList>
                         <CommandEmpty>Nada con ese nombre.</CommandEmpty>
-                        {porFamilia.map(([familia, lista]) => {
+                        {porFamilia.filter(([familia]) => !familiaElegida || familia === familiaElegida).map(([familia, lista]) => {
                           // Lo que ya está en el bono no se vuelve a ofrecer.
                           const libres = lista.filter((x) => !lineas.some((l) => l.serviceId === x.id))
                           if (libres.length === 0) return null

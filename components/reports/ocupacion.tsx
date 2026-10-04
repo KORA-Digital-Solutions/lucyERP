@@ -6,8 +6,9 @@
 
 import { AlertTriangle, CalendarClock, Clock, DoorOpen } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { Table, TableBody, TableCell, TableHeader, TableRow } from "@/components/ui/table"
 import { fmtEur } from "@/components/client-profile-view"
+import { SortableTableHead, byNumber, byText, useTableSort } from "@/components/sortable-table-head"
 import { horasLegibles, type FilaDeCaida, type FilaDeOcupacion, type ResumenDeCitas } from "@/lib/reports"
 import { cn } from "@/lib/utils"
 import {
@@ -87,6 +88,16 @@ export function InformeDeOcupacion({
   )
 }
 
+const OCUPACION_SORTERS = {
+  nombre: byText<FilaDeOcupacion>((f) => f.nombre),
+  citas: byNumber<FilaDeOcupacion>((f) => f.citas),
+  ocupado: byNumber<FilaDeOcupacion>((f) => f.minutosOcupados),
+  disponible: byNumber<FilaDeOcupacion>((f) => f.minutosDisponibles),
+  ocupacion: byNumber<FilaDeOcupacion>((f) => f.porcentaje),
+}
+
+type OcupacionSortKey = keyof typeof OCUPACION_SORTERS
+
 function Ocupacion({
   titulo, pie, filas, vacio,
 }: {
@@ -95,6 +106,8 @@ function Ocupacion({
   filas: FilaDeOcupacion[]
   vacio: string
 }) {
+  const { sort, sorted, toggleSort } = useTableSort<FilaDeOcupacion, OcupacionSortKey>(filas, OCUPACION_SORTERS)
+
   return (
     <Card>
       <CardHeader className="pb-2">
@@ -108,15 +121,15 @@ function Ocupacion({
           <Table>
             <TableHeader>
               <TableRow className={SIN_HOVER}>
-                <TableHead>Nombre</TableHead>
-                <TableHead className="text-right">Citas</TableHead>
-                <TableHead className="text-right">Ocupado</TableHead>
-                <TableHead className="text-right">Disponible</TableHead>
-                <TableHead className="w-56">Ocupación</TableHead>
+                <SortableTableHead sortKey="nombre" sort={sort} onToggle={toggleSort}>Nombre</SortableTableHead>
+                <SortableTableHead sortKey="citas" sort={sort} onToggle={toggleSort} className="text-right">Citas</SortableTableHead>
+                <SortableTableHead sortKey="ocupado" sort={sort} onToggle={toggleSort} className="text-right">Ocupado</SortableTableHead>
+                <SortableTableHead sortKey="disponible" sort={sort} onToggle={toggleSort} className="text-right">Disponible</SortableTableHead>
+                <SortableTableHead sortKey="ocupacion" sort={sort} onToggle={toggleSort} className="w-56">Ocupación</SortableTableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filas.map((f) => (
+              {sorted.map((f) => (
                 <TableRow key={f.id} className={SIN_HOVER}>
                   <TableCell className="font-medium">{f.nombre}</TableCell>
                   <TableCell className="text-right tabular-nums text-muted-foreground">{f.citas}</TableCell>
@@ -214,6 +227,16 @@ function CancelacionesYAusencias({ resumen }: { resumen: ResumenDeCitas }) {
   )
 }
 
+const CAIDA_SORTERS = {
+  nombre: byText<FilaDeCaida>((f) => f.nombre),
+  total: byNumber<FilaDeCaida>((f) => f.total),
+  canceladas: byNumber<FilaDeCaida>((f) => f.canceladas),
+  noAsistio: byNumber<FilaDeCaida>((f) => f.noAsistio),
+  porcentaje: byNumber<FilaDeCaida>((f) => f.porcentaje),
+}
+
+type CaidaSortKey = keyof typeof CAIDA_SORTERS
+
 function TablaDeCaidas({
   titulo, filas, columna,
 }: {
@@ -221,6 +244,8 @@ function TablaDeCaidas({
   filas: ResumenDeCitas["porServicio"]
   columna: string
 }) {
+  const { sort, sorted, toggleSort } = useTableSort<FilaDeCaida, CaidaSortKey>(filas, CAIDA_SORTERS)
+
   return (
     <div className="space-y-2">
       <h3 className="text-sm font-medium">{titulo}</h3>
@@ -230,15 +255,15 @@ function TablaDeCaidas({
         <Table>
           <TableHeader>
             <TableRow className={SIN_HOVER}>
-              <TableHead>{columna}</TableHead>
-              <TableHead className="text-right">Citas</TableHead>
-              <TableHead className="text-right">Canc.</TableHead>
-              <TableHead className="text-right">No vino</TableHead>
-              <TableHead className="w-16 text-right">% caída</TableHead>
+              <SortableTableHead sortKey="nombre" sort={sort} onToggle={toggleSort}>{columna}</SortableTableHead>
+              <SortableTableHead sortKey="total" sort={sort} onToggle={toggleSort} className="text-right">Citas</SortableTableHead>
+              <SortableTableHead sortKey="canceladas" sort={sort} onToggle={toggleSort} className="text-right">Canc.</SortableTableHead>
+              <SortableTableHead sortKey="noAsistio" sort={sort} onToggle={toggleSort} className="text-right">No vino</SortableTableHead>
+              <SortableTableHead sortKey="porcentaje" sort={sort} onToggle={toggleSort} className="w-16 text-right">% caída</SortableTableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {filas.map((f) => (
+            {sorted.map((f) => (
               <TableRow key={f.nombre} className={SIN_HOVER}>
                 <TableCell className="font-medium">{f.nombre}</TableCell>
                 <TableCell className="text-right tabular-nums text-muted-foreground">{f.total}</TableCell>

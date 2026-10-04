@@ -15,9 +15,10 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { StockFilters, hayFiltros } from "@/components/stock-filters"
+import { StockFilters, PRODUCT_SORTERS, hayFiltros, type ProductSortKey } from "@/components/stock-filters"
+import { useTableSort, SortableTableHead, byBoolean, byText } from "@/components/sortable-table-head"
 import { saveProduct, saveSupplier, deleteSupplier, adjustStock } from "@/lib/actions"
-import { formatPrice } from "@/lib/format"
+import { formatPrice, matchesProductSearch } from "@/lib/format"
 
 /**
  * El catálogo de productos y proveedores, en la gestión del centro.
@@ -53,6 +54,16 @@ export interface SupplierRow {
   notes: string | null
   active: boolean
 }
+
+const SUPPLIER_SORTERS = {
+  nombre: byText<SupplierRow>((r) => r.name),
+  telefono: byText<SupplierRow>((r) => r.phone),
+  email: byText<SupplierRow>((r) => r.email),
+  notas: byText<SupplierRow>((r) => r.notes),
+  activo: byBoolean<SupplierRow>((r) => r.active),
+}
+
+type SupplierSortKey = keyof typeof SUPPLIER_SORTERS
 
 /**
  * Regularizar un producto tras contarlo.
@@ -183,12 +194,17 @@ export function ProductsClient({ products, suppliers }: { products: ProductRow[]
   }
 
   const filteredProducts = products.filter((p) => {
-    if (search.trim() && !p.name.toLowerCase().includes(search.toLowerCase())) return false
+    if (!matchesProductSearch(p, search)) return false
     if (supplierFilter !== "ALL" && p.supplierId !== supplierFilter) return false
     if (stockDesde !== "" && p.stock < Number(stockDesde)) return false
     if (stockHasta !== "" && p.stock > Number(stockHasta)) return false
     return true
   })
+
+  const { sort: productSort, sorted: sortedProducts, toggleSort: toggleProductSort } =
+    useTableSort<ProductRow, ProductSortKey>(filteredProducts, PRODUCT_SORTERS)
+  const { sort: supplierSort, sorted: sortedSuppliers, toggleSort: toggleSupplierSort } =
+    useTableSort<SupplierRow, SupplierSortKey>(suppliers, SUPPLIER_SORTERS)
 
   return (
     <div>
@@ -236,15 +252,15 @@ export function ProductsClient({ products, suppliers }: { products: ProductRow[]
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Producto</TableHead>
-                    <TableHead>Proveedor</TableHead>
-                    <TableHead>Precio venta</TableHead>
-                    <TableHead>Coste</TableHead>
+                    <SortableTableHead sortKey="codigo" sort={productSort} onToggle={toggleProductSort}>Código y descripción</SortableTableHead>
+                    <SortableTableHead sortKey="proveedor" sort={productSort} onToggle={toggleProductSort}>Proveedor</SortableTableHead>
+                    <SortableTableHead sortKey="precio" sort={productSort} onToggle={toggleProductSort}>Precio venta</SortableTableHead>
+                    <SortableTableHead sortKey="coste" sort={productSort} onToggle={toggleProductSort}>Coste</SortableTableHead>
                     {/* Suben y bajan solas con las entradas y los consumos del
                         mostrador; aquí solo se corrigen tras un recuento. */}
-                    <TableHead>Stock</TableHead>
-                    <TableHead>Mínimo</TableHead>
-                    <TableHead>Activo</TableHead>
+                    <SortableTableHead sortKey="stock" sort={productSort} onToggle={toggleProductSort}>Stock</SortableTableHead>
+                    <SortableTableHead sortKey="minimo" sort={productSort} onToggle={toggleProductSort}>Mínimo</SortableTableHead>
+                    <SortableTableHead sortKey="activo" sort={productSort} onToggle={toggleProductSort}>Activo</SortableTableHead>
                     <TableHead className="text-right">
                       <div className="flex justify-end text-xs font-normal text-muted-foreground">
                         <span className="flex w-20 items-center justify-center gap-1"><ClipboardCheck className="h-3.5 w-3.5 text-primary" /> Ajustar</span>
@@ -254,7 +270,7 @@ export function ProductsClient({ products, suppliers }: { products: ProductRow[]
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {filteredProducts.map((p) => (
+                  {sortedProducts.map((p) => (
                     <TableRow key={p.id} className={!p.active ? "opacity-50" : undefined}>
                       <TableCell>
                         <p className="font-medium">{p.name}</p>
@@ -306,11 +322,11 @@ export function ProductsClient({ products, suppliers }: { products: ProductRow[]
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Proveedor</TableHead>
-                    <TableHead>Teléfono</TableHead>
-                    <TableHead>Email</TableHead>
-                    <TableHead>Notas</TableHead>
-                    <TableHead>Activo</TableHead>
+                    <SortableTableHead sortKey="nombre" sort={supplierSort} onToggle={toggleSupplierSort}>Proveedor</SortableTableHead>
+                    <SortableTableHead sortKey="telefono" sort={supplierSort} onToggle={toggleSupplierSort}>Teléfono</SortableTableHead>
+                    <SortableTableHead sortKey="email" sort={supplierSort} onToggle={toggleSupplierSort}>Email</SortableTableHead>
+                    <SortableTableHead sortKey="notas" sort={supplierSort} onToggle={toggleSupplierSort}>Notas</SortableTableHead>
+                    <SortableTableHead sortKey="activo" sort={supplierSort} onToggle={toggleSupplierSort}>Activo</SortableTableHead>
                     <TableHead className="text-right">
                       <div className="flex justify-end text-xs font-normal text-muted-foreground">
                         <span className="flex w-20 items-center justify-center gap-1"><Pencil className="h-3.5 w-3.5" /> Editar</span>
@@ -320,7 +336,7 @@ export function ProductsClient({ products, suppliers }: { products: ProductRow[]
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {suppliers.map((s) => (
+                  {sortedSuppliers.map((s) => (
                     <TableRow key={s.id} className={!s.active ? "opacity-50" : undefined}>
                       <TableCell className="font-medium">{s.name}</TableCell>
                       <TableCell className="text-muted-foreground text-sm">{s.phone ?? "—"}</TableCell>
@@ -377,12 +393,22 @@ export function ProductsClient({ products, suppliers }: { products: ProductRow[]
             </DialogHeader>
             <form onSubmit={onProductSubmit} className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="name">Nombre</Label>
-                <Input id="name" name="name" defaultValue={editingProduct?.name} required />
+                <Label htmlFor="name">Código</Label>
+                <Input id="name" name="name" defaultValue={editingProduct?.name} placeholder="XA27_140" required />
+                {/* Mientras no haya lector, el código se arma a mano: siglas y
+                    número del producto, guion bajo y cantidad en ml. */}
+                <p className="text-xs text-muted-foreground">
+                  Sin código de barras: siglas y número del producto, y su cantidad en ml
+                  (por ejemplo, X.A.27 de 140 ml → XA27_140).
+                </p>
               </div>
               <div className="space-y-2">
-                <Label htmlFor="description">Descripción</Label>
-                <Input id="description" name="description" defaultValue={editingProduct?.description ?? ""} />
+                <Label htmlFor="description">Descripción (nombre completo)</Label>
+                <Input
+                  id="description" name="description" required
+                  defaultValue={editingProduct?.description ?? ""}
+                  placeholder="Limpiador Seborregulador Reparador X.A.27 HIGIENIZANT 140ml"
+                />
               </div>
               <div className="space-y-2">
                 <Label>Proveedor</Label>

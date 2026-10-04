@@ -300,3 +300,136 @@ Es media jornada larga: el aplicador de migraciones y el reparto de
 responsabilidades entre `build-release.mjs` y los `.cmd`. No depende de
 requisitos de la clínica, así que se puede hacer en cualquier momento; solo
 hay que querer gastarla.
+
+---
+
+## «He olvidado mi PIN» y «he olvidado mi contraseña»
+
+**Estado: propuesto, no implementado. Sin bloqueos: se puede hacer ya.**
+
+La aplicación es local, no manda correos y WhatsApp está apagado, así que el
+típico «te enviamos un enlace» no existe. Y no hace falta: en un centro de
+cuatro o cinco personas, quien puede restablecer un acceso es **otra persona
+que está en el mismo local**. El diseño se apoya en eso.
+
+### Qué hay hoy
+
+- **PIN de una trabajadora.** Ya se puede resolver: Gestión → Personal → ficha →
+  «Generar PIN» / «Generar uno nuevo» (`generateUserPin` en `lib/actions.ts`).
+  El sistema elige uno
+  libre, lo enseña una sola vez y nace con `mustChangePin`. Lo que falta es que
+  **nadie lo sabe**: la pantalla del teclado no dice qué hacer si no te acuerdas.
+- **PIN de una administradora.** Igual: entra por la gestión (con contraseña) y
+  se lo genera ella misma, o lo hace otra.
+- **Contraseña de la gestión.** No hay camino en la aplicación. `setUserPassword`
+  deja a una administradora cambiar la de otra, pero **la escribe ella**, así
+  que acaba siendo `lucia2026`. Y si la que la pierde es la única administradora,
+  el centro se queda sin gestión: `DEPLOY.md` manda traerse el `.db` y tocar el
+  hash a mano. Es lento, exige a quien desarrolla y obliga a mover la base de
+  datos del cliente.
+
+### Qué se propone, en tres capas
+
+**1. Decir qué hacer (S).** Sin código de seguridad, solo textos:
+
+- Teclado del mostrador: bajo los puntos, en pequeño, *«¿Has olvidado tu PIN?
+  Pídele a una administradora que te genere uno nuevo.»*
+- Mensaje de bloqueo («Demasiados intentos…»): añadir esa misma frase. Es donde
+  más falta hace: quien no se acuerda sigue probando, y el contador es global
+  (ver `lib/pin.ts`), así que **bloquea a todas**.
+- Login de la gestión: *«¿Has olvidado la contraseña? Otra administradora puede
+  restablecerla desde Personal.»*
+
+**2. Restablecer entre administradoras, bien hecho (S–M).** La acción ya existe;
+hay que quitarle las trampas:
+
+- **La contraseña temporal la genera el sistema**, como el PIN, y se enseña una
+  sola vez. Hoy la inventa la administradora. Letras y números sin los que se
+  confunden (`0/O`, `1/l/I`), tres grupos de tres, por ejemplo `K7M-4PQ-9XT`.
+  Nace con `mustChangePassword`.
+- **Confirmar a quién.** El diálogo dice «Vas a cambiar la contraseña / el PIN
+  de **Marta Gómez Ruiz**», con apellidos, para no resetear a la equivocada si
+  hay dos Martas.
+- **Que quede constancia** de que se enseñó: «Anótalo ahora, no se vuelve a
+  mostrar. Si lo pierdes, genera otro.» Regenerar no cuesta nada, y eso quita la
+  angustia de «no lo he apuntado».
+- **Nunca quedarse sin administradora.** Comprobar que no se puede desactivar,
+  rebajar de rol ni quitar la contraseña a la **última administradora activa**.
+  Es el fallo humano más caro de todos y es una línea de validación.
+- **Aviso permanente si solo hay una** administradora activa: banda en Personal,
+  *«Solo hay una administradora. Si pierde su contraseña, habrá que recuperar el
+  acceso a mano. Da de alta una segunda.»* Es la medida que más protege y no
+  cuesta desarrollo: es una recomendación de instalación (poner a dos).
+
+**3. Última red: recuperar desde el propio PC (M).** Para cuando la única
+administradora no recuerda nada y no hay segunda. Un `recuperar-acceso.cmd` junto
+a `iniciar-lucyerp.cmd` que llama a un script en JS plano (no `tsx`: el paquete
+autónomo no lo lleva, ver `DEPLOY.md`). Lo que hace, pensado para no equivocarse:
+
+1. **Hace copia del `.db`** antes de tocar nada (misma carpeta que
+   `copia-seguridad.cmd`).
+2. **Lista las administradoras activas numeradas** y se elige con un número: sin
+   teclear correos, así no hay erratas.
+3. Genera una contraseña temporal aleatoria, la **muestra una vez**, pone
+   `mustChangePassword` y avisa de que cualquier sesión abierta de esa persona
+   sigue viva hasta que caduque (60 min; el JWT no se puede revocar).
+4. Lo apunta en el log del servicio.
+
+La autorización es **tener acceso físico al PC y a su cuenta de Windows**. Es el
+mismo nivel de confianza que ya tiene quien puede copiar el `.db`, y no abre
+ninguna puerta nueva desde la red. Sustituye al «traerse el `.db`» de `DEPLOY.md`
+y a la fila de `INSTALAR.md` que dice «hay que restablecerla desde el
+desarrollo». Ambos textos hay que actualizarlos al hacerlo.
+
+### Fallos humanos que esto tiene que aguantar
+
+| Qué puede pasar | Cómo se evita |
+|---|---|
+| Se cierra el diálogo sin apuntar el PIN o la contraseña | Regenerar es gratis y lo dice el propio aviso |
+| Se resetea a la persona equivocada (dos con el mismo nombre) | El diálogo muestra nombre y apellidos antes de confirmar |
+| Alguien llama o escribe «soy Marta, ponme otro PIN» | No hay reset por teléfono ni mensaje: lo hace una administradora, **delante de la persona**. Regla para la Guía del mostrador, no código |
+| Una persona teclea mal cinco veces y deja parado el mostrador | El mensaje de bloqueo dice qué hacer; el minuto no escala (ver `lib/pin.ts`) |
+| Se dejan la temporal sin estrenar días | Personal ya marca «PIN por cambiar» / «Contraseña por cambiar»; no se añade caducidad en v1 |
+| La única administradora pierde la contraseña | Capa 3, y la capa 2 avisa antes de que ocurra |
+| Se desactiva a la última administradora sin querer | La validación de capa 2 lo impide |
+| El `.db` queda mal al recuperar a mano | El script hace copia antes |
+
+### Qué se descarta, y por qué
+
+- **Enlace por correo o SMS.** No hay servicio de correo en el PC del centro y
+  añadirlo es una dependencia externa para resolver algo que se arregla
+  hablando con quien está al lado.
+- **Código de recuperación impreso al instalar.** Se pierde, o lo ve quien no
+  debe. Cambia «olvidé la contraseña» por «olvidé dónde está el papel».
+- **Preguntas de seguridad.** Las respuestas se adivinan o se olvidan, y el
+  PIN de seis dígitos que protege el cobro es más fuerte que eso.
+- **Que la trabajadora restablezca su propio PIN.** Quien no recuerda el PIN no
+  puede demostrar quién es sin la administradora; el PIN es lo único que
+  identifica a quien cobra (ver `lib/operator.ts`).
+
+### Decisiones a tomar antes
+
+- **¿Cuántas administradoras habrá de verdad?** Si ya son dos, la capa 3 baja de
+  prioridad (queda como red de último recurso, no como camino habitual).
+- **¿Puede cualquier administradora restablecer el PIN de cualquiera,
+  incluida otra administradora?** Es lo que hay hoy. Si no se quiere, hay que
+  decidir quién puede con quién.
+- **¿Se quiere dejar registro de quién restableció qué y cuándo?** Una tabla
+  mínima (`AccessReset`: quién, a quién, PIN o contraseña, fecha) responde a
+  «¿quién le dio ese PIN?» si un día se cobra a nombre de otra. Es opcional,
+  media tarde, y no guarda ningún secreto.
+
+### Hallazgo de paso
+
+`loginAction` (contraseña de la gestión) **no tiene freno de fuerza bruta**; solo
+lo tiene el PIN. Sin él, una contraseña de seis caracteres que escribió una
+persona es el eslabón débil de toda la aplicación. Conviene meter el mismo
+freno (cinco fallos, un minuto) en esta misma pasada, y de hecho es lo que hace
+que la capa 2 sea seguro de ofrecer.
+
+### Orden sugerido
+
+Capa 1 (textos) + «nunca quedarse sin administradora» + freno del login: una
+tarde, y ya se nota. Después la contraseña temporal generada y el aviso de
+«solo hay una». La capa 3 al final, o antes si el centro arranca con una sola
+administradora.

@@ -4,10 +4,10 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { KPICard } from "@/components/kpi-card"
 import { DashboardRemindersCard, type DashboardReminderRow } from "@/components/dashboard-reminders-card"
+import { UpcomingAppointmentRow, type UpcomingAppointment } from "@/components/upcoming-appointment-row"
 import { prisma } from "@/lib/db"
 import { getActiveClinic } from "@/lib/clinic"
-import { dayRange, hoy, toDateInputValue, toTimeString } from "@/lib/format"
-import { STATUS_META, type AppointmentStatus } from "@/lib/enums"
+import { dayRange, hoy, toDateInputValue } from "@/lib/format"
 import { isReminderActive, isReminderOverdue } from "@/lib/reminders"
 
 export const dynamic = "force-dynamic"
@@ -57,6 +57,35 @@ export default async function DashboardPage() {
       select: { status: true },
     }),
   ])
+
+  // Lo último que se le hizo a cada clienta de las próximas citas, en una sola
+  // consulta: la más reciente ya realizada, que es la que dice qué se hizo.
+  // Una cita pasada sin cerrar no cuenta: no hay forma de saber si vino.
+  const ultimas = await prisma.appointment.findMany({
+    where: {
+      clinicId: clinic.id,
+      customerId: { in: upcoming.map((a) => a.customerId) },
+      status: "DONE",
+      startAt: { lt: now },
+    },
+    orderBy: { startAt: "desc" },
+    distinct: ["customerId"],
+    select: { customerId: true, startAt: true, service: { select: { name: true } } },
+  })
+  const ultimaDe = new Map(ultimas.map((u) => [u.customerId, { at: u.startAt, serviceName: u.service.name }]))
+
+  const proximas: UpcomingAppointment[] = upcoming.map((a) => ({
+    id: a.id,
+    startAt: a.startAt,
+    status: a.status,
+    customerName: `${a.customer.firstName} ${a.customer.lastName ?? ""}`.trim(),
+    serviceName: a.service.name,
+    workerName: a.worker.name,
+    appointmentNotes: a.notes?.trim() || null,
+    allergies: a.customer.allergies?.trim() || null,
+    customerNotes: a.customer.notes?.trim() || null,
+    lastVisit: ultimaDe.get(a.customerId) ?? null,
+  }))
 
   // El where ya descarta los permanentes; el flatMap con el guard es para que
   // TypeScript sepa que a partir de aquí siempre hay fecha.
@@ -132,29 +161,7 @@ export default async function DashboardPage() {
             <CardContent className="flex-1 overflow-y-auto">
               <div className="space-y-1">
                 {upcoming.length === 0 && <p className="py-6 text-center text-sm text-muted-foreground">Sin próximas citas.</p>}
-                {upcoming.map((a) => {
-                  const meta = STATUS_META[a.status as AppointmentStatus] ?? STATUS_META.PENDING
-                  return (
-                    <div key={a.id} className="flex items-center gap-4 rounded-lg p-3 transition-colors hover:bg-muted/50">
-                      <div className="w-20 shrink-0 text-xs text-muted-foreground">
-                        <span className="font-medium text-foreground">
-                          {a.startAt.toLocaleDateString("es-ES", { day: "2-digit", month: "short" })}
-                        </span>
-                        <br />
-                        {toTimeString(a.startAt)}
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-medium">
-                          {a.customer.firstName} {a.customer.lastName ?? ""}
-                        </p>
-                        <p className="truncate text-xs text-muted-foreground">
-                          {a.service.name} · {a.worker.name}
-                        </p>
-                      </div>
-                      <span className={`shrink-0 rounded-full border px-2 py-0.5 text-xs ${meta.className}`}>{meta.label}</span>
-                    </div>
-                  )
-                })}
+                {proximas.map((a) => <UpcomingAppointmentRow key={a.id} a={a} />)}
               </div>
             </CardContent>
           </Card>

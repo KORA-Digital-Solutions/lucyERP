@@ -2,7 +2,7 @@
 
 /**
  * Los datos de una empleada, en un solo formulario para los dos sitios donde
- * se piden: el diálogo de "Nuevo usuario" de la lista y la pestaña "Datos" de
+ * se piden: el diálogo de "Nueva persona" de la lista y la pestaña "Datos" de
  * su ficha. Antes solo existía dentro del diálogo, así que para cambiar un
  * teléfono había que abrir un modal a dos columnas encima de la tabla.
  */
@@ -61,7 +61,7 @@ export function WorkerForm({
     const res = await saveWorker(worker?.id ?? null, fd)
     setLoading(false)
     if (res.ok) {
-      toast.success("Usuario guardado.")
+      toast.success("Guardado.")
       router.refresh()
       onDone()
     } else toast.error(res.error ?? "Error al guardar.")

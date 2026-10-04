@@ -138,7 +138,7 @@ function DatosTab({ worker, domain, onDeleted }: {
   async function onDelete() {
     const res = await deleteWorker(worker.id)
     if (res.ok) {
-      toast.success("Usuario eliminado.")
+      toast.success("Eliminada.")
       setConfirmarBorrado(false)
       router.refresh()
       onDeleted()
@@ -163,10 +163,10 @@ function DatosTab({ worker, domain, onDeleted }: {
           por qué. Aquí está siempre, apagado y con el motivo al lado. */}
       <Card className="border-destructive/30">
         <CardHeader>
-          <CardTitle className="text-base">Eliminar usuario</CardTitle>
+          <CardTitle className="text-base">Eliminar de la plantilla</CardTitle>
           <CardDescription>
             {worker.active
-              ? "Solo se pueden eliminar usuarios desactivados. Desactívala arriba si de verdad quieres borrarla."
+              ? "Solo se puede eliminar a quien está desactivada. Desactívala arriba si de verdad quieres borrarla."
               : "Se borra para siempre y no se puede deshacer. Si solo quieres que deje de trabajar, basta con tenerla desactivada."}
           </CardDescription>
         </CardHeader>
@@ -177,7 +177,7 @@ function DatosTab({ worker, domain, onDeleted }: {
             disabled={worker.active}
             onClick={() => setConfirmarBorrado(true)}
           >
-            <Trash2 className="h-4 w-4" /> Eliminar usuario
+            <Trash2 className="h-4 w-4" /> Eliminar
           </Button>
         </CardContent>
       </Card>
@@ -185,7 +185,7 @@ function DatosTab({ worker, domain, onDeleted }: {
       <AlertDialog open={confirmarBorrado} onOpenChange={setConfirmarBorrado}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>¿Eliminar usuario?</AlertDialogTitle>
+            <AlertDialogTitle>¿Eliminar a esta persona?</AlertDialogTitle>
             <AlertDialogDescription>
               Se eliminará permanentemente a <strong>{worker.name} {worker.lastName}</strong>. Esta acción no se puede deshacer.
             </AlertDialogDescription>
@@ -314,7 +314,7 @@ function AccesoTab({ worker }: { worker: WorkerRow }) {
             <KeyRound className="h-4 w-4" /> Contraseña de gestión
           </CardTitle>
           <CardDescription>
-            Abre la gestión del centro: informes, usuarios, horarios y configuración.
+            Abre la gestión del centro: informes, personal, horarios y configuración.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">

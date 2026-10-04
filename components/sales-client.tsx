@@ -51,8 +51,7 @@ const SIN_BONO = "__sin_bono__"
 const TODAS_LAS_FAMILIAS = "__todas__"
 
 type Service  = {
-  id: string; name: string; priceCents: number; pricingType: string
-  pricePerMinuteCents: number | null; durationMinutes: number
+  id: string; name: string; priceCents: number
   familyId: string; familyName: string; familySortOrder: number
 }
 // name es el código del producto (XA27_140) y description su nombre completo.
@@ -2401,7 +2400,7 @@ function AddLinePanel({ services, products, workers, currentUserId, customers, g
                             workerId: defaultWorkerId, notes: null, appointmentId: null,
                             voucherId: null, voucherRef: null,
                             quantity: 1, unitPriceCents: s.priceCents, discountPercent: 0,
-                            durationMinutes: s.pricingType === "PER_MINUTE" ? s.durationMinutes : null,
+                            durationMinutes: null,
                           })
                         } else {
                           onAdd({
@@ -2431,8 +2430,8 @@ function AddLinePanel({ services, products, workers, currentUserId, customers, g
                       </span>
                       <span className="text-muted-foreground tabular-nums ml-3 shrink-0">
                         {isService
-                          ? (s.pricingType === "PER_MINUTE" && s.pricePerMinuteCents ? `${fmtEur(s.pricePerMinuteCents)}/min` : fmtEur(s.priceCents))
-                          : <><span className={p.stock === 0 ? "text-red-500" : ""}>{p.stock} ud</span> · {fmtEur(p.priceCents)}</>
+                          ? fmtEur(s.priceCents)
+                          :<><span className={p.stock === 0 ? "text-red-500" : ""}>{p.stock} ud</span> · {fmtEur(p.priceCents)}</>
                         }
                       </span>
                     </button>

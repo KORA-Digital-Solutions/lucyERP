@@ -357,8 +357,6 @@ export async function saveService(id: string | null, fd: FormData): Promise<Acti
   try {
     await requireAdmin()
     const clinicId = await getActiveClinicId()
-    const pricingType = str(fd, "pricingType") || "FIXED"
-    const pricePerMinute = str(fd, "pricePerMinute")
     const familyId = str(fd, "familyId")
     if (!familyId) return { ok: false, error: "La familia es obligatoria." }
     const data = {
@@ -367,10 +365,10 @@ export async function saveService(id: string | null, fd: FormData): Promise<Acti
       description: optStr(fd, "description"),
       durationMinutes: int(fd, "durationMinutes", 60),
       priceCents: Math.round(Number(str(fd, "price") || "0") * 100),
-      pricingType,
-      pricePerMinuteCents: pricingType === "PER_MINUTE" && pricePerMinute
-        ? Math.round(Number(pricePerMinute) * 100)
-        : null,
+      // La tarifa por minuto se retiró: todo servicio es de precio fijo. Las
+      // columnas siguen en el esquema, pero ya no se rellenan.
+      pricingType: "FIXED",
+      pricePerMinuteCents: null,
       active: bool(fd, "active"),
     }
     if (id) {
@@ -1090,8 +1088,7 @@ export async function getBillableAppointments(customerId: string): Promise<Billa
     include: {
       service: {
         select: {
-          id: true, name: true, priceCents: true, pricingType: true,
-          pricePerMinuteCents: true, family: { select: { name: true } },
+          id: true, name: true, priceCents: true, family: { select: { name: true } },
         },
       },
       worker: { select: { name: true, lastName: true } },
@@ -1106,11 +1103,9 @@ export async function getBillableAppointments(customerId: string): Promise<Billa
     serviceName: c.service.name,
     familyName: c.service.family.name,
     durationMinutes: c.durationMinutes,
-    // Manda la tarifa de hoy, no la del día en que se pidió la cita. En el
+    // Manda el precio de hoy, no el del día en que se pidió la cita. En el
     // ticket sigue siendo editable, como cualquier otra línea.
-    priceCents: c.service.pricingType === "PER_MINUTE" && c.service.pricePerMinuteCents
-      ? c.service.pricePerMinuteCents * c.durationMinutes
-      : c.service.priceCents,
+    priceCents: c.service.priceCents,
     workerId: c.workerId,
     workerName: [c.worker.name, c.worker.lastName].filter(Boolean).join(" "),
     alreadyDone: c.status === "DONE",

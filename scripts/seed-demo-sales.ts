@@ -424,9 +424,7 @@ async function generar(prisma: PrismaClient) {
       // Se cobra al terminar, que es como sale del panel de la agenda.
       const createdAt = endAt
       const cobra = pick(users) // quien está en el mostrador, no quien atiende
-      const precio = c.servicio.pricingType === "PER_MINUTE" && c.servicio.pricePerMinuteCents
-        ? c.servicio.pricePerMinuteCents * c.servicio.durationMinutes
-        : c.servicio.priceCents
+      const precio = c.servicio.priceCents
       const dtoServicio = rnd() < 0.2 ? pick([10, 15, 20]) : 0
 
       const lines: {
@@ -441,7 +439,7 @@ async function generar(prisma: PrismaClient) {
         quantity: 1,
         unitPriceCents: precio,
         discountPercent: dtoServicio,
-        durationMinutes: c.servicio.pricingType === "PER_MINUTE" ? c.servicio.durationMinutes : null,
+        durationMinutes: null,
         totalCents: Math.round(precio * (1 - dtoServicio / 100)),
         // Quien atiende no es quien cobra: es justo lo que mide el informe de
         // facturación por empleada.

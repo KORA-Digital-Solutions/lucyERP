@@ -24,8 +24,6 @@ export default async function ServicesPage() {
     description: s.description,
     durationMinutes: s.durationMinutes,
     priceCents: s.priceCents,
-    pricingType: s.pricingType,
-    pricePerMinuteCents: s.pricePerMinuteCents,
     active: s.active,
     familyId: s.familyId,
     familyName: s.family.name,

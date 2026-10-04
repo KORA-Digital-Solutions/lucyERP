@@ -16,7 +16,8 @@ import { useState } from "react"
 import { ChevronRight, Star } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { Table, TableBody, TableCell, TableHeader, TableRow } from "@/components/ui/table"
+import { SortableTableHead, byNumber, byText, useTableSort } from "@/components/sortable-table-head"
 import { fmtEur } from "@/components/client-profile-view"
 import { WorkerReportView } from "@/components/worker-report-view"
 import { aValorDeInput } from "@/lib/reports"
@@ -25,6 +26,15 @@ import {
   AZUL, AZUL_CLARO, SIN_HOVER, InformeShell, porcentaje,
   type FilaDeEmpleadaConNombre, type PeriodoEnPantalla,
 } from "@/components/reports/shared"
+
+const EMPLEADA_SORTERS = {
+  empleada: byText<FilaDeEmpleadaConNombre>((f) => f.nombre),
+  servicios: byNumber<FilaDeEmpleadaConNombre>((f) => f.servicesCents),
+  producto: byNumber<FilaDeEmpleadaConNombre>((f) => f.productsCents),
+  total: byNumber<FilaDeEmpleadaConNombre>((f) => f.totalCents),
+  tickets: byNumber<FilaDeEmpleadaConNombre>((f) => f.tickets),
+  peso: byNumber<FilaDeEmpleadaConNombre>((f) => f.totalCents),
+}
 
 export function InformeDeEmpleadas({
   periodo, filas, totalCents, saldoVendidoCents, bonosVendidosCents,
@@ -115,6 +125,7 @@ function FacturacionPorEmpleada({
   onElegir: (workerId: string) => void
 }) {
   const maximo = Math.max(1, ...filas.map((f) => f.totalCents))
+  const { sort, sorted, toggleSort } = useTableSort(filas, EMPLEADA_SORTERS)
 
   return (
     <Card>
@@ -135,16 +146,16 @@ function FacturacionPorEmpleada({
         <Table>
           <TableHeader>
             <TableRow className={SIN_HOVER}>
-              <TableHead>Empleada</TableHead>
-              <TableHead className="text-right">Servicios</TableHead>
-              <TableHead className="text-right">Producto</TableHead>
-              <TableHead className="text-right">Total</TableHead>
-              <TableHead className="text-right">Tickets</TableHead>
-              <TableHead className="w-56">Peso sobre el total</TableHead>
+              <SortableTableHead sortKey="empleada" sort={sort} onToggle={toggleSort}>Empleada</SortableTableHead>
+              <SortableTableHead sortKey="servicios" sort={sort} onToggle={toggleSort} className="text-right">Servicios</SortableTableHead>
+              <SortableTableHead sortKey="producto" sort={sort} onToggle={toggleSort} className="text-right">Producto</SortableTableHead>
+              <SortableTableHead sortKey="total" sort={sort} onToggle={toggleSort} className="text-right">Total</SortableTableHead>
+              <SortableTableHead sortKey="tickets" sort={sort} onToggle={toggleSort} className="text-right">Tickets</SortableTableHead>
+              <SortableTableHead sortKey="peso" sort={sort} onToggle={toggleSort} className="w-56">Peso sobre el total</SortableTableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {filas.map((w) => {
+            {sorted.map((w) => {
               // La fila de "Sin asignar" no es de nadie: no hay informe que
               // abrir y no se ilumina al pasar por encima.
               const conDetalle = w.workerId !== null

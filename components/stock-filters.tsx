@@ -4,7 +4,21 @@ import { Search } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import type { SupplierRow } from "@/components/products-client"
+import { byBoolean, byNumber, byText } from "@/components/sortable-table-head"
+import type { ProductRow, SupplierRow } from "@/components/products-client"
+
+/** Las columnas ordenables del listado de productos, que son las mismas en el stock y en el catálogo. */
+export const PRODUCT_SORTERS = {
+  codigo: byText<ProductRow>((r) => r.name),
+  proveedor: byText<ProductRow>((r) => r.supplierName),
+  precio: byNumber<ProductRow>((r) => r.priceCents),
+  coste: byNumber<ProductRow>((r) => r.costCents),
+  stock: byNumber<ProductRow>((r) => r.stock),
+  minimo: byNumber<ProductRow>((r) => r.stockMin),
+  activo: byBoolean<ProductRow>((r) => r.active),
+}
+
+export type ProductSortKey = keyof typeof PRODUCT_SORTERS
 
 /**
  * Los filtros del listado de productos, compartidos por las dos pantallas: el

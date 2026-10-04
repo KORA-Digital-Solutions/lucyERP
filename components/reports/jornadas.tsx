@@ -6,7 +6,8 @@
 
 import { Clock } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { Table, TableBody, TableCell, TableHeader, TableRow } from "@/components/ui/table"
+import { SortableTableHead, byNumber, byText, useTableSort } from "@/components/sortable-table-head"
 import { horasLegibles, type FilaDeHoras } from "@/lib/reports"
 import { cn } from "@/lib/utils"
 import { SIN_HOVER, InformeShell, type PeriodoEnPantalla } from "@/components/reports/shared"
@@ -27,7 +28,22 @@ export function InformeDeJornadas({ periodo, filas, anio }: {
   )
 }
 
+const HORAS_SORTERS = {
+  empleada: byText<FilaDeHoras>((f) => f.nombre),
+  horas: byNumber<FilaDeHoras>((f) => f.minutos),
+  dias: byNumber<FilaDeHoras>((f) => f.diasTrabajados),
+  vacaciones: byNumber<FilaDeHoras>((f) => f.vacaciones),
+  asuntos: byNumber<FilaDeHoras>((f) => f.asuntosPropios),
+  otras: byNumber<FilaDeHoras>((f) => f.otrasAusencias),
+  // Sin cupo asignado (null) cae siempre al final.
+  quedan: byNumber<FilaDeHoras>((f) => f.vacacionesRestantes),
+}
+
+type HorasSortKey = keyof typeof HORAS_SORTERS
+
 function HorasTrabajadas({ filas, anio }: { filas: FilaDeHoras[]; anio: number }) {
+  const { sort, sorted, toggleSort } = useTableSort<FilaDeHoras, HorasSortKey>(filas, HORAS_SORTERS)
+
   return (
     <Card>
       <CardHeader className="pb-2">
@@ -52,17 +68,17 @@ function HorasTrabajadas({ filas, anio }: { filas: FilaDeHoras[]; anio: number }
           <Table>
             <TableHeader>
               <TableRow className={SIN_HOVER}>
-                <TableHead>Empleada</TableHead>
-                <TableHead className="text-right">Horas</TableHead>
-                <TableHead className="text-right">Días</TableHead>
-                <TableHead className="text-right">Vacaciones</TableHead>
-                <TableHead className="text-right">Asuntos</TableHead>
-                <TableHead className="text-right">Otras</TableHead>
-                <TableHead className="w-40">Le quedan</TableHead>
+                <SortableTableHead sortKey="empleada" sort={sort} onToggle={toggleSort}>Empleada</SortableTableHead>
+                <SortableTableHead sortKey="horas" sort={sort} onToggle={toggleSort} className="text-right">Horas</SortableTableHead>
+                <SortableTableHead sortKey="dias" sort={sort} onToggle={toggleSort} className="text-right">Días</SortableTableHead>
+                <SortableTableHead sortKey="vacaciones" sort={sort} onToggle={toggleSort} className="text-right">Vacaciones</SortableTableHead>
+                <SortableTableHead sortKey="asuntos" sort={sort} onToggle={toggleSort} className="text-right">Asuntos</SortableTableHead>
+                <SortableTableHead sortKey="otras" sort={sort} onToggle={toggleSort} className="text-right">Otras</SortableTableHead>
+                <SortableTableHead sortKey="quedan" sort={sort} onToggle={toggleSort} className="w-40">Le quedan</SortableTableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filas.map((f) => (
+              {sorted.map((f) => (
                 <TableRow key={f.workerId} className={SIN_HOVER}>
                   <TableCell className="font-medium">{f.nombre}</TableCell>
                   <TableCell className="text-right font-medium tabular-nums">{horasLegibles(f.minutos)}</TableCell>

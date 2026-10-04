@@ -23,6 +23,7 @@ import { cn } from "@/lib/utils"
 import { normalizeSearch, capitalizeFirst } from "@/lib/format"
 import { STATUS_META, type AppointmentStatus } from "@/lib/enums"
 import { deleteAppointment } from "@/lib/actions"
+import { useTableSort, SortableTableHead, byDate, byNumber, byText } from "@/components/sortable-table-head"
 
 export interface AppointmentRow {
   id: string
@@ -53,6 +54,20 @@ function formatTime(iso: string) {
 function toDateParam(iso: string) {
   return iso.slice(0, 10)
 }
+
+const APPOINTMENT_SORTERS = {
+  fecha: byDate<AppointmentRow>((r) => r.startAt),
+  // Solo la hora del día, para juntar las citas de las 10:00 de días distintos.
+  hora: byText<AppointmentRow>((r) => formatTime(r.startAt)),
+  cliente: byText<AppointmentRow>((r) => r.customerName),
+  servicio: byText<AppointmentRow>((r) => r.serviceName),
+  trabajador: byText<AppointmentRow>((r) => r.workerName),
+  cabina: byText<AppointmentRow>((r) => r.cabinName),
+  duracion: byNumber<AppointmentRow>((r) => r.durationMinutes),
+  estado: byText<AppointmentRow>((r) => STATUS_META[r.status as AppointmentStatus]?.label ?? r.status),
+}
+
+type AppointmentSortKey = keyof typeof APPOINTMENT_SORTERS
 
 interface Props {
   rows: AppointmentRow[]
@@ -112,6 +127,9 @@ export function AppointmentsHistoryClient({ rows, defaultFrom, defaultTo, defaul
       return tokens.every((t) => words.some((w) => w.startsWith(t)))
     })
   }, [rows, search])
+
+  const { sort, sorted, toggleSort } =
+    useTableSort<AppointmentRow, AppointmentSortKey>(filtered, APPOINTMENT_SORTERS)
 
   return (
     <div className="flex h-screen flex-col">
@@ -182,19 +200,19 @@ export function AppointmentsHistoryClient({ rows, defaultFrom, defaultTo, defaul
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Fecha</TableHead>
-                <TableHead>Hora</TableHead>
-                <TableHead>Cliente</TableHead>
-                <TableHead>Servicio</TableHead>
-                <TableHead>Trabajador</TableHead>
-                <TableHead>Cabina</TableHead>
-                <TableHead>Duración</TableHead>
-                <TableHead>Estado</TableHead>
+                <SortableTableHead sortKey="fecha" sort={sort} onToggle={toggleSort}>Fecha</SortableTableHead>
+                <SortableTableHead sortKey="hora" sort={sort} onToggle={toggleSort}>Hora</SortableTableHead>
+                <SortableTableHead sortKey="cliente" sort={sort} onToggle={toggleSort}>Cliente</SortableTableHead>
+                <SortableTableHead sortKey="servicio" sort={sort} onToggle={toggleSort}>Servicio</SortableTableHead>
+                <SortableTableHead sortKey="trabajador" sort={sort} onToggle={toggleSort}>Trabajador</SortableTableHead>
+                <SortableTableHead sortKey="cabina" sort={sort} onToggle={toggleSort}>Cabina</SortableTableHead>
+                <SortableTableHead sortKey="duracion" sort={sort} onToggle={toggleSort}>Duración</SortableTableHead>
+                <SortableTableHead sortKey="estado" sort={sort} onToggle={toggleSort}>Estado</SortableTableHead>
                 <TableHead />
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filtered.map((r) => (
+              {sorted.map((r) => (
                 <TableRow
                   key={r.id}
                   className="cursor-pointer"

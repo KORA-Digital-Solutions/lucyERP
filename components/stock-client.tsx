@@ -12,7 +12,8 @@ import { Badge } from "@/components/ui/badge"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { StockFilters, hayFiltros } from "@/components/stock-filters"
+import { StockFilters, PRODUCT_SORTERS, hayFiltros, type ProductSortKey } from "@/components/stock-filters"
+import { useTableSort, SortableTableHead } from "@/components/sortable-table-head"
 import { addStockMovement, registerOrder } from "@/lib/actions"
 import { matchesProductSearch } from "@/lib/format"
 import type { ProductRow, SupplierRow } from "@/components/products-client"
@@ -245,6 +246,9 @@ export function StockClient({ products, suppliers }: { products: ProductRow[]; s
     return true
   })
 
+  const { sort, sorted: sortedProducts, toggleSort } =
+    useTableSort<ProductRow, ProductSortKey>(filteredProducts, PRODUCT_SORTERS)
+
   return (
     <div>
       <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-card p-6">
@@ -283,12 +287,12 @@ export function StockClient({ products, suppliers }: { products: ProductRow[]; s
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Código y descripción</TableHead>
-                <TableHead>Proveedor</TableHead>
-                <TableHead>Stock</TableHead>
-                <TableHead>Precio venta</TableHead>
-                <TableHead>Coste</TableHead>
-                <TableHead>Activo</TableHead>
+                <SortableTableHead sortKey="codigo" sort={sort} onToggle={toggleSort}>Código y descripción</SortableTableHead>
+                <SortableTableHead sortKey="proveedor" sort={sort} onToggle={toggleSort}>Proveedor</SortableTableHead>
+                <SortableTableHead sortKey="stock" sort={sort} onToggle={toggleSort}>Stock</SortableTableHead>
+                <SortableTableHead sortKey="precio" sort={sort} onToggle={toggleSort}>Precio venta</SortableTableHead>
+                <SortableTableHead sortKey="coste" sort={sort} onToggle={toggleSort}>Coste</SortableTableHead>
+                <SortableTableHead sortKey="activo" sort={sort} onToggle={toggleSort}>Activo</SortableTableHead>
                 <TableHead className="text-right">
                   <div className="flex justify-end text-xs font-normal text-muted-foreground">
                     <span className="flex w-20 items-center justify-center gap-1"><ArrowDownCircle className="h-3.5 w-3.5 text-green-600" /> Entrada</span>
@@ -298,7 +302,7 @@ export function StockClient({ products, suppliers }: { products: ProductRow[]; s
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filteredProducts.map((p) => (
+              {sortedProducts.map((p) => (
                 <TableRow key={p.id} className={!p.active ? "opacity-50" : undefined}>
                   <TableCell>
                     <p className="font-medium">{p.name}</p>

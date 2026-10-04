@@ -14,6 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { saveLeaveBalance, addWorkerLeaveRange, deleteWorkerLeave } from "@/lib/actions"
 import { LEAVE_TYPE_META, type LeaveType } from "@/lib/enums"
 import { DateRangeFilter, ConfirmDeleteDialog, startOfWeek } from "@/components/schedules-client"
+import { useTableSort, SortableTableHead, byDate, byNumber, byText } from "@/components/sortable-table-head"
 
 export interface BalanceRow {
   workerId: string
@@ -173,6 +174,17 @@ export interface LeaveGroup {
   ids: string[]
   days: number
 }
+
+const LEAVE_SORTERS = {
+  empleada: byText<LeaveGroup>((g) => g.workerName),
+  tipo: byText<LeaveGroup>((g) => LEAVE_TYPE_META[g.type as LeaveType]?.label ?? g.type),
+  desde: byDate<LeaveGroup>((g) => g.startDate),
+  hasta: byDate<LeaveGroup>((g) => g.endDate),
+  dias: byNumber<LeaveGroup>((g) => g.days),
+  notas: byText<LeaveGroup>((g) => g.notes),
+}
+
+type LeaveSortKey = keyof typeof LEAVE_SORTERS
 
 function parseDate(s: string): Date {
   const [y, m, d] = s.split("-").map(Number)
@@ -445,6 +457,8 @@ export function AbsencesTable({
     .filter((g) => (!fromDate || g.endDate >= fromDate) && (!toDate || g.startDate <= toDate))
     .sort((a, b) => (periodFilter === "past" ? b.startDate.localeCompare(a.startDate) : a.startDate.localeCompare(b.startDate)))
 
+  const { sort, sorted: sortedRows, toggleSort } = useTableSort<LeaveGroup, LeaveSortKey>(rows, LEAVE_SORTERS)
+
   const hidden = all.length - rows.length
   function clearFilters() {
     setWorkerFilter("all")
@@ -509,12 +523,12 @@ export function AbsencesTable({
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead>Empleada</TableHead>
-            <TableHead>Tipo</TableHead>
-            <TableHead>Desde</TableHead>
-            <TableHead>Hasta</TableHead>
-            <TableHead>Días</TableHead>
-            <TableHead>Notas</TableHead>
+            <SortableTableHead sortKey="empleada" sort={sort} onToggle={toggleSort}>Empleada</SortableTableHead>
+            <SortableTableHead sortKey="tipo" sort={sort} onToggle={toggleSort}>Tipo</SortableTableHead>
+            <SortableTableHead sortKey="desde" sort={sort} onToggle={toggleSort}>Desde</SortableTableHead>
+            <SortableTableHead sortKey="hasta" sort={sort} onToggle={toggleSort}>Hasta</SortableTableHead>
+            <SortableTableHead sortKey="dias" sort={sort} onToggle={toggleSort}>Días</SortableTableHead>
+            <SortableTableHead sortKey="notas" sort={sort} onToggle={toggleSort}>Notas</SortableTableHead>
             <TableHead className="text-right">
               <span className="flex justify-end text-xs font-normal text-muted-foreground">
                 <span className="flex w-16 items-center justify-center gap-1"><Eye className="h-3.5 w-3.5" /> Ver</span>
@@ -523,7 +537,7 @@ export function AbsencesTable({
           </TableRow>
         </TableHeader>
         <TableBody>
-          {rows.map((g) => {
+          {sortedRows.map((g) => {
             const meta = LEAVE_TYPE_META[g.type as LeaveType]
             return (
               <TableRow key={g.ids[0]}>

@@ -4,10 +4,12 @@
  * A quién hace tiempo que no se ve, para poder llamarla.
  */
 
+import { useMemo } from "react"
 import { UserMinus } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { Table, TableBody, TableCell, TableHeader, TableRow } from "@/components/ui/table"
 import { fmtEur } from "@/components/client-profile-view"
+import { SortableTableHead, byDate, byNumber, byText, useTableSort } from "@/components/sortable-table-head"
 import type { ResumenDeInactivos } from "@/lib/reports"
 import { cn } from "@/lib/utils"
 import {
@@ -34,7 +36,24 @@ export function InformeDeInactivos({ periodo, inactivos }: {
 
 const TOP_INACTIVOS = 15
 
+type FilaInactivo = InactivosEnPantalla["filas"][number]
+
+const INACTIVO_SORTERS = {
+  cliente: byText<FilaInactivo>((f) => f.nombre),
+  telefono: byText<FilaInactivo>((f) => f.telefono),
+  ultimaCita: byDate<FilaInactivo>((f) => f.ultimaCita),
+  sinVenir: byNumber<FilaInactivo>((f) => f.diasSinVenir),
+  dejado: byNumber<FilaInactivo>((f) => f.gastoHistoricoCents),
+}
+
+type InactivoSortKey = keyof typeof INACTIVO_SORTERS
+
 function ClientesInactivos({ resumen }: { resumen: InactivosEnPantalla }) {
+  // Se ordena solo el top que se enseña: reordenar la lista entera metería en
+  // pantalla a quien no está entre los que más dejaban.
+  const visibles = useMemo(() => resumen.filas.slice(0, TOP_INACTIVOS), [resumen.filas])
+  const { sort, sorted, toggleSort } = useTableSort<FilaInactivo, InactivoSortKey>(visibles, INACTIVO_SORTERS)
+
   return (
     <Card>
       <CardHeader className="pb-2">
@@ -68,15 +87,15 @@ function ClientesInactivos({ resumen }: { resumen: InactivosEnPantalla }) {
             <Table>
               <TableHeader>
                 <TableRow className={SIN_HOVER}>
-                  <TableHead>Cliente</TableHead>
-                  <TableHead>Teléfono</TableHead>
-                  <TableHead className="text-right">Última cita</TableHead>
-                  <TableHead className="text-right">Sin venir</TableHead>
-                  <TableHead className="text-right">Ha dejado</TableHead>
+                  <SortableTableHead sortKey="cliente" sort={sort} onToggle={toggleSort}>Cliente</SortableTableHead>
+                  <SortableTableHead sortKey="telefono" sort={sort} onToggle={toggleSort}>Teléfono</SortableTableHead>
+                  <SortableTableHead sortKey="ultimaCita" sort={sort} onToggle={toggleSort} className="text-right">Última cita</SortableTableHead>
+                  <SortableTableHead sortKey="sinVenir" sort={sort} onToggle={toggleSort} className="text-right">Sin venir</SortableTableHead>
+                  <SortableTableHead sortKey="dejado" sort={sort} onToggle={toggleSort} className="text-right">Ha dejado</SortableTableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {resumen.filas.slice(0, TOP_INACTIVOS).map((f) => (
+                {sorted.map((f) => (
                   <TableRow key={f.id} className={SIN_HOVER}>
                     <TableCell className="font-medium">{f.nombre}</TableCell>
                     <TableCell className="tabular-nums text-muted-foreground">{f.telefono ?? "—"}</TableCell>

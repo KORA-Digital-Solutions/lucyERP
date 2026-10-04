@@ -5,10 +5,12 @@
  */
 
 import Link from "next/link"
+import { useMemo } from "react"
 import { useRouter } from "next/navigation"
 import { Megaphone, Star, UserPlus, Users } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { SortableTableHead, byDate, byNumber, byText, useTableSort } from "@/components/sortable-table-head"
 import { fmtEur } from "@/components/client-profile-view"
 import { REFERRAL_SOURCE, REFERRAL_SOURCE_META, type ReferralSource } from "@/lib/enums"
 import { SIN_ORIGEN, type FilaDeOrigen, type ResumenDeCaptacion, type ResumenDeClientes } from "@/lib/reports"
@@ -19,6 +21,16 @@ import {
 } from "@/components/reports/shared"
 
 const TOP_CLIENTES = 15
+
+const RANKING_SORTERS = {
+  cliente: byText<FilaDeClienteEnPantalla>((f) => f.nombre),
+  visitas: byNumber<FilaDeClienteEnPantalla>((f) => f.tickets),
+  gasto: byNumber<FilaDeClienteEnPantalla>((f) => f.totalCents),
+  ticketMedio: byNumber<FilaDeClienteEnPantalla>((f) => f.ticketMedioCents),
+  cada: byNumber<FilaDeClienteEnPantalla>((f) => f.diasEntreVisitas),
+  ultima: byDate<FilaDeClienteEnPantalla>((f) => f.ultimaCompra),
+  peso: byNumber<FilaDeClienteEnPantalla>((f) => f.totalCents),
+}
 
 /** «Sin especificar» es SIN_ORIGEN: la ficha no dice cómo nos conoció. */
 function etiquetaDeOrigen(origen: string): string {
@@ -276,6 +288,10 @@ function RankingDeClientes({
   sinClienteTickets: number
 }) {
   const maximo = Math.max(1, ...filas.map((f) => f.totalCents))
+  // Se ordena solo lo que se enseña: «los {TOP_CLIENTES} primeros» siguen siendo
+  // los de más gasto aunque se reordene la tabla.
+  const top = useMemo(() => filas.slice(0, TOP_CLIENTES), [filas])
+  const { sort, sorted, toggleSort } = useTableSort(top, RANKING_SORTERS)
 
   return (
     <Card>
@@ -299,17 +315,17 @@ function RankingDeClientes({
           <Table>
             <TableHeader>
               <TableRow className={SIN_HOVER}>
-                <TableHead>Cliente</TableHead>
-                <TableHead className="text-right">Visitas</TableHead>
-                <TableHead className="text-right">Gasto</TableHead>
-                <TableHead className="text-right">Ticket medio</TableHead>
-                <TableHead className="text-right">Cada</TableHead>
-                <TableHead className="text-right">Última</TableHead>
-                <TableHead className="w-40">Peso</TableHead>
+                <SortableTableHead sortKey="cliente" sort={sort} onToggle={toggleSort}>Cliente</SortableTableHead>
+                <SortableTableHead sortKey="visitas" sort={sort} onToggle={toggleSort} className="text-right">Visitas</SortableTableHead>
+                <SortableTableHead sortKey="gasto" sort={sort} onToggle={toggleSort} className="text-right">Gasto</SortableTableHead>
+                <SortableTableHead sortKey="ticketMedio" sort={sort} onToggle={toggleSort} className="text-right">Ticket medio</SortableTableHead>
+                <SortableTableHead sortKey="cada" sort={sort} onToggle={toggleSort} className="text-right">Cada</SortableTableHead>
+                <SortableTableHead sortKey="ultima" sort={sort} onToggle={toggleSort} className="text-right">Última</SortableTableHead>
+                <SortableTableHead sortKey="peso" sort={sort} onToggle={toggleSort} className="w-40">Peso</SortableTableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filas.slice(0, TOP_CLIENTES).map((f) => (
+              {sorted.map((f) => (
                 <TableRow key={f.customerId} className={SIN_HOVER}>
                   <TableCell className="font-medium">{f.nombre}</TableCell>
                   <TableCell className="text-right tabular-nums text-muted-foreground">{f.tickets}</TableCell>

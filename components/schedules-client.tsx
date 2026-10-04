@@ -37,6 +37,7 @@ import {
 import { WEEKDAY_LABELS, HOLIDAY_SCOPE_META, LEAVE_TYPE_META, type HolidayScope, type LeaveType } from "@/lib/enums"
 import { cn } from "@/lib/utils"
 import type { LeaveRow } from "@/components/vacations-client"
+import { useTableSort, SortableTableHead, byDate, byText } from "@/components/sortable-table-head"
 
 export interface WeeklyDay {
   dayOfWeek: number
@@ -52,6 +53,16 @@ export interface OverrideRow {
   workerId: string | null
   workerName: string | null
 }
+
+const OVERRIDE_SORTERS = {
+  fecha: byDate<OverrideRow>((r) => r.date),
+  quien: byText<OverrideRow>((r) => (r.workerId ? r.workerName : "Centro")),
+  // Por la primera franja; los días cerrados, sin horario, se van al final.
+  horario: byText<OverrideRow>((r) => (r.closed ? null : r.slots[0]?.startTime)),
+  motivo: byText<OverrideRow>((r) => r.reason),
+}
+
+type OverrideSortKey = keyof typeof OVERRIDE_SORTERS
 
 export interface HolidayRow {
   id: string
@@ -728,6 +739,8 @@ export function OverridesHistoryTable({
     // en descendente (lo más reciente, primero).
     .sort((a, b) => (periodFilter === "past" ? b.date.localeCompare(a.date) : a.date.localeCompare(b.date)))
 
+  const { sort, sorted: sortedRows, toggleSort } = useTableSort<OverrideRow, OverrideSortKey>(rows, OVERRIDE_SORTERS)
+
   const hidden = all.length - rows.length
   function clearFilters() {
     setScopeFilter("all")
@@ -781,10 +794,10 @@ export function OverridesHistoryTable({
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead>Fecha</TableHead>
-            <TableHead>Quién</TableHead>
-            <TableHead>Horario</TableHead>
-            <TableHead>Motivo</TableHead>
+            <SortableTableHead sortKey="fecha" sort={sort} onToggle={toggleSort}>Fecha</SortableTableHead>
+            <SortableTableHead sortKey="quien" sort={sort} onToggle={toggleSort}>Quién</SortableTableHead>
+            <SortableTableHead sortKey="horario" sort={sort} onToggle={toggleSort}>Horario</SortableTableHead>
+            <SortableTableHead sortKey="motivo" sort={sort} onToggle={toggleSort}>Motivo</SortableTableHead>
             <TableHead className="text-right">
               <span className="flex justify-end text-xs font-normal text-muted-foreground">
                 <span className="flex w-16 items-center justify-center gap-1"><Eye className="h-3.5 w-3.5" /> Ver</span>
@@ -793,7 +806,7 @@ export function OverridesHistoryTable({
           </TableRow>
         </TableHeader>
         <TableBody>
-          {rows.map((r) => (
+          {sortedRows.map((r) => (
             <TableRow key={r.id}>
               <TableCell>{r.date}</TableCell>
               <TableCell>{r.workerId ? r.workerName : "Centro"}</TableCell>

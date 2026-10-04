@@ -29,6 +29,19 @@ import {
   suggestedBasePriceCents, suggestedVoucherName,
   voucherFinalPriceCents, voucherPricePerSessionCents, voucherTotals,
 } from "@/lib/vouchers"
+import { useTableSort, SortableTableHead, byBoolean, byNumber, byText } from "@/components/sortable-table-head"
+
+const VOUCHER_SORTERS = {
+  bono: byText<VoucherTemplateRow>((r) => r.name),
+  incluye: byText<VoucherTemplateRow>((r) => r.services.map((s) => s.name).join(", ")),
+  sesiones: byNumber<VoucherTemplateRow>((r) => r.totalSessions),
+  // La tarifa solo se enseña cuando difiere del precio: sin ahorro sale "—".
+  tarifa: byNumber<VoucherTemplateRow>((r) => (r.savingsCents > 0 ? r.basePriceCents : null)),
+  precio: byNumber<VoucherTemplateRow>((r) => r.finalPriceCents),
+  estado: byBoolean<VoucherTemplateRow>((r) => r.active),
+}
+
+type VoucherSortKey = keyof typeof VOUCHER_SORTERS
 
 export interface VoucherServiceOption {
   id: string
@@ -95,6 +108,9 @@ export function VouchersClient({
   // La familia con la que se acota la lista de servicios; vacía, todas. Se
   // conserva entre servicio y servicio: un bono de láser añade varios seguidos.
   const [familiaElegida, setFamiliaElegida] = useState("")
+
+  const { sort, sorted: sortedRows, toggleSort } =
+    useTableSort<VoucherTemplateRow, VoucherSortKey>(rows, VOUCHER_SORTERS)
 
   const servicioPorId = useMemo(
     () => new Map(services.map((s) => [s.id, s])),
@@ -277,12 +293,12 @@ export function VouchersClient({
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Bono</TableHead>
-                <TableHead>Qué incluye</TableHead>
-                <TableHead className="text-right">Sesiones</TableHead>
-                <TableHead className="text-right">Tarifa</TableHead>
-                <TableHead className="text-right">Precio</TableHead>
-                <TableHead>Estado</TableHead>
+                <SortableTableHead sortKey="bono" sort={sort} onToggle={toggleSort}>Bono</SortableTableHead>
+                <SortableTableHead sortKey="incluye" sort={sort} onToggle={toggleSort}>Qué incluye</SortableTableHead>
+                <SortableTableHead sortKey="sesiones" sort={sort} onToggle={toggleSort} className="text-right">Sesiones</SortableTableHead>
+                <SortableTableHead sortKey="tarifa" sort={sort} onToggle={toggleSort} className="text-right">Tarifa</SortableTableHead>
+                <SortableTableHead sortKey="precio" sort={sort} onToggle={toggleSort} className="text-right">Precio</SortableTableHead>
+                <SortableTableHead sortKey="estado" sort={sort} onToggle={toggleSort}>Estado</SortableTableHead>
                 <TableHead className="text-right">
                   <div className="flex justify-end text-xs font-normal text-muted-foreground">
                     <span className="flex w-32 items-center justify-center gap-1">
@@ -296,7 +312,7 @@ export function VouchersClient({
               </TableRow>
             </TableHeader>
             <TableBody>
-              {rows.map((r) => (
+              {sortedRows.map((r) => (
                 <TableRow key={r.id}>
                   <TableCell className="font-medium">{r.name}</TableCell>
                   <TableCell>

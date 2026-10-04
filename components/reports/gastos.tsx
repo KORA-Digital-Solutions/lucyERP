@@ -4,12 +4,14 @@
  * Lo que sale: lo que se gasta en cabina y lo que hay parado en la estantería.
  */
 
+import { useMemo } from "react"
 import { Boxes, Package } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { Table, TableBody, TableCell, TableHeader, TableRow } from "@/components/ui/table"
 import { fmtEur } from "@/components/client-profile-view"
-import type { ResumenDeConsumo, ResumenDeInventario } from "@/lib/reports"
+import { SortableTableHead, byNumber, byText, useTableSort } from "@/components/sortable-table-head"
+import type { FilaDeConsumo, FilaDeInventario, ResumenDeConsumo, ResumenDeInventario } from "@/lib/reports"
 import { cn } from "@/lib/utils"
 import {
   AZUL, SIN_HOVER, Barra, Cifra, InformeShell, porcentaje,
@@ -36,6 +38,27 @@ export function InformeDeGastos({ periodo, consumo, inventario, facturacionCents
 
 const TOP_INVENTARIO = 15
 
+const CONSUMO_SORTERS = {
+  producto: byText<FilaDeConsumo>((f) => f.nombre),
+  unidades: byNumber<FilaDeConsumo>((f) => f.unidades),
+  costeUnitario: byNumber<FilaDeConsumo>((f) => f.costeUnitarioCents),
+  coste: byNumber<FilaDeConsumo>((f) => f.costeCents),
+  peso: byNumber<FilaDeConsumo>((f) => f.costeCents),
+}
+
+type ConsumoSortKey = keyof typeof CONSUMO_SORTERS
+
+const INVENTARIO_SORTERS = {
+  producto: byText<FilaDeInventario>((f) => f.nombre),
+  stock: byNumber<FilaDeInventario>((f) => f.stock),
+  costeUnitario: byNumber<FilaDeInventario>((f) => f.costeUnitarioCents),
+  valor: byNumber<FilaDeInventario>((f) => f.valorCents),
+  salidas: byNumber<FilaDeInventario>((f) => f.salidas),
+  peso: byNumber<FilaDeInventario>((f) => f.valorCents),
+}
+
+type InventarioSortKey = keyof typeof INVENTARIO_SORTERS
+
 function ConsumoInterno({
   resumen, facturacionCents, periodo,
 }: {
@@ -43,6 +66,7 @@ function ConsumoInterno({
   facturacionCents: number
   periodo: string
 }) {
+  const { sort, sorted, toggleSort } = useTableSort<FilaDeConsumo, ConsumoSortKey>(resumen.filas, CONSUMO_SORTERS)
   const maximo = Math.max(1, ...resumen.filas.map((f) => f.costeCents))
 
   return (
@@ -81,15 +105,15 @@ function ConsumoInterno({
             <Table>
               <TableHeader>
                 <TableRow className={SIN_HOVER}>
-                  <TableHead>Producto</TableHead>
-                  <TableHead className="text-right">Uds.</TableHead>
-                  <TableHead className="text-right">Coste ud.</TableHead>
-                  <TableHead className="text-right">Coste</TableHead>
-                  <TableHead className="w-48">Peso</TableHead>
+                  <SortableTableHead sortKey="producto" sort={sort} onToggle={toggleSort}>Producto</SortableTableHead>
+                  <SortableTableHead sortKey="unidades" sort={sort} onToggle={toggleSort} className="text-right">Uds.</SortableTableHead>
+                  <SortableTableHead sortKey="costeUnitario" sort={sort} onToggle={toggleSort} className="text-right">Coste ud.</SortableTableHead>
+                  <SortableTableHead sortKey="coste" sort={sort} onToggle={toggleSort} className="text-right">Coste</SortableTableHead>
+                  <SortableTableHead sortKey="peso" sort={sort} onToggle={toggleSort} className="w-48">Peso</SortableTableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {resumen.filas.map((f) => (
+                {sorted.map((f) => (
                   <TableRow key={f.productId} className={SIN_HOVER}>
                     <TableCell className="font-medium">
                       {f.nombre}
@@ -124,7 +148,10 @@ function ConsumoInterno({
 
 function ValorDelInventario({ resumen, periodo }: { resumen: ResumenDeInventario; periodo: string }) {
   const maximo = Math.max(1, ...resumen.filas.map((f) => f.valorCents))
-  const visibles = resumen.filas.slice(0, TOP_INVENTARIO)
+  // Se ordena solo el top que se enseña: reordenar la lista entera metería en
+  // pantalla referencias que no están entre las de más valor.
+  const visibles = useMemo(() => resumen.filas.slice(0, TOP_INVENTARIO), [resumen.filas])
+  const { sort, sorted, toggleSort } = useTableSort<FilaDeInventario, InventarioSortKey>(visibles, INVENTARIO_SORTERS)
 
   return (
     <Card>
@@ -162,16 +189,16 @@ function ValorDelInventario({ resumen, periodo }: { resumen: ResumenDeInventario
             <Table>
               <TableHeader>
                 <TableRow className={SIN_HOVER}>
-                  <TableHead>Producto</TableHead>
-                  <TableHead className="text-right">Stock</TableHead>
-                  <TableHead className="text-right">Coste ud.</TableHead>
-                  <TableHead className="text-right">Valor</TableHead>
-                  <TableHead className="text-right">Salidas</TableHead>
-                  <TableHead className="w-48">Peso</TableHead>
+                  <SortableTableHead sortKey="producto" sort={sort} onToggle={toggleSort}>Producto</SortableTableHead>
+                  <SortableTableHead sortKey="stock" sort={sort} onToggle={toggleSort} className="text-right">Stock</SortableTableHead>
+                  <SortableTableHead sortKey="costeUnitario" sort={sort} onToggle={toggleSort} className="text-right">Coste ud.</SortableTableHead>
+                  <SortableTableHead sortKey="valor" sort={sort} onToggle={toggleSort} className="text-right">Valor</SortableTableHead>
+                  <SortableTableHead sortKey="salidas" sort={sort} onToggle={toggleSort} className="text-right">Salidas</SortableTableHead>
+                  <SortableTableHead sortKey="peso" sort={sort} onToggle={toggleSort} className="w-48">Peso</SortableTableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {visibles.map((f) => (
+                {sorted.map((f) => (
                   <TableRow key={f.productId} className={SIN_HOVER}>
                     <TableCell className="font-medium">
                       <span className="flex flex-wrap items-center gap-1.5">

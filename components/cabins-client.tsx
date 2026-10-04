@@ -14,6 +14,7 @@ import { Badge } from "@/components/ui/badge"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { saveCabin, toggleCabinActive } from "@/lib/actions"
+import { useTableSort, SortableTableHead, byBoolean, byNumber, byText } from "@/components/sortable-table-head"
 
 export interface CabinRow {
   id: string
@@ -23,11 +24,21 @@ export interface CabinRow {
   active: boolean
 }
 
+const CABIN_SORTERS = {
+  orden: byNumber<CabinRow>((r) => r.sortOrder),
+  nombre: byText<CabinRow>((r) => r.name),
+  descripcion: byText<CabinRow>((r) => r.description),
+  activa: byBoolean<CabinRow>((r) => r.active),
+}
+
+type CabinSortKey = keyof typeof CABIN_SORTERS
+
 export function CabinsClient({ rows }: { rows: CabinRow[] }) {
   const router = useRouter()
   const [open, setOpen] = useState(false)
   const [editing, setEditing] = useState<CabinRow | null>(null)
   const [loading, setLoading] = useState(false)
+  const { sort, sorted: sortedRows, toggleSort } = useTableSort<CabinRow, CabinSortKey>(rows, CABIN_SORTERS)
 
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
@@ -65,10 +76,10 @@ export function CabinsClient({ rows }: { rows: CabinRow[] }) {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead className="w-16">Orden</TableHead>
-                <TableHead>Nombre</TableHead>
-                <TableHead>Descripción</TableHead>
-                <TableHead>Activa</TableHead>
+                <SortableTableHead sortKey="orden" sort={sort} onToggle={toggleSort} className="w-16">Orden</SortableTableHead>
+                <SortableTableHead sortKey="nombre" sort={sort} onToggle={toggleSort}>Nombre</SortableTableHead>
+                <SortableTableHead sortKey="descripcion" sort={sort} onToggle={toggleSort}>Descripción</SortableTableHead>
+                <SortableTableHead sortKey="activa" sort={sort} onToggle={toggleSort}>Activa</SortableTableHead>
                 <TableHead className="text-right">
                   <div className="flex justify-end text-xs font-normal text-muted-foreground">
                     <span className="flex w-36 items-center justify-center gap-1"><ToggleRight className="h-3.5 w-3.5 text-primary" /> Activar/Desactivar</span>
@@ -78,7 +89,7 @@ export function CabinsClient({ rows }: { rows: CabinRow[] }) {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {rows.map((r) => (
+              {sortedRows.map((r) => (
                 <TableRow key={r.id}>
                   <TableCell>{r.sortOrder}</TableCell>
                   <TableCell className="font-medium">{r.name}</TableCell>

@@ -12,6 +12,7 @@ import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 import { toggleWorkerActive } from "@/lib/actions"
+import { useTableSort, SortableTableHead, byBoolean, byText } from "@/components/sortable-table-head"
 import { WorkerForm } from "@/components/worker-form"
 import { EstadoAcceso, WorkerProfileView, type WorkerTab } from "@/components/worker-profile-view"
 
@@ -184,6 +185,17 @@ function GrupoDeUsuarios({ titulo, descripcion, filas, onAbrir, onDesactivada }:
   )
 }
 
+const WORKER_SORTERS = {
+  nombre: byText<WorkerRow>((r) => `${r.lastName ?? ""} ${r.name}`),
+  rol: byText<WorkerRow>((r) => r.role),
+  email: byText<WorkerRow>((r) => r.email),
+  telefono: byText<WorkerRow>((r) => r.phone),
+  acceso: byText<WorkerRow>((r) => resumenAcceso(r).texto),
+  activo: byBoolean<WorkerRow>((r) => r.active),
+}
+
+type WorkerSortKey = keyof typeof WORKER_SORTERS
+
 /**
  * El listado se queda con quién es cada una y cómo está: el resto —informe,
  * PIN, contraseña, editar, borrar— vive dentro de su ficha. Antes eran cinco
@@ -198,6 +210,8 @@ function TablaDeUsuarios({ filas, onAbrir, conRol = false, onDesactivada }: {
   onDesactivada?: () => void
 }) {
   const router = useRouter()
+  // Cada grupo se ordena por su cuenta: son tres tablas y cada una con su criterio.
+  const { sort, sorted, toggleSort } = useTableSort<WorkerRow, WorkerSortKey>(filas, WORKER_SORTERS)
 
   async function onToggle(r: WorkerRow) {
     const res = await toggleWorkerActive(r.id, !r.active)
@@ -215,16 +229,16 @@ function TablaDeUsuarios({ filas, onAbrir, conRol = false, onDesactivada }: {
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead>Nombre</TableHead>
-            {conRol && <TableHead>Rol</TableHead>}
-            <TableHead>Email</TableHead>
-            <TableHead>Teléfono</TableHead>
-            <TableHead>Acceso</TableHead>
+            <SortableTableHead sortKey="nombre" sort={sort} onToggle={toggleSort}>Nombre</SortableTableHead>
+            {conRol && <SortableTableHead sortKey="rol" sort={sort} onToggle={toggleSort}>Rol</SortableTableHead>}
+            <SortableTableHead sortKey="email" sort={sort} onToggle={toggleSort}>Email</SortableTableHead>
+            <SortableTableHead sortKey="telefono" sort={sort} onToggle={toggleSort}>Teléfono</SortableTableHead>
+            <SortableTableHead sortKey="acceso" sort={sort} onToggle={toggleSort}>Acceso</SortableTableHead>
             <TableHead className="w-24 text-center">Activo</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
-          {filas.map((r) => {
+          {sorted.map((r) => {
             const acceso = resumenAcceso(r)
             return (
               <TableRow

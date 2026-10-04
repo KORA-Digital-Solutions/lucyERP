@@ -16,6 +16,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { saveService, toggleServiceActive, saveServiceFamily, toggleServiceFamilyActive } from "@/lib/actions"
 import { formatDuration, formatPrice } from "@/lib/format"
+import { useTableSort, SortableTableHead, byBoolean, byNumber, byText } from "@/components/sortable-table-head"
 
 export interface ServiceRow {
   id: string
@@ -29,6 +30,20 @@ export interface ServiceRow {
   familyId: string
   familyName: string
 }
+
+const SERVICE_SORTERS = {
+  nombre: byText<ServiceRow>((r) => r.name),
+  familia: byText<ServiceRow>((r) => r.familyName),
+  duracion: byNumber<ServiceRow>((r) => r.durationMinutes),
+  // Lo que se lee en la celda: el precio por minuto en los servicios que se
+  // cobran así, y el fijo en el resto.
+  precio: byNumber<ServiceRow>((r) =>
+    r.pricingType === "PER_MINUTE" && r.pricePerMinuteCents ? r.pricePerMinuteCents : r.priceCents),
+  tarifa: byText<ServiceRow>((r) => r.pricingType),
+  activo: byBoolean<ServiceRow>((r) => r.active),
+}
+
+type ServiceSortKey = keyof typeof SERVICE_SORTERS
 
 export interface ServiceFamilyRow {
   id: string
@@ -67,6 +82,9 @@ export function ServicesClient({ rows, families }: { rows: ServiceRow[]; familie
     if (familyFilter === "ALL") return rows
     return rows.filter((r) => r.familyId === familyFilter)
   }, [rows, familyFilter])
+
+  const { sort, sorted: sortedRows, toggleSort } =
+    useTableSort<ServiceRow, ServiceSortKey>(filteredRows, SERVICE_SORTERS)
 
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
@@ -150,12 +168,12 @@ export function ServicesClient({ rows, families }: { rows: ServiceRow[]; familie
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Nombre</TableHead>
-                <TableHead>Familia</TableHead>
-                <TableHead>Duración</TableHead>
-                <TableHead>Precio</TableHead>
-                <TableHead>Tipo tarifa</TableHead>
-                <TableHead>Activo</TableHead>
+                <SortableTableHead sortKey="nombre" sort={sort} onToggle={toggleSort}>Nombre</SortableTableHead>
+                <SortableTableHead sortKey="familia" sort={sort} onToggle={toggleSort}>Familia</SortableTableHead>
+                <SortableTableHead sortKey="duracion" sort={sort} onToggle={toggleSort}>Duración</SortableTableHead>
+                <SortableTableHead sortKey="precio" sort={sort} onToggle={toggleSort}>Precio</SortableTableHead>
+                <SortableTableHead sortKey="tarifa" sort={sort} onToggle={toggleSort}>Tipo tarifa</SortableTableHead>
+                <SortableTableHead sortKey="activo" sort={sort} onToggle={toggleSort}>Activo</SortableTableHead>
                 <TableHead className="text-right">
                   <div className="flex justify-end text-xs font-normal text-muted-foreground">
                     <span className="flex w-36 items-center justify-center gap-1"><ToggleRight className="h-3.5 w-3.5 text-primary" /> Activar/Desactivar</span>
@@ -165,7 +183,7 @@ export function ServicesClient({ rows, families }: { rows: ServiceRow[]; familie
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filteredRows.map((r) => (
+              {sortedRows.map((r) => (
                 <TableRow key={r.id}>
                   <TableCell className="font-medium">{r.name}</TableCell>
                   <TableCell>

@@ -24,8 +24,6 @@ export interface ServiceRow {
   description: string | null
   durationMinutes: number
   priceCents: number
-  pricingType: string
-  pricePerMinuteCents: number | null
   active: boolean
   familyId: string
   familyName: string
@@ -35,11 +33,7 @@ const SERVICE_SORTERS = {
   nombre: byText<ServiceRow>((r) => r.name),
   familia: byText<ServiceRow>((r) => r.familyName),
   duracion: byNumber<ServiceRow>((r) => r.durationMinutes),
-  // Lo que se lee en la celda: el precio por minuto en los servicios que se
-  // cobran así, y el fijo en el resto.
-  precio: byNumber<ServiceRow>((r) =>
-    r.pricingType === "PER_MINUTE" && r.pricePerMinuteCents ? r.pricePerMinuteCents : r.priceCents),
-  tarifa: byText<ServiceRow>((r) => r.pricingType),
+  precio: byNumber<ServiceRow>((r) => r.priceCents),
   activo: byBoolean<ServiceRow>((r) => r.active),
 }
 
@@ -56,7 +50,6 @@ export function ServicesClient({ rows, families }: { rows: ServiceRow[]; familie
   const [open, setOpen] = useState(false)
   const [editing, setEditing] = useState<ServiceRow | null>(null)
   const [loading, setLoading] = useState(false)
-  const [pricingType, setPricingType] = useState("FIXED")
   const [familyId, setFamilyId] = useState("")
   const [familyFilter, setFamilyFilter] = useState("ALL")
   const [familiesOpen, setFamiliesOpen] = useState(false)
@@ -67,13 +60,11 @@ export function ServicesClient({ rows, families }: { rows: ServiceRow[]; familie
 
   function openNew() {
     setEditing(null)
-    setPricingType("FIXED")
     setFamilyId(activeFamilies[0]?.id ?? "")
     setOpen(true)
   }
   function openEdit(r: ServiceRow) {
     setEditing(r)
-    setPricingType(r.pricingType)
     setFamilyId(r.familyId)
     setOpen(true)
   }
@@ -93,7 +84,6 @@ export function ServicesClient({ rows, families }: { rows: ServiceRow[]; familie
       return
     }
     const fd = new FormData(e.currentTarget)
-    fd.set("pricingType", pricingType)
     fd.set("familyId", familyId)
     setLoading(true)
     const res = await saveService(editing?.id ?? null, fd)
@@ -172,7 +162,6 @@ export function ServicesClient({ rows, families }: { rows: ServiceRow[]; familie
                 <SortableTableHead sortKey="familia" sort={sort} onToggle={toggleSort}>Familia</SortableTableHead>
                 <SortableTableHead sortKey="duracion" sort={sort} onToggle={toggleSort}>Duración</SortableTableHead>
                 <SortableTableHead sortKey="precio" sort={sort} onToggle={toggleSort}>Precio</SortableTableHead>
-                <SortableTableHead sortKey="tarifa" sort={sort} onToggle={toggleSort}>Tipo tarifa</SortableTableHead>
                 <SortableTableHead sortKey="activo" sort={sort} onToggle={toggleSort}>Activo</SortableTableHead>
                 <TableHead className="text-right">
                   <div className="flex justify-end text-xs font-normal text-muted-foreground">
@@ -190,16 +179,7 @@ export function ServicesClient({ rows, families }: { rows: ServiceRow[]; familie
                     <Badge variant="outline" className="text-xs">{r.familyName}</Badge>
                   </TableCell>
                   <TableCell>{formatDuration(r.durationMinutes)}</TableCell>
-                  <TableCell>
-                    {r.pricingType === "PER_MINUTE" && r.pricePerMinuteCents
-                      ? `${formatPrice(r.pricePerMinuteCents)}/min`
-                      : formatPrice(r.priceCents)}
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant="outline" className="text-xs">
-                      {r.pricingType === "PER_MINUTE" ? "Por minuto" : "Precio fijo"}
-                    </Badge>
-                  </TableCell>
+                  <TableCell>{formatPrice(r.priceCents)}</TableCell>
                   <TableCell>
                     <Badge variant={r.active ? "secondary" : "outline"} className={r.active ? "" : "text-muted-foreground"}>
                       {r.active ? "Activo" : "Inactivo"}
@@ -221,7 +201,7 @@ export function ServicesClient({ rows, families }: { rows: ServiceRow[]; familie
               ))}
               {filteredRows.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={7} className="py-8 text-center text-muted-foreground">Sin servicios.</TableCell>
+                  <TableCell colSpan={6} className="py-8 text-center text-muted-foreground">Sin servicios.</TableCell>
                 </TableRow>
               )}
             </TableBody>
@@ -256,34 +236,15 @@ export function ServicesClient({ rows, families }: { rows: ServiceRow[]; familie
                   <p className="text-xs text-muted-foreground">No hay familias creadas todavía. Creá una desde el botón &quot;Familias&quot;.</p>
                 )}
               </div>
-              <div className="space-y-2">
-                <Label>Tipo de tarifa</Label>
-                <Select value={pricingType} onValueChange={setPricingType}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="FIXED">Precio fijo</SelectItem>
-                    <SelectItem value="PER_MINUTE">Por minuto</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="durationMinutes">Duración (min)</Label>
                   <Input id="durationMinutes" name="durationMinutes" type="number" min={5} step={5} defaultValue={editing?.durationMinutes ?? 60} required />
                 </div>
-                {pricingType === "FIXED" ? (
-                  <div className="space-y-2">
-                    <Label htmlFor="price">Precio (€)</Label>
-                    <Input id="price" name="price" type="number" min={0} step="0.01" defaultValue={editing ? (editing.priceCents / 100).toFixed(2) : ""} required />
-                  </div>
-                ) : (
-                  <div className="space-y-2">
-                    <Label htmlFor="pricePerMinute">€ / minuto</Label>
-                    <Input id="pricePerMinute" name="pricePerMinute" type="number" min={0} step="0.01"
-                      defaultValue={editing?.pricePerMinuteCents ? (editing.pricePerMinuteCents / 100).toFixed(2) : ""} required />
-                    <input type="hidden" name="price" value="0" />
-                  </div>
-                )}
+                <div className="space-y-2">
+                  <Label htmlFor="price">Precio (€)</Label>
+                  <Input id="price" name="price" type="number" min={0} step="0.01" defaultValue={editing ? (editing.priceCents / 100).toFixed(2) : ""} required />
+                </div>
               </div>
               <div className="flex items-center justify-between rounded-lg border p-3">
                 <Label htmlFor="active">Servicio activo</Label>

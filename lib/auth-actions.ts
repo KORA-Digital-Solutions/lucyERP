@@ -304,6 +304,12 @@ export async function changeOwnPinAction(
     }
     olvidarFallosDePin()
 
+    // Cambiarlo por el mismo no cambia nada: y con el PIN que dio la
+    // administradora, que se dijo en voz alta, dejaría la cuenta como estaba.
+    if (nuevo === actual) {
+      return { error: "El PIN nuevo tiene que ser distinto del actual." }
+    }
+
     // Dos personas con el mismo PIN significa cobrar a nombre de quien no
     // toca: el sistema no puede distinguirlas.
     const yaEsDeOtra = await usuariaDelPin(nuevo)

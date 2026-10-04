@@ -154,7 +154,8 @@ describe("formularios de credenciales", () => {
     "components/pin-login-form.tsx",
     "components/admin-login-form.tsx",
     "app/(auth)/change-password/page.tsx",
-    "app/(auth)/cambiar-pin/page.tsx",
+    // La página solo lee la sesión; el <form> está en su componente.
+    "app/(auth)/cambiar-pin/cambiar-pin-form.tsx",
   ]
 
   for (const pagina of PAGINAS) {

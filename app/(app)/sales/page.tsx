@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/db"
 import { getActiveClinic } from "@/lib/clinic"
 import { getSession } from "@/lib/session"
+import { hoy } from "@/lib/format"
 import { getVoucherTemplatesForSale } from "@/lib/voucher-actions"
 import { SalesClient } from "@/components/sales-client"
 
@@ -19,7 +20,7 @@ const VENTAS_CARGADAS = 500
 
 export default async function SalesPage() {
   const [clinic, session] = await Promise.all([getActiveClinic(), getSession()])
-  const today = new Date().toISOString().slice(0, 10)
+  const today = hoy()
 
   const [sales, customers, services, products, workers, voucherTemplates, cashRegister, conPin] = await Promise.all([
     prisma.sale.findMany({

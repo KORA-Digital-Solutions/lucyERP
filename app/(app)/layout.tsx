@@ -12,8 +12,9 @@ export default async function AppLayout({
   const session = await getSession()
   if (!session) redirect("/login")
 
-  // La sesión es un JWT de 8 h: sigue siendo válida aunque el usuario ya no
-  // exista en la BD (p. ej. tras volver a sembrar la base en desarrollo). Si
+  // La sesión es un JWT deslizante (ver lib/session.ts): sigue siendo válida
+  // aunque el usuario ya no exista en la BD (p. ej. tras volver a sembrar la
+  // base en desarrollo). Si
   // no se comprueba, cualquier registro que guarde userId falla con un error
   // de clave foránea imposible de entender. Mejor obligar a iniciar sesión.
   const clinic = await prisma.clinic.findFirst({ select: { name: true } })

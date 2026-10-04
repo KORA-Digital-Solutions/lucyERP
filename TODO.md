@@ -433,3 +433,137 @@ Capa 1 (textos) + «nunca quedarse sin administradora» + freno del login: una
 tarde, y ya se nota. Después la contraseña temporal generada y el aviso de
 «solo hay una». La capa 3 al final, o antes si el centro arranca con una sola
 administradora.
+
+---
+
+## Escribir la cantidad en la línea del ticket
+
+**Estado: propuesto, no implementado. No bloquea nada, es de comodidad.**
+
+### Qué hay hoy
+
+Desde que se quitó la tarifa por minuto (B1) hay un servicio, «Epilación
+eléctrica», que se cobra a mano con el precio del minuto como precio fijo
+(2,35 €) y los minutos como cantidad: 8 minutos son una línea de 8 × 2,35 €.
+En la línea del ticket la cantidad solo se cambia con los botones − y +
+(`LineRow` en `components/sales-client.tsx`), así que 8 minutos son 7 clics y
+20 minutos son 19.
+
+### Qué haría falta
+
+Que la cantidad del medio del stepper sea un campo numérico editable, con el
+mismo patrón que ya usa el descuento de la misma fila: se escribe, se limita a
+un mínimo de 1 y se guarda al vuelo. Sirve igual para productos (la clienta que
+se lleva seis ampollas). Es solo pantalla: `createSale` ya recibe la cantidad y
+recalcula los totales.
+
+### Para decidir
+
+- **¿Un tope?** Un `1000` por un dedo de más en el teclado pasaría sin que nadie
+  lo viera. Un límite razonable (p. ej. 999) y un total bien visible bastan.
+- **¿Es la solución definitiva a los servicios por minuto?** Si la clínica va a
+  cobrar así más servicios, quizá compense un servicio «por tiempo» de verdad
+  (precio por minuto y minutos que se teclean), que es justo lo que se quitó
+  por estar roto. Mientras sea uno solo, el campo editable es suficiente.
+
+---
+
+## «Esta semana» en el informe de horas trabajadas
+
+**Estado: propuesto, no implementado. Sin requisitos pendientes de la clínica.**
+
+### Qué hay hoy
+
+Informes > Actividad del centro > «Horas trabajadas y ausencias»
+(`components/reports/jornadas.tsx`) usa el selector de período de todos los
+informes: Este mes, Mes pasado, Trimestre, Año y Personalizado
+(`PERIODOS` en `lib/reports.ts`). Para ver una semana hay que ir a
+Personalizado y teclear las dos fechas, y para este informe la semana es
+justo lo que se mira: quién trabaja cuántas horas y quién falta estos días.
+
+### Qué haría falta
+
+- Un período `semana` en `PeriodoId` y en `resolverPeriodo`: de lunes a domingo
+  de la semana en curso, con la semana anterior como tramo de comparación
+  (igual que el mes pasado lo es del mes). Ojo con el cambio de hora, que ya
+  cuida `diasEntre`.
+- Una pestaña «Esta semana» delante de «Este mes» en el selector, con su test
+  en `tests/reports/periodo.test.ts` (un domingo, un lunes, el cambio de año).
+
+### Para decidir
+
+- **¿Solo en este informe o en todos?** El selector es común. Ponerlo en todos
+  es lo más barato y no estorba, pero en los de ventas «esta semana» a media
+  semana compara tres días contra siete de la anterior. En este informe no
+  pasa, porque las horas son las del horario y cuentan también los días que
+  aún no han llegado.
+- **¿La semana empieza en lunes?** Es lo habitual aquí y lo que usa el resto de
+  la aplicación; se deja dicho para no descubrirlo con un informe en domingo.
+
+---
+
+## Exportar informes para la propietaria
+
+**Estado: por analizar, no implementado. Bloqueado por requisitos: primero hay que
+saber qué quiere llevarse y para qué.**
+
+### Qué hay hoy
+
+Los once informes de Informes (`components/reports/indice.tsx`: facturación por
+empleada, ingresos por familia, cobros y descuentos, evolución, gastos, clientes,
+inactivos, deuda, saldo, ocupación y horas trabajadas) solo se leen en pantalla.
+No hay botón de exportar, ni CSV, ni Excel, ni PDF, ni vista de impresión.
+
+### Qué hay que averiguar antes de programar
+
+Es una conversación con la propietaria, no una decisión técnica. Y conviene
+hacerla con los informes delante, no en abstracto:
+
+- **¿Para qué los exporta?** Para enseñárselos a la gestoría, para su propio
+  control en una hoja de cálculo, para imprimirlos y archivarlos, para
+  mandárselos a alguien. Cada uso pide un formato distinto.
+- **¿Cuáles de los once?** Seguramente no todos. Candidatos naturales: facturación
+  por empleada (para calcular incentivos a mano, que es como lo hace hoy), cobros
+  y descuentos, deuda, y las ventas por línea. Lo que pase por la gestoría
+  (cobros por forma de pago, IVA si llega a hacer falta) pesa más que lo demás.
+- **¿Qué formato?**
+  - CSV: lo más barato y lo abre cualquier hoja de cálculo, pero la propietaria
+    probablemente espera «un Excel» que se abra sin pasos intermedios (cuidado
+    con la codificación y el separador decimal en español: coma, y `;` como
+    separador, o Excel lo abre todo en una columna).
+  - XLSX: más trabajo y una dependencia nueva, pero abre bien y permite varias
+    hojas y formato.
+  - PDF o impresión: para archivar o enseñar. Más barato con una vista de
+    impresión del navegador (como el ticket) que con un generador de PDF.
+- **¿Qué trae el fichero?** Lo que se ve en pantalla (el resumen) o el detalle
+  línea a línea. Para calcular incentivos, el detalle de cada empleada con sus
+  servicios y precios; para la gestoría, el resumen por forma de pago.
+- **¿Con qué filtros?** El período que está mirando, con los filtros que tenga
+  puestos, o siempre el período entero. Lo segundo es más predecible; lo
+  primero es lo que uno espera al pulsar el botón desde una pantalla filtrada.
+- **¿Qué hacen las sesiones de bono?** En la actividad de la empleada hay un
+  interruptor para sumarlas al total (apagado por defecto). El fichero tiene que
+  decir cuál de los dos totales lleva, o llevar los dos, para que nadie compare
+  la hoja con la pantalla y vea números distintos sin saber por qué.
+
+### Qué haría falta, una vez claro
+
+- Un botón «Exportar» en `InformeShell` (`components/reports/shared.tsx`), que es
+  la cabecera común, y una función por informe que devuelva las filas ya
+  calculadas: los datos salen de `lib/reports.ts` y no hay que recalcular nada,
+  solo darles forma de tabla.
+- El fichero se genera en el servidor (una ruta o una acción) con los mismos
+  filtros que la pantalla, y se prueba como cualquier otra función de
+  `lib/reports.ts`: es aritmética con formato, y es donde se cuela un céntimo
+  de más o una fila repetida.
+- Cuidar lo de siempre: los importes con coma decimal, las fechas legibles, el
+  nombre del fichero con el período (`facturacion-empleadas-octubre-2026`), y que
+  las empleadas dadas de baja sigan saliendo con su nombre.
+
+### Orden sugerido
+
+1. Sentarse con la propietaria y enseñarle los informes: marcar cuáles exportaría,
+   para qué y qué esperaría abrir.
+2. Hacer primero uno solo (el que más pida), en el formato que elija, y ver si le
+   sirve antes de multiplicarlo por once.
+3. Con ese patrón, añadir el resto con el mismo botón.

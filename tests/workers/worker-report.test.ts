@@ -230,3 +230,54 @@ describe("getWorkerReport", () => {
     expect(r.ticketCount).toBe(0)
   })
 })
+
+describe("getWorkerReport · sesiones de bono", () => {
+  // Una sesión entra con su precio dentro del bono y un 100 % de descuento: el
+  // total es 0 porque ya se cobró al vender el bono, pero es trabajo de quien la
+  // da y el informe tiene que poder valorarlo.
+  async function conSesion<T>(fn: () => Promise<T>): Promise<T> {
+    const venta = await prisma.sale.create({
+      data: {
+        clinicId, customerId: creados.customers[0], userId: cobra, status: "PAID",
+        subtotalCents: 0, discountCents: 0, totalCents: 0, paidCents: 0,
+        createdAt: new Date("2026-09-10T10:00:00Z"),
+        lines: {
+          create: [
+            { type: "VOUCHER_SESSION", serviceId: creados.services[0], workerId: sinActividad, description: "Presoterapia", quantity: 1, unitPriceCents: 6667, discountPercent: 100, totalCents: 0 },
+          ],
+        },
+      },
+    })
+    try {
+      return await fn()
+    } finally {
+      await prisma.saleLine.deleteMany({ where: { saleId: venta.id } })
+      await prisma.sale.delete({ where: { id: venta.id } })
+    }
+  }
+
+  it("trae el precio de la sesión, que no es cero", async () => {
+    await conSesion(async () => {
+      const r = await getWorkerReport(sinActividad)
+      const sesion = r.lines.find((l) => l.type === "VOUCHER_SESSION")!
+      expect(sesion.unitPriceCents).toBe(6667)
+      expect(sesion.discountPercent).toBe(100)
+      expect(sesion.totalCents).toBe(0)
+      expect(sesion.family).toBe("Corporal")
+    })
+  })
+
+  it("las suma aparte, sin meterlas en el total cobrado", async () => {
+    await conSesion(async () => {
+      const r = await getWorkerReport(sinActividad)
+      expect(r.bonoSessionsCents).toBe(6667)
+      expect(r.totalCents).toBe(0)
+      expect(r.servicesCents).toBe(0)
+    })
+  })
+
+  it("quien no ha dado sesiones tiene cero en sesiones de bono", async () => {
+    const r = await getWorkerReport(atiende)
+    expect(r.bonoSessionsCents).toBe(0)
+  })
+})

@@ -285,7 +285,7 @@ describe("createSale · gastar sesiones", () => {
     expect(bono.usedSessions).toBe(0)
   })
 
-  it("la sesión entra a 0 EUR aunque la pantalla mande otro importe", async () => {
+  it("la sesión no cobra nada aunque la pantalla mande otro importe", async () => {
     const voucherId = await venderBono()
     const linea = { ...lineaDeSesion({ voucherId }), unitPriceCents: 3000, totalCents: 3000 }
     const res = await createSale(customerId, "SALE", "CASH", [linea], null)
@@ -294,6 +294,103 @@ describe("createSale · gastar sesiones", () => {
     const venta = await prisma.sale.findUnique({ where: { id: res.id! }, include: { lines: true } })
     expect(venta!.totalCents).toBe(0)
     expect(venta!.lines[0].totalCents).toBe(0)
+  })
+})
+
+describe("createSale · precio de la sesión de bono", () => {
+  async function ventaDe(res: { id?: string }) {
+    return prisma.sale.findUnique({ where: { id: res.id! }, include: { lines: true } })
+  }
+
+  it("entra al precio de la sesión dentro del bono, con un 100 % de descuento", async () => {
+    const voucherId = await venderBono()
+    // La pantalla manda la tarifa del catálogo (30 €) y no se le hace caso:
+    // el láser del bono sale a 81 € entre 3 sesiones.
+    const linea = { ...lineaDeSesion({ voucherId }), unitPriceCents: 3000 }
+    const venta = await ventaDe(await createSale(customerId, "SALE", "CASH", [linea], null))
+
+    const sesion = venta!.lines[0]
+    expect(sesion.unitPriceCents).toBe(2700)
+    expect(sesion.discountPercent).toBe(100)
+    expect(sesion.totalCents).toBe(0)
+  })
+
+  it("cada servicio del bono va a su precio", async () => {
+    const voucherId = await venderBono()
+    const venta = await ventaDe(await createSale(customerId, "SALE", "CASH", [
+      lineaDeSesion({ voucherId }),
+      lineaDeSesion({ voucherId, serviceId: facialId }),
+    ], null))
+
+    const precios = Object.fromEntries(venta!.lines.map((l) => [l.serviceId, l.unitPriceCents]))
+    expect(precios[laserId]).toBe(2700)
+    expect(precios[facialId]).toBe(3000)
+  })
+
+  it("no cuenta como subtotal ni como descuento del ticket", async () => {
+    const voucherId = await venderBono()
+    const venta = await ventaDe(await createSale(customerId, "SALE", "CASH", [lineaDeSesion({ voucherId })], null))
+
+    expect(venta!.subtotalCents).toBe(0)
+    expect(venta!.discountCents).toBe(0)
+    expect(venta!.totalCents).toBe(0)
+  })
+
+  it("junto a un servicio cobrado, solo cuenta el descuento de verdad", async () => {
+    const voucherId = await venderBono()
+    const cobrado: SaleLineInput = {
+      type: "SERVICE", serviceId: ajenoId, description: "Masaje ajeno", quantity: 1,
+      unitPriceCents: 5000, discountPercent: 10, totalCents: 4500, workerId: atiende,
+    }
+    const venta = await ventaDe(await createSale(customerId, "SALE", "CASH", [cobrado, lineaDeSesion({ voucherId })], null))
+
+    expect(venta!.subtotalCents).toBe(5000)
+    expect(venta!.discountCents).toBe(500)
+    expect(venta!.totalCents).toBe(4500)
+  })
+
+  it("las sesiones de un bono suman lo que valía su línea", async () => {
+    const voucherId = await venderBono()
+    // Las tres de láser, repartidas en dos tickets: la segunda y la tercera
+    // siguen la cuenta de la primera.
+    await createSale(customerId, "SALE", "CASH", [lineaDeSesion({ voucherId })], null)
+    await createSale(customerId, "SALE", "CASH", [lineaDeSesion({ voucherId }), lineaDeSesion({ voucherId })], null)
+
+    const lineas = await prisma.saleLine.findMany({
+      where: { type: "VOUCHER_SESSION", voucherSession: { voucherId } },
+    })
+    expect(lineas).toHaveLength(3)
+    expect(lineas.reduce((a, l) => a + l.unitPriceCents, 0)).toBe(8100)
+  })
+
+  it("en el bono recién comprado sale de la plantilla", async () => {
+    const ref = "bono-precio-1"
+    const venta = await ventaDe(await createSale(customerId, "SALE", "CASH", [
+      lineaDeBono(ref),
+      lineaDeSesion({ ref }),
+      lineaDeSesion({ ref, serviceId: facialId }),
+    ], null))
+
+    const sesiones = venta!.lines.filter((l) => l.type === "VOUCHER_SESSION")
+    expect(sesiones.map((l) => l.unitPriceCents).sort()).toEqual([2700, 3000])
+    // El ticket sigue cobrando solo el bono.
+    expect(venta!.totalCents).toBe(PRECIO_DEL_BONO)
+    expect(venta!.discountCents).toBe(0)
+  })
+
+  it("el precio es el pactado en el bono aunque la plantilla cambie después", async () => {
+    const voucherId = await venderBono()
+    await prisma.voucherTemplateService.updateMany({
+      where: { templateId, serviceId: laserId },
+      data: { basePriceCents: 30000, discountPercent: 0 },
+    })
+    const venta = await ventaDe(await createSale(customerId, "SALE", "CASH", [lineaDeSesion({ voucherId })], null))
+    expect(venta!.lines[0].unitPriceCents).toBe(2700)
+
+    await prisma.voucherTemplateService.updateMany({
+      where: { templateId, serviceId: laserId },
+      data: { basePriceCents: 9000, discountPercent: 10 },
+    })
   })
 })
 

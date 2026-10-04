@@ -508,6 +508,11 @@ type ServiceRow = {
   discountPercent: number
   totalCents: number
   ticketStatus: string
+  /**
+   * Sesión gastada de un bono: va con un 100 % de descuento, pero no es una
+   * rebaja ni un regalo —ya se pagó al comprar el bono—, y así se dice.
+   */
+  esSesionDeBono: boolean
 }
 
 const SERVICE_SORTERS = {
@@ -547,6 +552,7 @@ function ClientServicesTab({ data }: { data: ConsumptionData | null }) {
           discountPercent: l.discountPercent,
           totalCents: l.totalCents,
           ticketStatus: t.status,
+          esSesionDeBono: l.type === "VOUCHER_SESSION",
         })
       })
     }
@@ -660,6 +666,9 @@ function ClientServicesTab({ data }: { data: ConsumptionData | null }) {
                 <TableCell className="whitespace-nowrap">{r.family}</TableCell>
                 <TableCell>
                   {r.description}
+                  {r.esSesionDeBono && (
+                    <span className="block text-xs text-muted-foreground">Sesión de bono</span>
+                  )}
                   {/* Solo las tarjetas regalo la traen: es lo único que dice
                       para qué se compró, porque no van atadas a un servicio. */}
                   {r.notes && <span className="block text-xs text-muted-foreground">{r.notes}</span>}
@@ -673,9 +682,13 @@ function ClientServicesTab({ data }: { data: ConsumptionData | null }) {
                 {/* El descuento solo se enseña cuando lo hay, como en los
                     listados de servicios realizados de siempre. */}
                 <TableCell className="text-right tabular-nums text-muted-foreground">
-                  {r.discountPercent > 0 ? `${r.discountPercent}%` : ""}
+                  {r.discountPercent > 0 && !r.esSesionDeBono ? `${r.discountPercent}%` : ""}
                 </TableCell>
-                <TableCell className="text-right font-medium tabular-nums">{fmtEur(r.totalCents)}</TableCell>
+                <TableCell className="text-right font-medium tabular-nums">
+                  {r.esSesionDeBono
+                    ? <span className="font-normal text-muted-foreground">Bono</span>
+                    : fmtEur(r.totalCents)}
+                </TableCell>
               </TableRow>
             ))}
             {sorted.length === 0 && (

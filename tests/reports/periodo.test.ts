@@ -221,6 +221,47 @@ describe("facturacionPorEmpleada", () => {
   })
 })
 
+describe("facturacionPorEmpleada · sesiones de bono", () => {
+  // Una sesión de bono entra con su precio de bono y un 100 % de descuento: su
+  // total es 0 y el valor está en la tarifa de la línea.
+  const sesion = (workerId: string | null, unitPriceCents: number, saleId: string) =>
+    linea({ type: "VOUCHER_SESSION", unitPriceCents, totalCents: 0, workerId, saleId })
+
+  it("las cuenta aparte, con su valor, sin sumarlas al total", () => {
+    const filas = facturacionPorEmpleada([
+      linea({ type: "SERVICE", totalCents: 6500, workerId: "marta", saleId: "v1" }),
+      sesion("marta", 4800, "v2"),
+      sesion("marta", 4800, "v3"),
+    ])
+    const marta = filas.find((f) => f.workerId === "marta")!
+    expect(marta.totalCents).toBe(6500)
+    expect(marta.sesionesDeBono).toBe(2)
+    expect(marta.sesionesDeBonoCents).toBe(9600)
+  })
+
+  it("sale en la tabla quien solo ha dado sesiones, con el total a cero", () => {
+    const lola = facturacionPorEmpleada([sesion("lola", 4800, "v1")]).find((f) => f.workerId === "lola")!
+    expect(lola.totalCents).toBe(0)
+    expect(lola.sesionesDeBonoCents).toBe(4800)
+    expect(lola.tickets).toBe(0)
+  })
+
+  it("la tabla sigue sumando lo mismo que la tarjeta de facturación", () => {
+    const lineas = [
+      linea({ type: "SERVICE", totalCents: 6500, workerId: "marta", saleId: "v1" }),
+      sesion("lola", 4800, "v2"),
+    ]
+    const suma = facturacionPorEmpleada(lineas).reduce((a, f) => a + f.totalCents, 0)
+    expect(suma).toBe(totales(lineas).totalCents)
+  })
+
+  it("una sesión vieja, a 0 €, cuenta como sesión pero no vale nada", () => {
+    const marta = facturacionPorEmpleada([sesion("marta", 0, "v1")]).find((f) => f.workerId === "marta")!
+    expect(marta.sesionesDeBono).toBe(1)
+    expect(marta.sesionesDeBonoCents).toBe(0)
+  })
+})
+
 describe("ranking", () => {
   it("acumula unidades e importe por concepto", () => {
     const filas = ranking([

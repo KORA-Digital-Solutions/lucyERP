@@ -10,7 +10,8 @@ import {
   sessionDiscountPercent, sessionSavingsCents,
   suggestedBasePriceCents, suggestedVoucherName,
   voucherFinalPriceCents, voucherPricePerSessionCents,
-  voucherRemainingSessions, voucherSavingsCents, voucherTotals,
+  saleTotals, voucherRemainingSessions, voucherSavingsCents, voucherSessionPriceCents,
+  voucherTotals,
 } from "@/lib/vouchers"
 
 describe("voucherFinalPriceCents", () => {
@@ -160,5 +161,67 @@ describe("lo que se le cuenta a la clienta", () => {
 
   it("con el servicio a cero no divide entre cero", () => {
     expect(sessionDiscountPercent(0, 5600)).toBe(0)
+  })
+})
+
+describe("voucherSessionPriceCents", () => {
+  it("reparte un precio exacto a partes iguales", () => {
+    // 240 € en 5 sesiones: 48 € cada una, que es el ejemplo de la decisión D2.
+    const precios = [0, 1, 2, 3, 4].map((k) => voucherSessionPriceCents(24000, 5, k))
+    expect(precios).toEqual([4800, 4800, 4800, 4800, 4800])
+  })
+
+  it("las sesiones suman el precio de la línea al céntimo cuando no sale redondo", () => {
+    // 250 € entre 3 no es exacto: 83,33 × 3 = 249,99. Repartido por acumulado,
+    // cada sesión se desvía un céntimo como mucho y el total no se pierde.
+    const precios = [0, 1, 2].map((k) => voucherSessionPriceCents(25000, 3, k))
+    expect(precios).toEqual([8333, 8334, 8333])
+    expect(precios.reduce((a, b) => a + b, 0)).toBe(25000)
+  })
+
+  it("suma exacto para cualquier precio y número de sesiones", () => {
+    for (const total of [1, 2, 3, 5, 7, 10, 12]) {
+      for (const precio of [0, 1, 99, 10000, 12345, 24999]) {
+        const suma = Array.from({ length: total }, (_, k) => voucherSessionPriceCents(precio, total, k))
+          .reduce((a, b) => a + b, 0)
+        expect(suma).toBe(precio)
+      }
+    }
+  })
+
+  it("una sola sesión vale todo el precio", () => {
+    expect(voucherSessionPriceCents(4999, 1, 0)).toBe(4999)
+  })
+
+  it("pasarse de sesiones no sale a más que la última", () => {
+    expect(voucherSessionPriceCents(25000, 3, 7)).toBe(voucherSessionPriceCents(25000, 3, 2))
+  })
+
+  it("sin sesiones no divide entre cero", () => {
+    expect(voucherSessionPriceCents(25000, 0, 0)).toBe(0)
+  })
+})
+
+describe("saleTotals", () => {
+  const servicio = { type: "SERVICE", unitPriceCents: 6000, quantity: 1, discountPercent: 10, totalCents: 5400 }
+  const sesion = { type: "VOUCHER_SESSION", unitPriceCents: 4800, quantity: 1, discountPercent: 100, totalCents: 0 }
+
+  it("suma subtotal, descuento y total de un ticket normal", () => {
+    expect(saleTotals([servicio])).toEqual({ subtotalCents: 6000, discountCents: 600, totalCents: 5400 })
+  })
+
+  it("la sesión de bono no cuenta como descuento ni como subtotal", () => {
+    // Con la sesión a 48 € y un 100 %, contarla daría 4.800 de «descuento»
+    // en un ticket donde nadie ha rebajado nada.
+    expect(saleTotals([servicio, sesion])).toEqual({ subtotalCents: 6000, discountCents: 600, totalCents: 5400 })
+  })
+
+  it("un ticket que solo gasta sesiones queda a cero", () => {
+    expect(saleTotals([sesion, sesion])).toEqual({ subtotalCents: 0, discountCents: 0, totalCents: 0 })
+  })
+
+  it("conserva subtotal − descuento = total", () => {
+    const t = saleTotals([servicio, sesion])
+    expect(t.subtotalCents - t.discountCents).toBe(t.totalCents)
   })
 })

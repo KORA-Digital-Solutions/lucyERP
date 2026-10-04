@@ -30,7 +30,7 @@ de confirmadas, how-to de despliegue) ya están hechos y no se repiten aquí.
 | # | Decisión |
 |---|---|
 | D1 | **Quitar** la tarifa por minuto (solo precio fijo). Migrar servicios `PER_MINUTE` a precio fijo y borrar el selector. Cierra B1. **Hecho** (rama `fix/quitar-tarifa-por-minuto`: migración de datos `€/min × duración`; y las columnas `pricingType`/`pricePerMinuteCents` se eliminan en una segunda migración). |
-| D2 | **Opción A**: línea de sesión a precio de bono/sesión (48 €) con dto 100 %. Incluye excluir VOUCHER_SESSION del `discountCents`, columna aparte en informe de empleadas y relleno retroactivo. |
+| D2 | **Opción A**: línea de sesión a precio de bono/sesión (48 €) con dto 100 %. Incluye excluir VOUCHER_SESSION del `discountCents`, columna aparte en informe de empleadas y relleno retroactivo. **Hecho** (rama `feature/m2-precio-sesion-bono`; el relleno retroactivo es `npm run db:backfill-sesiones-bono`, simulacro por defecto y `-- --apply` para escribir). |
 | D3 | **Pagos mixtos en serio (F3 completo, `SalePayment`) con Bizum dentro.** F3 sube de "Después" a antes de Sprint 3; M7 deja de ser suelto. |
 | D4 | **Bizum en columna propia** en caja, informe de cobros y dashboard (se paga también por datáfono; se revisará tras un tiempo de uso). |
 | D5 | **Papelera**: borrado real si el servicio nunca se vendió ni citó; si no, desactivar con aviso. |

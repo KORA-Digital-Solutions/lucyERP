@@ -22,7 +22,7 @@ const PUBLIC = ["/login", "/api/auth", "/api/webhooks/"]
 // Páginas de la gestión del centro. Desde el mostrador no existen: se entra
 // con contraseña de administradora por la otra puerta. Deben coincidir con
 // GRUPOS_GESTION en components/app-sidebar.tsx: si el menú lo oculta, esto lo bloquea.
-const MANAGEMENT_ONLY_PAGES = ["/workers", "/services", "/cabins", "/settings", "/horarios", "/appointments", "/reports", "/products", "/vouchers"]
+const MANAGEMENT_ONLY_PAGES = ["/workers", "/services", "/cabins", "/settings", "/horarios", "/appointments", "/reports", "/products", "/vouchers", "/cash-registers"]
 
 // Rutas API de la gestión. Se listan aparte porque "/api/workers" no empieza
 // por "/workers": sin esta lista quedaban abiertas a cualquier sesión.
@@ -40,6 +40,16 @@ const MANAGEMENT_ONLY_API = ["/api/workers", "/api/services", "/api/cabins"]
  * miraría. Con /clients no pasa: la gestión ya tiene sus informes de clientes.
  */
 const COUNTER_ONLY_PAGES = ["/dashboard", "/agenda", "/clients", "/cash-register", "/stock"]
+
+/**
+ * ¿Es esta ruta, o una que cuelga de ella? Se compara por segmento y no con
+ * startsWith a secas: "/cash-registers" (el historial de la gestión) empieza por
+ * "/cash-register" (la caja del mostrador) y, con startsWith, cada una quedaba
+ * tapada por la lista de la otra.
+ */
+function esRuta(pathname: string, ruta: string): boolean {
+  return pathname === ruta || pathname.startsWith(ruta + "/")
+}
 
 /**
  * Renueva la cookie de sesión sobre la respuesta que ya se va a devolver.
@@ -83,17 +93,17 @@ export async function proxy(req: NextRequest) {
   }
 
   if (session.mode !== "MANAGEMENT") {
-    if (MANAGEMENT_ONLY_API.some((p) => pathname.startsWith(p))) {
+    if (MANAGEMENT_ONLY_API.some((p) => esRuta(pathname, p))) {
       return NextResponse.json({ error: "Sin permisos." }, { status: 403 })
     }
-    if (MANAGEMENT_ONLY_PAGES.some((p) => pathname.startsWith(p))) {
+    if (MANAGEMENT_ONLY_PAGES.some((p) => esRuta(pathname, p))) {
       const url = req.nextUrl.clone()
       // A la portada del mostrador, que es donde se aterriza al entrar.
       url.pathname = "/dashboard"
       return conSesionRenovada(NextResponse.redirect(url), session)
     }
   } else {
-    if (COUNTER_ONLY_PAGES.some((p) => pathname.startsWith(p))) {
+    if (COUNTER_ONLY_PAGES.some((p) => esRuta(pathname, p))) {
       const url = req.nextUrl.clone()
       // A la portada de la gestión, que es donde se aterriza al entrar.
       url.pathname = "/reports"

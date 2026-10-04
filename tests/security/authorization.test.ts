@@ -43,7 +43,7 @@ const DEBEN_SER_DEL_MOSTRADOR = [
   "createCustomerReminder", "deleteCustomerReminder", "reopenCustomerReminder",
   "completeCustomerReminder",
   "registerOrder", "addStockMovement",
-  "createSale", "payDebt", "openCashRegister", "closeCashRegister",
+  "createSale", "payDebt", "openCashRegister", "closeCashRegister", "editCashRegisterClosing",
 ]
 
 /** Rutas públicas a propósito, con su propia autenticación. */
@@ -218,8 +218,20 @@ describe("configuración", () => {
     for (const ruta of ["/api/workers", "/api/services", "/api/cabins"]) {
       expect(src).toContain(ruta)
     }
-    for (const pagina of ["/horarios", "/appointments", "/reports"]) {
+    for (const pagina of ["/horarios", "/appointments", "/reports", "/cash-registers"]) {
       expect(src).toContain(pagina)
     }
+  })
+
+  it("el proxy compara las rutas por segmento: /cash-registers no es /cash-register", () => {
+    // La caja del mostrador y el historial de la gestión se llaman casi igual.
+    // Con startsWith a secas, la lista de una tapaba a la otra.
+    const src = readFileSync(join(RAIZ, "proxy.ts"), "utf8")
+    // PUBLIC sí va por prefijo a propósito (/login, /api/auth…); las listas de
+    // mostrador y gestión, no.
+    expect(src).not.toMatch(
+      /(MANAGEMENT_ONLY_API|MANAGEMENT_ONLY_PAGES|COUNTER_ONLY_PAGES)\.some\(\(p\) => pathname\.startsWith\(p\)\)/,
+    )
+    expect(src).toMatch(/COUNTER_ONLY_PAGES\.some\(\(p\) => esRuta\(pathname, p\)\)/)
   })
 })

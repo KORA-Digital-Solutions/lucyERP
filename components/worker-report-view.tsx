@@ -24,6 +24,7 @@ import { Info, Search, ShoppingCart, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
+import { Switch } from "@/components/ui/switch"
 import { Label } from "@/components/ui/label"
 import { Table, TableBody, TableCell, TableHeader, TableRow } from "@/components/ui/table"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -41,6 +42,16 @@ const TYPE_LABEL: Record<string, string> = {
   SERVICE: "Servicio",
   PRODUCT: "Producto",
   GIFT_CARD: "Tarjeta regalo",
+  VOUCHER_SESSION: "Sesión de bono",
+}
+
+/**
+ * Lo que vale la línea para quien la hizo. Una sesión de bono tiene el total a
+ * 0 —ya se cobró al vender el bono— y entra con su precio dentro del bono y un
+ * 100 % de descuento: ese precio es lo que se le cuenta a la empleada.
+ */
+function valorDeLinea(r: WorkerReportLine): number {
+  return r.type === "VOUCHER_SESSION" ? r.unitPriceCents * r.quantity : r.totalCents
 }
 
 const SORTERS = {
@@ -51,7 +62,7 @@ const SORTERS = {
   cliente: byText<WorkerReportLine>((r) => r.customerName),
   uds: byNumber<WorkerReportLine>((r) => r.quantity),
   dto: byNumber<WorkerReportLine>((r) => r.discountPercent),
-  total: byNumber<WorkerReportLine>((r) => r.totalCents),
+  total: byNumber<WorkerReportLine>(valorDeLinea),
 }
 
 type SortKey = keyof typeof SORTERS
@@ -79,6 +90,9 @@ export function WorkerReportView({ workerId, desdeInicial = "", hastaInicial = "
   const [family, setFamily] = useState(TODAS_FAMILIAS)
   const [from, setFrom] = useState(desdeInicial)
   const [to, setTo] = useState(hastaInicial)
+  // Apagado por defecto: el total es lo que se cobró. Encendido, es todo lo que
+  // ha hecho la empleada, con las sesiones de bono a su precio dentro del bono.
+  const [sumarSesiones, setSumarSesiones] = useState(false)
 
   useEffect(() => {
     setData(null)
@@ -122,13 +136,20 @@ export function WorkerReportView({ workerId, desdeInicial = "", hastaInicial = "
   // Los totales de arriba son los de lo filtrado, no los de siempre: si se
   // pide "agosto" y el número que se lee es el del año, engaña.
   const totals = useMemo(() => {
-    let services = 0, products = 0, giftCards = 0
+    let services = 0, products = 0, giftCards = 0, bonoSessions = 0
     for (const r of filtered) {
       if (r.type === "SERVICE") services += r.totalCents
       else if (r.type === "PRODUCT") products += r.totalCents
       else if (r.type === "GIFT_CARD") giftCards += r.totalCents
+      // Aparte: no suma en el total, que es lo que se cobró.
+      else if (r.type === "VOUCHER_SESSION") bonoSessions += valorDeLinea(r)
     }
-    return { services, products, giftCards, total: services + products + giftCards }
+    return {
+      services, products, giftCards, bonoSessions,
+      total: services + products + giftCards,
+      // El mismo total con las sesiones dentro, para el interruptor.
+      totalConSesiones: services + products + giftCards + bonoSessions,
+    }
   }, [filtered])
 
   // Lo que se ve no es el informe entero. Manda sobre los totales: el número
@@ -210,6 +231,16 @@ export function WorkerReportView({ workerId, desdeInicial = "", hastaInicial = "
                   <X className="h-3.5 w-3.5" /> Quitar filtros
                 </Button>
               )}
+              {/* Solo si hay sesiones de bono que sumar: en el resto de informes
+                  el interruptor no tendría nada que hacer. */}
+              {typeCounts.has("VOUCHER_SESSION") && (
+                <div className="ml-auto flex items-center gap-2">
+                  <Switch id="inf-sumar-sesiones" checked={sumarSesiones} onCheckedChange={setSumarSesiones} />
+                  <Label htmlFor="inf-sumar-sesiones" className="cursor-pointer text-xs font-normal text-muted-foreground">
+                    Sumar sesiones de bono al total
+                  </Label>
+                </div>
+              )}
             </div>
 
             <Card className="overflow-hidden p-0">
@@ -260,7 +291,16 @@ export function WorkerReportView({ workerId, desdeInicial = "", hastaInicial = "
                       <TableCell className="text-right tabular-nums text-muted-foreground">
                         {r.discountPercent > 0 ? `${r.discountPercent}%` : ""}
                       </TableCell>
-                      <TableCell className="text-right font-medium tabular-nums">{fmtEur(r.totalCents)}</TableCell>
+                      <TableCell className="text-right font-medium tabular-nums">
+                        {r.type === "VOUCHER_SESSION"
+                          // El precio que valió la sesión, no un 0,00 € que la
+                          // haría pasar por trabajo regalado.
+                          ? <>
+                              {fmtEur(valorDeLinea(r))}
+                              <span className="block text-xs font-normal text-muted-foreground">ya pagado en el bono</span>
+                            </>
+                          : fmtEur(r.totalCents)}
+                      </TableCell>
                     </TableRow>
                   ))}
                   {sorted.length === 0 && (
@@ -299,18 +339,36 @@ export function WorkerReportView({ workerId, desdeInicial = "", hastaInicial = "
                   <span className="text-lg font-semibold tabular-nums">{fmtEur(totals.giftCards)}</span>
                 </span>
               )}
+              {totals.bonoSessions > 0 && (
+                <span className="flex items-baseline gap-2" title={sumarSesiones ? "Sumadas en el total" : "No suman en el total: ya se cobraron al vender el bono"}>
+                  <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Sesiones de bono</span>
+                  <span className="text-lg font-semibold tabular-nums">{fmtEur(totals.bonoSessions)}</span>
+                </span>
+              )}
               {hayFiltro && (
                 <span className="text-xs text-muted-foreground">
-                  de {fmtEur(data.totalCents)} en total
+                  de {fmtEur(sumarSesiones ? data.totalCents + data.bonoSessionsCents : data.totalCents)} en total
                 </span>
               )}
               <span className="flex items-baseline gap-2">
                 <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                   {hayFiltro ? "Total filtrado" : "Total"}
+                  {sumarSesiones && " con sesiones"}
                 </span>
-                <span className="text-2xl font-bold tabular-nums">{fmtEur(totals.total)}</span>
+                <span className="text-2xl font-bold tabular-nums">
+                  {fmtEur(sumarSesiones ? totals.totalConSesiones : totals.total)}
+                </span>
               </span>
             </div>
+
+            {totals.bonoSessions > 0 && (
+              <p className="max-w-3xl text-xs text-muted-foreground">
+                Las sesiones de bono se cuentan a quien las da, a lo que valen dentro del
+                bono. {sumarSesiones
+                  ? "Ahora están sumadas en el total: es lo que ha hecho la empleada, no lo que entró en caja."
+                  : "No suman en el total de abajo porque ese dinero se cobró el día que se vendió el bono: es el total de caja."}
+              </p>
+            )}
 
             {hayProductoAproximado && (
               <div className="flex max-w-3xl gap-3 rounded-lg border border-[#F59E0B]/40 bg-[#FEF3E2] p-3 text-sm text-[#92400E]">

@@ -28,7 +28,7 @@ import {
   getRedeemableVouchers,
   type CustomerVoucherRow, type VoucherTemplateRow,
 } from "@/lib/voucher-actions"
-import { sessionSavingsCents, voucherBalances, type VoucherBalance } from "@/lib/vouchers"
+import { sessionSavingsCents, voucherBalances, voucherSessionPriceCents, type VoucherBalance } from "@/lib/vouchers"
 import { PinDialog } from "@/components/pin-dialog"
 import { QuickCustomerDialog } from "@/components/quick-customer-dialog"
 import { ClientProfileDialog } from "@/components/client-profile-dialog"
@@ -180,6 +180,45 @@ function calcularBonos(
   return voucherBalances([...deAntes, ...deEsteTicket], gastadas)
 }
 
+/**
+ * Lo que vale cada sesión de bono del ticket, por clave de línea.
+ *
+ * Es el mismo reparto que hace el servidor al guardar (createSale), para que lo
+ * que se lee aquí sea lo que queda en la venta: el precio de la línea del bono
+ * entre sus sesiones, y la que toca depende de cuántas se llevan gastadas, ya
+ * sea de otros días o de líneas anteriores de este mismo ticket.
+ */
+function preciosDeSesion(
+  lines: DraftLine[],
+  vouchers: CustomerVoucherRow[],
+  voucherTemplates: VoucherTemplateRow[],
+): Map<number, number> {
+  const precios = new Map<number, number>()
+  const yaEnElTicket = new Map<string, number>()
+  for (const l of lines) {
+    if (l.type !== "VOUCHER_SESSION") continue
+    const bono = l.voucherId ? `bono:${l.voucherId}` : `nuevo:${l.voucherRef}`
+    const clave = `${bono}|${l.itemId}`
+    const delTicket = yaEnElTicket.get(clave) ?? 0
+    yaEnElTicket.set(clave, delTicket + 1)
+
+    let tarifa: { finalPriceCents: number; totalSessions: number; gastadas: number } | null = null
+    if (l.voucherId) {
+      const s = vouchers.find((v) => v.id === l.voucherId)?.services.find((x) => x.id === l.itemId)
+      if (s) tarifa = { finalPriceCents: s.finalPriceCents, totalSessions: s.totalSessions, gastadas: s.usedSessions }
+    } else {
+      const venta = lines.find((x) => x.type === "VOUCHER" && x.voucherRef === l.voucherRef)
+      const s = voucherTemplates.find((t) => t.id === venta?.itemId)?.services.find((x) => x.id === l.itemId)
+      if (s) tarifa = { finalPriceCents: s.finalPriceCents, totalSessions: s.totalSessions, gastadas: 0 }
+    }
+    precios.set(
+      l.key,
+      tarifa ? voucherSessionPriceCents(tarifa.finalPriceCents, tarifa.totalSessions, tarifa.gastadas + delTicket) : 0,
+    )
+  }
+  return precios
+}
+
 /* ─── Helpers ────────────────────────────────────────────────────────────── */
 
 /**
@@ -214,7 +253,9 @@ function mismaLinea(a: DraftLine, b: DraftLine): boolean {
 function lineTotal(l: DraftLine) {
   // Una sesión de bono ya se pagó el día que se compró el bono: entra en el
   // ticket para dejar constancia de quién la dio, pero no suma. La línea
-  // conserva la tarifa del servicio, que se enseña tachada.
+  // conserva la tarifa del servicio, para poder volver a cobrarla aparte; lo
+  // que se enseña y se guarda es el precio de la sesión dentro del bono
+  // (ver preciosDeSesion).
   if (l.type === "VOUCHER_SESSION") return 0
   return Math.round(l.unitPriceCents * l.quantity * (1 - l.discountPercent / 100))
 }
@@ -687,16 +728,16 @@ export function SalesClient({ sales, customers, services, products, workers, vou
                         {r.atendio || <span className="text-muted-foreground">—</span>}
                       </TableCell>
                       <TableCell className="whitespace-nowrap px-2 text-right tabular-nums text-muted-foreground">
-                        {/* La sesión de bono no tiene tarifa propia guardada:
-                            se apunta a 0 EUR porque ya se pagó en su día. Un
-                            0,00 EUR aquí la haría pasar por un servicio
-                            regalado. */}
-                        {esSesionDeBono(l) ? "—" : fmtEur(l.unitPriceCents)}
+                        {/* La sesión de bono lleva lo que valió dentro del bono.
+                            Las anteriores a que se guardase ese valor están a
+                            0 EUR, y un 0,00 EUR aquí las haría pasar por un
+                            servicio regalado. */}
+                        {tarifaVisible(l) ? fmtEur(l.unitPriceCents) : "—"}
                       </TableCell>
                       {/* El descuento, en su columna: el porcentaje y lo que
                           son en euros, que es lo que se acaba preguntando. */}
                       <TableCell className="whitespace-nowrap px-2 text-right tabular-nums">
-                        {l.discountPercent > 0
+                        {l.discountPercent > 0 && !esSesionDeBono(l)
                           ? <span className="text-primary">
                               −{l.discountPercent} %
                               {/* Lo que son en euros debajo del porcentaje, no
@@ -831,12 +872,19 @@ function etiquetaDeLinea(l: SaleLine): string | null {
 
 /**
  * Lo que va en la columna del importe. Una sesión de bono no se cobra —ya se
- * pagó el día que se compró el bono—, así que su línea no lleva ni tarifa ni
- * descuento y su total es cero. Escribirlo con números la hacía parecer un
- * servicio regalado; con la palabra queda dicho por qué no hay dinero.
+ * pagó el día que se compró el bono—, así que su total es cero. Escribirlo con
+ * números la hacía parecer un servicio regalado; con la palabra queda dicho por
+ * qué no hay dinero. Su línea sí guarda lo que valió dentro del bono, con un
+ * 100 % de descuento que no es una rebaja concedida: por eso no se enseña en la
+ * columna de descuento.
  */
 function esSesionDeBono(l: SaleLine): boolean {
   return l.type === "VOUCHER_SESSION"
+}
+
+/** Si hay tarifa que enseñar: la de una sesión de bono vieja es 0 y no vale. */
+function tarifaVisible(l: SaleLine): boolean {
+  return !esSesionDeBono(l) || l.unitPriceCents > 0
 }
 
 /**
@@ -854,7 +902,10 @@ function esSesionDeBono(l: SaleLine): boolean {
 function TicketDetalle({ sale }: { sale: Sale }) {
   // Se calculan sobre las líneas que se están enseñando, no sobre los totales
   // guardados en la venta: así lo que suma es exactamente lo que se lee.
-  const subtotalCents = sale.lines.reduce((a, l) => a + l.unitPriceCents * l.quantity, 0)
+  // Sin las sesiones de bono: llevan su valor con un 100 % de descuento, y
+  // contarlas haría pasar por descuento lo que ya estaba pagado.
+  const subtotalCents = sale.lines.reduce(
+    (a, l) => esSesionDeBono(l) ? a : a + l.unitPriceCents * l.quantity, 0)
   const lineasCents = sale.lines.reduce((a, l) => a + l.totalCents, 0)
   const descuentoCents = subtotalCents - lineasCents
   const saldoCents = sale.balanceMovements.reduce((a, m) => a + Math.abs(m.amountCents), 0)
@@ -898,10 +949,10 @@ function TicketDetalle({ sale }: { sale: Sale }) {
                 </td>
                 <td className="py-1.5 text-right tabular-nums">{l.quantity}</td>
                 <td className="py-1.5 text-right tabular-nums text-muted-foreground">
-                  {esSesionDeBono(l) ? "—" : fmtEur(l.unitPriceCents)}
+                  {tarifaVisible(l) ? fmtEur(l.unitPriceCents) : "—"}
                 </td>
                 <td className="py-1.5 text-right tabular-nums">
-                  {l.discountPercent > 0
+                  {l.discountPercent > 0 && !esSesionDeBono(l)
                     ? <span className="text-primary">
                         −{l.discountPercent} % · −{fmtEur(brutoCents - l.totalCents)}
                       </span>
@@ -1057,9 +1108,16 @@ function POSView({ sales, customers, services, products, workers, voucherTemplat
   const timeStr = now.toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" })
   const dateStr = capitalizeFirst(now.toLocaleDateString("es-ES", { weekday: "long", day: "numeric", month: "long" }))
 
-  const subtotalCents = lines.reduce((s, l) => s + l.unitPriceCents * l.quantity, 0)
-  const discountCents = lines.reduce((s, l) => s + (l.unitPriceCents * l.quantity - lineTotal(l)), 0)
+  // Las sesiones de bono quedan fuera del subtotal y del descuento: ya están
+  // pagadas, no suman al ticket y no son una rebaja concedida (ver saleTotals).
+  const cobrables = lines.filter((l) => l.type !== "VOUCHER_SESSION")
+  const subtotalCents = cobrables.reduce((s, l) => s + l.unitPriceCents * l.quantity, 0)
+  const discountCents = cobrables.reduce((s, l) => s + (l.unitPriceCents * l.quantity - lineTotal(l)), 0)
   const totalCents = subtotalCents - discountCents
+  const preciosDeSesionPorLinea = useMemo(
+    () => preciosDeSesion(lines, vouchers, voucherTemplates),
+    [lines, vouchers, voucherTemplates],
+  )
   const customerBalance = customer?.balanceCents ?? 0
   const remainingCents = Math.max(0, totalCents - balanceAppliedCents)
   // Saldo a favor que aún podría aplicarse a esta venta
@@ -1128,8 +1186,10 @@ function POSView({ sales, customers, services, products, workers, voucherTemplat
         productId: l.type === "PRODUCT" ? l.itemId : undefined,
         description: l.description,
         quantity: l.quantity,
-        unitPriceCents: l.unitPriceCents,
-        discountPercent: l.discountPercent,
+        // El servidor vuelve a poner el precio de la sesión desde el bono: esto
+        // es lo que se ha leído en pantalla, no lo que se fía.
+        unitPriceCents: l.type === "VOUCHER_SESSION" ? preciosDeSesionPorLinea.get(l.key) ?? 0 : l.unitPriceCents,
+        discountPercent: l.type === "VOUCHER_SESSION" ? 100 : l.discountPercent,
         durationMinutes: l.durationMinutes ?? undefined,
         totalCents: lineTotal(l),
         workerId: l.workerId,
@@ -1570,6 +1630,7 @@ function POSView({ sales, customers, services, products, workers, voucherTemplat
                         bonoVendido={l.type === "VOUCHER"
                           ? voucherTemplates.find((t) => t.id === l.itemId) ?? null
                           : null}
+                        precioDeSesionCents={preciosDeSesionPorLinea.get(l.key) ?? null}
                       />
                     ))}
                   </tbody>
@@ -2505,7 +2566,7 @@ function BonoDetalle({ bono }: { bono: VoucherTemplateRow }) {
 
 /* ─── Line row ───────────────────────────────────────────────────────────── */
 
-function LineRow({ line, workers, onUpdate, onRemove, bonos, onSetBono, bonoVendido }: {
+function LineRow({ line, workers, onUpdate, onRemove, bonos, onSetBono, bonoVendido, precioDeSesionCents }: {
   line: DraftLine; workers: Worker[]
   onUpdate: (p: Partial<DraftLine>) => void; onRemove: () => void
   /** Los bonos que podrían pagar esta línea, con el que ya la paga incluido. */
@@ -2513,6 +2574,8 @@ function LineRow({ line, workers, onUpdate, onRemove, bonos, onSetBono, bonoVend
   onSetBono: (bono: BonoDisponible | null) => void
   /** Solo en la línea que vende un bono: el bono del catálogo que es. */
   bonoVendido: VoucherTemplateRow | null
+  /** Solo en una sesión de bono: lo que vale dentro del bono. */
+  precioDeSesionCents: number | null
 }) {
   const total = lineTotal(line)
   const [discountStr, setDiscountStr] = useState(line.discountPercent === 0 ? "" : String(line.discountPercent))
@@ -2600,14 +2663,17 @@ function LineRow({ line, workers, onUpdate, onRemove, bonos, onSetBono, bonoVend
       </td>
 
       <td className="px-3 py-2.5 text-right text-sm tabular-nums text-muted-foreground">
-        <span className={cn(line.type === "VOUCHER_SESSION" && "line-through")}>
-          {fmtEur(line.unitPriceCents)}
-        </span>
+        {/* La sesión de bono enseña lo que vale dentro del bono, no la tarifa
+            del catálogo: es lo que se le atribuye a quien la da. */}
+        {fmtEur(line.type === "VOUCHER_SESSION" ? precioDeSesionCents ?? 0 : line.unitPriceCents)}
       </td>
 
       <td className="px-3 py-2 text-center">
-        {line.type === "GIFT_CARD" || line.type === "VOUCHER_SESSION"
-          ? <span className="text-muted-foreground text-xs">—</span> : (
+        {line.type === "GIFT_CARD"
+          ? <span className="text-muted-foreground text-xs">—</span>
+          : line.type === "VOUCHER_SESSION"
+          // No se edita: la sesión va siempre al 100 %, pagada con el bono.
+          ? <span className="text-xs text-muted-foreground">100 %</span> : (
           <div className="relative w-24">
             <Input
               type="number" min={0} max={100}

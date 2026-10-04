@@ -207,3 +207,66 @@ export function voucherBalances(
     })
     .filter((b) => b.remaining > 0)
 }
+
+/* ------------------------ LA SESIÓN EN EL TICKET ------------------------- */
+
+/**
+ * Lo que vale, en el ticket, la sesión número `ordinal` de una línea del bono
+ * (la primera es la 0).
+ *
+ * Es el precio de la línea repartido entre sus sesiones. Si dividiera siempre
+ * lo mismo, 250 € en 3 sesiones darían 83,33 € × 3 = 249,99 € y las sesiones
+ * no sumarían lo que entró por el bono. Se reparte por acumulado: la sesión k
+ * vale lo que le falta al total de las k primeras para llegar al de las k+1.
+ * Así cada una difiere de las otras a lo sumo un céntimo y las N suman el precio
+ * de la línea al céntimo (83,33 + 83,34 + 83,33).
+ *
+ * Es el precio pactado del bono —el de la plantilla que se copió al venderlo—,
+ * no lo que se acabó cobrando: en el mostrador la línea del ticket se puede
+ * editar, y ese ajuste es del bono entero, no de cada sesión.
+ */
+export function voucherSessionPriceCents(
+  finalPriceCents: number,
+  totalSessions: number,
+  ordinal: number,
+): number {
+  if (totalSessions <= 0) return 0
+  const precio = Math.max(0, Math.round(finalPriceCents))
+  // Pasarse de sesiones no debe salir a más de lo que vale la última.
+  const k = Math.min(Math.max(0, Math.round(ordinal)), totalSessions - 1)
+  const acumulado = (n: number) => Math.round((precio * n) / totalSessions)
+  return acumulado(k + 1) - acumulado(k)
+}
+
+/** Una línea de ticket con lo justo para sumar. */
+export type TicketLine = {
+  type: string
+  unitPriceCents: number
+  quantity: number
+  discountPercent: number
+  totalCents: number
+}
+
+/**
+ * Subtotal, descuento y total de un ticket.
+ *
+ * Las sesiones de bono (VOUCHER_SESSION) entran con su precio de bono y un 100 %
+ * de descuento, y por eso se dejan fuera del subtotal y del descuento: no es una
+ * rebaja que se haya concedido ni dinero que entre hoy —ya se cobró el día que
+ * se vendió el bono—. Contarlas inflaría los «Descuentos» del ticket y de los
+ * informes. Así sigue valiendo subtotal − descuento = total.
+ */
+export function saleTotals(lines: TicketLine[]): {
+  subtotalCents: number
+  discountCents: number
+  totalCents: number
+} {
+  let subtotalCents = 0, discountCents = 0, totalCents = 0
+  for (const l of lines) {
+    totalCents += l.totalCents
+    if (l.type === "VOUCHER_SESSION") continue
+    subtotalCents += l.unitPriceCents * l.quantity
+    discountCents += Math.round(l.unitPriceCents * l.quantity * l.discountPercent / 100)
+  }
+  return { subtotalCents, discountCents, totalCents }
+}

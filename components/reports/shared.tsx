@@ -54,6 +54,8 @@ export type FilaDeEmpleadaConNombre = {
   productsCents: number
   totalCents: number
   tickets: number
+  sesionesDeBono: number
+  sesionesDeBonoCents: number
 }
 
 /* Las fechas cruzan del servidor al cliente como texto ISO: se formatean aquí,

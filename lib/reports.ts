@@ -278,6 +278,13 @@ export type FilaDeEmpleada = {
   productsCents: number
   totalCents: number
   tickets: number
+  /**
+   * Sesiones de bono que ha dado, y lo que valían dentro del bono. Va aparte y
+   * NO entra en `totalCents`: ese dinero ya se contó el día que se vendió el
+   * bono, y sumarlo aquí lo contaría dos veces.
+   */
+  sesionesDeBono: number
+  sesionesDeBonoCents: number
 }
 
 /**
@@ -295,11 +302,22 @@ export type FilaDeEmpleada = {
 export function facturacionPorEmpleada(lineas: LineaDeInforme[]): FilaDeEmpleada[] {
   const porEmpleada = new Map<string, { fila: FilaDeEmpleada; tickets: Set<string> }>()
   for (const l of lineas) {
-    if (!FACTURA.includes(l.type)) continue
+    if (!FACTURA.includes(l.type) && l.type !== "VOUCHER_SESSION") continue
     const clave = l.workerId ?? ""
     const acc = porEmpleada.get(clave) ?? {
-      fila: { workerId: l.workerId, servicesCents: 0, productsCents: 0, totalCents: 0, tickets: 0 },
+      fila: {
+        workerId: l.workerId, servicesCents: 0, productsCents: 0, totalCents: 0, tickets: 0,
+        sesionesDeBono: 0, sesionesDeBonoCents: 0,
+      },
       tickets: new Set<string>(),
+    }
+    porEmpleada.set(clave, acc)
+    if (l.type === "VOUCHER_SESSION") {
+      // El precio de bono de la sesión: entra con un 100 % de descuento, así
+      // que su `totalCents` es 0 y el valor está en la tarifa de la línea.
+      acc.fila.sesionesDeBono += l.quantity
+      acc.fila.sesionesDeBonoCents += l.unitPriceCents * l.quantity
+      continue
     }
     if (l.type === "SERVICE") acc.fila.servicesCents += l.totalCents
     else acc.fila.productsCents += l.totalCents

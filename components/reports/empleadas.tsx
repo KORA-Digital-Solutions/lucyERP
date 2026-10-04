@@ -32,6 +32,7 @@ const EMPLEADA_SORTERS = {
   servicios: byNumber<FilaDeEmpleadaConNombre>((f) => f.servicesCents),
   producto: byNumber<FilaDeEmpleadaConNombre>((f) => f.productsCents),
   total: byNumber<FilaDeEmpleadaConNombre>((f) => f.totalCents),
+  bonos: byNumber<FilaDeEmpleadaConNombre>((f) => f.sesionesDeBonoCents),
   tickets: byNumber<FilaDeEmpleadaConNombre>((f) => f.tickets),
   peso: byNumber<FilaDeEmpleadaConNombre>((f) => f.totalCents),
 }
@@ -150,6 +151,7 @@ function FacturacionPorEmpleada({
               <SortableTableHead sortKey="servicios" sort={sort} onToggle={toggleSort} className="text-right">Servicios</SortableTableHead>
               <SortableTableHead sortKey="producto" sort={sort} onToggle={toggleSort} className="text-right">Producto</SortableTableHead>
               <SortableTableHead sortKey="total" sort={sort} onToggle={toggleSort} className="text-right">Total</SortableTableHead>
+              <SortableTableHead sortKey="bonos" sort={sort} onToggle={toggleSort} className="text-right">Sesiones de bono</SortableTableHead>
               <SortableTableHead sortKey="tickets" sort={sort} onToggle={toggleSort} className="text-right">Tickets</SortableTableHead>
               <SortableTableHead sortKey="peso" sort={sort} onToggle={toggleSort} className="w-56">Peso sobre el total</SortableTableHead>
             </TableRow>
@@ -188,6 +190,11 @@ function FacturacionPorEmpleada({
                   <TableCell className="text-right tabular-nums text-muted-foreground">{fmtEur(w.servicesCents)}</TableCell>
                   <TableCell className="text-right tabular-nums text-muted-foreground">{fmtEur(w.productsCents)}</TableCell>
                   <TableCell className="text-right font-medium tabular-nums">{fmtEur(w.totalCents)}</TableCell>
+                  <TableCell className="text-right tabular-nums text-muted-foreground">
+                    {w.sesionesDeBono > 0
+                      ? <>{w.sesionesDeBono} · {fmtEur(w.sesionesDeBonoCents)}</>
+                      : "—"}
+                  </TableCell>
                   <TableCell className="text-right tabular-nums text-muted-foreground">{w.tickets}</TableCell>
                   <TableCell>
                     <div className="flex h-3 w-full overflow-hidden rounded-full bg-muted">
@@ -223,6 +230,14 @@ function FacturacionPorEmpleada({
           <p className="text-xs text-muted-foreground">
             Las tarjetas regalo no cuentan aquí: se facturan cuando se gastan, no cuando se
             venden. En este período se vendieron {fmtEur(saldoVendidoCents)} en tarjetas.
+          </p>
+        )}
+
+        {filas.some((f) => f.sesionesDeBono > 0) && (
+          <p className="text-xs text-muted-foreground">
+            «Sesiones de bono» es lo que cada una ha dado con bonos ya pagados, valorado a
+            lo que vale la sesión dentro del bono. Va aparte y no suma en el total: ese
+            dinero se contó el día que se vendió el bono.
           </p>
         )}
 

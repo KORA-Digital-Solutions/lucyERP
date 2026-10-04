@@ -28,7 +28,7 @@ import {
 } from "@/lib/enums"
 import { dayOfWeekFromDateStr } from "@/lib/schedule"
 import { DEFAULT_REMINDER_ALERT_DAYS, isReminderActive, isReminderOverdue } from "@/lib/reminders"
-import { activeVoucherStock } from "@/lib/vouchers"
+import { activeVoucherStock, saleTotals, voucherFinalPriceCents, voucherSessionPriceCents } from "@/lib/vouchers"
 
 export type ActionResult = {
   ok: boolean
@@ -659,6 +659,8 @@ export type WorkerReportLine = {
   notes: string | null
   customerName: string | null
   quantity: number
+  /** Precio de la línea antes del descuento. */
+  unitPriceCents: number
   discountPercent: number
   totalCents: number
   ticketStatus: string
@@ -670,6 +672,12 @@ export async function getWorkerReport(workerId: string): Promise<{
   servicesCents: number
   productsCents: number
   giftCardsCents: number
+  /**
+   * Lo que valieron las sesiones de bono que ha dado, a precio de bono. Va
+   * aparte y NO está en `totalCents`: el dinero ya entró cuando se vendió el
+   * bono, pero es trabajo suyo y se le cuenta aquí.
+   */
+  bonoSessionsCents: number
   totalCents: number
   ticketCount: number
 }> {
@@ -696,6 +704,7 @@ export async function getWorkerReport(workerId: string): Promise<{
       description: true,
       notes: true,
       quantity: true,
+      unitPriceCents: true,
       discountPercent: true,
       totalCents: true,
       workerId: true,
@@ -726,6 +735,7 @@ export async function getWorkerReport(workerId: string): Promise<{
         + `, ${l.sale.customer.firstName}`
       : null,
     quantity: l.quantity,
+    unitPriceCents: l.unitPriceCents,
     discountPercent: l.discountPercent,
     totalCents: l.totalCents,
     ticketStatus: l.sale.status,
@@ -742,6 +752,10 @@ export async function getWorkerReport(workerId: string): Promise<{
     servicesCents: sumBy("SERVICE"),
     productsCents: sumBy("PRODUCT"),
     giftCardsCents: sumBy("GIFT_CARD"),
+    // La sesión de bono entra con un 100 % de descuento: su total es 0 y lo que
+    // vale está en el precio de la línea.
+    bonoSessionsCents: lines.reduce(
+      (s, l) => (l.type === "VOUCHER_SESSION" ? s + l.unitPriceCents * l.quantity : s), 0),
     totalCents: lines.reduce((s, l) => s + l.totalCents, 0),
     ticketCount: new Set(rows.map((l) => l.saleId)).size,
   }
@@ -1115,8 +1129,23 @@ type PlantillaDeBono = {
   services: { serviceId: string; totalSessions: number; basePriceCents: number; discountPercent: number }[]
 }
 
-/** Lo que le queda a un bono, servicio por servicio. */
-type SaldoDeBono = { name: string; libresPorServicio: Map<string, number> }
+/**
+ * Lo que le queda a un bono, servicio por servicio, y a cuánto salió cada línea
+ * (precio final y sesiones) para poner precio a las sesiones que se gasten.
+ */
+type SaldoDeBono = {
+  name: string
+  libresPorServicio: Map<string, number>
+  tarifaPorServicio: Map<string, { finalPriceCents: number; totalSessions: number }>
+}
+
+/** El precio pactado de una línea del bono: base con su descuento ya aplicado. */
+function tarifaDeLinea(s: { basePriceCents: number; discountPercent: number; totalSessions: number }) {
+  return {
+    finalPriceCents: voucherFinalPriceCents(s.basePriceCents, s.discountPercent),
+    totalSessions: s.totalSessions,
+  }
+}
 
 /**
  * Comprueba los bonos de un ticket antes de tocar la base de datos, y de paso
@@ -1135,11 +1164,19 @@ async function prepararBonosDelTicket(
   lines: SaleLineInput[],
   customerId: string | null,
   clinicId: string,
-): Promise<{ error: string } | { plantillas: Map<string, PlantillaDeBono> }> {
+): Promise<
+  | { error: string }
+  | {
+      plantillas: Map<string, PlantillaDeBono>
+      /** Lo que vale cada sesión del ticket, según el bono del que sale. */
+      preciosDeSesion: Map<SaleLineInput, number>
+    }
+> {
   const lineasDeBono = lines.filter((l) => l.type === "VOUCHER")
   const lineasDeSesion = lines.filter((l) => l.type === "VOUCHER_SESSION")
   const plantillas = new Map<string, PlantillaDeBono>()
-  if (lineasDeBono.length === 0 && lineasDeSesion.length === 0) return { plantillas }
+  const preciosDeSesion = new Map<SaleLineInput, number>()
+  if (lineasDeBono.length === 0 && lineasDeSesion.length === 0) return { plantillas, preciosDeSesion }
 
   // Sin cliente no hay a quién apuntarle el bono, ni ficha donde consultarlo.
   if (!customerId) {
@@ -1166,7 +1203,7 @@ async function prepararBonosDelTicket(
     for (const t of filas) plantillas.set(t.id, t)
   }
 
-  if (lineasDeSesion.length === 0) return { plantillas }
+  if (lineasDeSesion.length === 0) return { plantillas, preciosDeSesion }
 
   // Bonos ya comprados de los que se gasta hoy.
   const saldos = new Map<string, SaldoDeBono>()
@@ -1176,7 +1213,9 @@ async function prepararBonosDelTicket(
       where: { id: { in: idsDeBono }, clinicId, customerId, status: "ACTIVE" },
       select: {
         id: true, name: true,
-        services: { select: { serviceId: true, totalSessions: true } },
+        services: {
+          select: { serviceId: true, totalSessions: true, basePriceCents: true, discountPercent: true },
+        },
         sessions: { select: { serviceId: true } },
       },
     })
@@ -1185,11 +1224,13 @@ async function prepararBonosDelTicket(
     }
     for (const b of filas) {
       const libresPorServicio = new Map<string, number>()
+      const tarifaPorServicio = new Map<string, { finalPriceCents: number; totalSessions: number }>()
       for (const s of b.services) {
         const gastadas = b.sessions.filter((x) => x.serviceId === s.serviceId).length
         libresPorServicio.set(s.serviceId, s.totalSessions - gastadas)
+        tarifaPorServicio.set(s.serviceId, tarifaDeLinea(s))
       }
-      saldos.set(b.id, { name: b.name, libresPorServicio })
+      saldos.set(b.id, { name: b.name, libresPorServicio, tarifaPorServicio })
     }
   }
 
@@ -1202,6 +1243,7 @@ async function prepararBonosDelTicket(
     saldosNuevos.set(l.newVoucherRef, {
       name: t.name,
       libresPorServicio: new Map(t.services.map((s) => [s.serviceId, s.totalSessions])),
+      tarifaPorServicio: new Map(t.services.map((s) => [s.serviceId, tarifaDeLinea(s)])),
     })
   }
 
@@ -1219,12 +1261,19 @@ async function prepararBonosDelTicket(
     if (libres <= 0) {
       return { error: `Al bono "${saldo.name}" no le quedan sesiones de "${l.description}".` }
     }
+    // Lo que vale esta sesión: la que toca de las del servicio, contando las
+    // que ya se gastaron y las que lleva este ticket más arriba.
+    const tarifa = saldo.tarifaPorServicio.get(l.serviceId)!
+    preciosDeSesion.set(
+      l,
+      voucherSessionPriceCents(tarifa.finalPriceCents, tarifa.totalSessions, tarifa.totalSessions - libres),
+    )
     // Se descuenta sobre la marcha para que dos sesiones del mismo servicio en
     // el mismo ticket no puedan colarse las dos por el último hueco.
     saldo.libresPorServicio.set(l.serviceId, libres - 1)
   }
 
-  return { plantillas }
+  return { plantillas, preciosDeSesion }
 }
 
 export async function createSale(
@@ -1261,15 +1310,23 @@ export async function createSale(
       return { ok: false, error: `Asigna un profesional a "${sinProfesional.description}".` }
     }
 
-    // Una sesión de bono ya se pagó el día que se compró el bono. Entra en el
-    // ticket a 0 EUR para que quede constancia de quién la dio, y el importe se
-    // fuerza aquí en vez de fiarlo a lo que mande la pantalla.
+    // Una sesión de bono ya se pagó el día que se compró el bono, así que no
+    // cobra nada: se fuerza aquí a 0 EUR en vez de fiarlo a lo que mande la
+    // pantalla. Su precio se pone justo debajo, cuando se sabe de qué bono sale.
     lines = lines.map((l) => l.type === "VOUCHER_SESSION"
-      ? { ...l, quantity: 1, unitPriceCents: 0, discountPercent: 0, totalCents: 0 }
+      ? { ...l, quantity: 1, totalCents: 0 }
       : l)
 
     const bonos = await prepararBonosDelTicket(lines, customerId, clinicId)
     if ("error" in bonos) return { ok: false, error: bonos.error }
+
+    // La línea de la sesión lleva lo que valió dentro del bono (D2) y un 100 %
+    // de descuento: la sesión queda valorada para los informes —lo que se
+    // atribuye a quien la dio— sin que el ticket cobre nada más. El precio sale
+    // del bono guardado, no de la pantalla.
+    lines = lines.map((l) => l.type === "VOUCHER_SESSION"
+      ? { ...l, unitPriceCents: bonos.preciosDeSesion.get(l) ?? 0, discountPercent: 100 }
+      : l)
 
     // Una cita se cobra una sola vez. El índice único de SaleLine.appointmentId
     // ya lo impide pase lo que pase, pero su error no le dice nada a nadie:
@@ -1285,9 +1342,7 @@ export async function createSale(
       }
     }
 
-    const subtotalCents = lines.reduce((s, l) => s + l.unitPriceCents * l.quantity, 0)
-    const discountCents = lines.reduce((s, l) => s + Math.round(l.unitPriceCents * l.quantity * l.discountPercent / 100), 0)
-    const totalCents = lines.reduce((s, l) => s + l.totalCents, 0)
+    const { subtotalCents, discountCents, totalCents } = saleTotals(lines)
 
     const sale = await prisma.$transaction(async (tx) => {
       // Saldo a favor disponible (solo positivo) del cliente comprador
@@ -1723,6 +1778,8 @@ export async function getClientProfile(customerId: string) {
 }
 
 export type ConsumptionLine = {
+  /** SERVICE, PRODUCT, GIFT_CARD, VOUCHER o VOUCHER_SESSION. */
+  type: string
   family: string
   description: string
   quantity: number
@@ -1782,6 +1839,7 @@ export async function getCustomerConsumption(customerId: string): Promise<{
     status: s.status,
     totalCents: s.totalCents,
     lines: s.lines.map((l) => ({
+      type: l.type,
       family:
         l.type === "PRODUCT" ? HOME_CARE_FAMILY :
         l.type === "GIFT_CARD" ? GIFT_CARD_FAMILY :

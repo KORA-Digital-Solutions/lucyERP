@@ -365,10 +365,6 @@ export async function saveService(id: string | null, fd: FormData): Promise<Acti
       description: optStr(fd, "description"),
       durationMinutes: int(fd, "durationMinutes", 60),
       priceCents: Math.round(Number(str(fd, "price") || "0") * 100),
-      // La tarifa por minuto se retiró: todo servicio es de precio fijo. Las
-      // columnas siguen en el esquema, pero ya no se rellenan.
-      pricingType: "FIXED",
-      pricePerMinuteCents: null,
       active: bool(fd, "active"),
     }
     if (id) {

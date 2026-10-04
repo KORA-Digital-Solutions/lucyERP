@@ -171,9 +171,6 @@ model ServiceFamily {
   @@index([clinicId])
 }
 
-// pricingType y pricePerMinuteCents están en desuso: la tarifa por minuto se
-// retiró y todo servicio es de precio fijo ("FIXED"). Se conservan las columnas
-// para no rehacer la tabla.
 model Service {
   id                  String   @id @default(cuid())
   clinicId            String
@@ -184,8 +181,6 @@ model Service {
   description         String?
   durationMinutes     Int
   priceCents          Int
-  pricingType         String   @default("FIXED")
-  pricePerMinuteCents Int?
   active              Boolean  @default(true)
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt

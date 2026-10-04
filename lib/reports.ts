@@ -848,6 +848,52 @@ export function nuevasVsRecurrentes(
   }
 }
 
+/** «Sin especificar»: la ficha no tiene apuntado cómo nos conoció. */
+export const SIN_ORIGEN = "NONE"
+
+export type FilaDeOrigen = {
+  /** Una clave de REFERRAL_SOURCE o SIN_ORIGEN. */
+  origen: string
+  clientes: number
+  tickets: number
+  totalCents: number
+}
+
+/**
+ * De dónde vienen las clientas nuevas: las mismas del tramo «nuevos» de
+ * nuevasVsRecurrentes, repartidas por «cómo nos ha conocido». Las fichas sin
+ * ese dato van aparte, como «sin especificar», para que se vea cuánto se está
+ * dejando de apuntar. Solo salen los orígenes que tienen alguna clienta.
+ */
+export function captacionPorOrigen(
+  filas: FilaDeCliente[],
+  primeraCompraDe: Map<string, Date>,
+  desde: Date,
+  origenDe: Map<string, string | null>,
+): FilaDeOrigen[] {
+  const porOrigen = new Map<string, FilaDeOrigen>()
+
+  for (const f of filas) {
+    const primera = primeraCompraDe.get(f.customerId) ?? f.primeraCompra
+    if (primera < desde) continue
+    const origen = origenDe.get(f.customerId) || SIN_ORIGEN
+    const acc = porOrigen.get(origen) ?? { origen, clientes: 0, tickets: 0, totalCents: 0 }
+    acc.clientes++
+    acc.tickets += f.tickets
+    acc.totalCents += f.totalCents
+    porOrigen.set(origen, acc)
+  }
+
+  return [...porOrigen.values()].sort(
+    (a, b) => b.clientes - a.clientes || b.totalCents - a.totalCents,
+  )
+}
+
+/** Si una ficha entra en el filtro de origen (SIN_ORIGEN es «sin apuntar»). */
+export function coincideOrigen(origen: string | null | undefined, filtro: string): boolean {
+  return filtro === SIN_ORIGEN ? !origen : origen === filtro
+}
+
 export type ClienteDeCartera = {
   id: string
   nombre: string

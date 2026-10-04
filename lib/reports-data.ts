@@ -22,7 +22,8 @@ import {
 } from "@/lib/reports"
 
 /** Lo que llega por la URL en cualquier informe. */
-export type ParamsDeInforme = Promise<{ periodo?: string; desde?: string; hasta?: string }>
+// `origen` solo lo lee el informe de clientes (cómo nos ha conocido).
+export type ParamsDeInforme = Promise<{ periodo?: string; desde?: string; hasta?: string; origen?: string }>
 
 /** El período tal cual lo pinta la pantalla: fechas como texto ISO. */
 export type PeriodoEnPantalla = {
@@ -125,6 +126,7 @@ export async function fichasDeCliente(clinicId: string) {
     select: {
       id: true, firstName: true, lastName: true, lastName2: true,
       phone: true, active: true, createdAt: true, balanceCents: true,
+      referralSource: true,
     },
   })
   const nombreDe = new Map(fichas.map((c) => [c.id, customerLabel(c)]))

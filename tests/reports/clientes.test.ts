@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import {
-  clientesInactivos, deudaPendiente, nuevasVsRecurrentes, porCliente, tarjetasRegalo,
+  captacionPorOrigen, clientesInactivos, coincideOrigen, deudaPendiente, nuevasVsRecurrentes, porCliente, tarjetasRegalo,
   type ClienteDeCartera, type LineaDeInforme,
 } from "@/lib/reports"
 
@@ -213,5 +213,48 @@ describe("tarjetasRegalo", () => {
       saldoVivoCents: 17000,
       clientesConSaldo: 1,
     })
+  })
+})
+
+describe("captacionPorOrigen", () => {
+  const desde = dia(1)
+  const filas = porCliente([
+    linea({ type: "SERVICE", totalCents: 6000, customerId: "ana", saleId: "v1", fecha: dia(3) }),
+    linea({ type: "SERVICE", totalCents: 4000, customerId: "eva", saleId: "v2", fecha: dia(4) }),
+    linea({ type: "SERVICE", totalCents: 2500, customerId: "lia", saleId: "v3", fecha: dia(5) }),
+    linea({ type: "SERVICE", totalCents: 9000, customerId: "ines", saleId: "v4", fecha: dia(6) }),
+  ]).filas
+  const primeras = new Map([
+    ["ana", dia(3)], ["eva", dia(4)], ["lia", dia(5)],
+    ["ines", new Date(2024, 0, 9)], // ya venía de antes: no es nueva
+  ])
+  const origenes = new Map<string, string | null>([
+    ["ana", "SOCIAL_MEDIA"], ["eva", "SOCIAL_MEDIA"], ["lia", null], ["ines", "INTERNET"],
+  ])
+
+  it("reparte solo a las nuevas por origen y deja aparte las fichas sin dato", () => {
+    const r = captacionPorOrigen(filas, primeras, desde, origenes)
+    expect(r).toEqual([
+      { origen: "SOCIAL_MEDIA", clientes: 2, tickets: 2, totalCents: 10000 },
+      { origen: "NONE", clientes: 1, tickets: 1, totalCents: 2500 },
+    ])
+  })
+
+  it("no saca orígenes sin ninguna clienta nueva", () => {
+    const r = captacionPorOrigen(filas, primeras, desde, origenes)
+    expect(r.some((f) => f.origen === "INTERNET")).toBe(false)
+  })
+})
+
+describe("coincideOrigen", () => {
+  it("compara con el origen de la ficha", () => {
+    expect(coincideOrigen("INTERNET", "INTERNET")).toBe(true)
+    expect(coincideOrigen("INTERNET", "SOCIAL_MEDIA")).toBe(false)
+  })
+  it("«sin especificar» es la ficha sin dato, vacía o ausente", () => {
+    expect(coincideOrigen(null, "NONE")).toBe(true)
+    expect(coincideOrigen(undefined, "NONE")).toBe(true)
+    expect(coincideOrigen("", "NONE")).toBe(true)
+    expect(coincideOrigen("OTHER", "NONE")).toBe(false)
   })
 })

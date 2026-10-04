@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import { Plus, Pencil, Trash2, ToggleRight, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { cn } from "@/lib/utils"
 import { Card } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -91,6 +92,9 @@ export function VouchersClient({
   const [nameTouched, setNameTouched] = useState(false)
   const [activo, setActivo] = useState(true)
   const [buscadorAbierto, setBuscadorAbierto] = useState(false)
+  // La familia con la que se acota la lista de servicios; vacía, todas. Se
+  // conserva entre servicio y servicio: un bono de láser añade varios seguidos.
+  const [familiaElegida, setFamiliaElegida] = useState("")
 
   const servicioPorId = useMemo(
     () => new Map(services.map((s) => [s.id, s])),
@@ -103,6 +107,7 @@ export function VouchersClient({
     setName("")
     setNameTouched(false)
     setActivo(true)
+    setFamiliaElegida("")
     setOpen(true)
   }
 
@@ -119,6 +124,7 @@ export function VouchersClient({
     setName(r.name)
     setNameTouched(true)
     setActivo(r.active)
+    setFamiliaElegida("")
     setOpen(true)
   }
 
@@ -375,11 +381,31 @@ export function VouchersClient({
                     </Button>
                   </PopoverTrigger>
                   <PopoverContent className="w-[22rem] p-0" align="end">
+                    {/* La familia va antes que el buscador: con el catálogo
+                        entero dado de alta, elegirla acorta la lista a lo que
+                        se está buscando sin tener que escribir nada. */}
+                    <div className="flex flex-wrap gap-1 border-b p-2">
+                      {[["", "Todas"], ...porFamilia.map(([f]) => [f, f])].map(([valor, etiqueta]) => (
+                        <button
+                          key={valor || "todas"}
+                          type="button"
+                          onClick={() => setFamiliaElegida(valor)}
+                          className={cn(
+                            "rounded-md px-2 py-1 text-xs font-medium transition-colors",
+                            familiaElegida === valor
+                              ? "bg-primary text-primary-foreground"
+                              : "bg-muted text-muted-foreground hover:bg-muted/70",
+                          )}
+                        >
+                          {etiqueta}
+                        </button>
+                      ))}
+                    </div>
                     <Command>
-                      <CommandInput placeholder="Buscar por servicio o familia…" />
+                      <CommandInput placeholder={familiaElegida ? `Buscar en ${familiaElegida}…` : "Buscar por servicio o familia…"} />
                       <CommandList>
                         <CommandEmpty>Nada con ese nombre.</CommandEmpty>
-                        {porFamilia.map(([familia, lista]) => {
+                        {porFamilia.filter(([familia]) => !familiaElegida || familia === familiaElegida).map(([familia, lista]) => {
                           // Lo que ya está en el bono no se vuelve a ofrecer.
                           const libres = lista.filter((x) => !lineas.some((l) => l.serviceId === x.id))
                           if (libres.length === 0) return null

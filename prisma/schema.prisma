@@ -90,7 +90,8 @@ model User {
   sales                Sale[]
   balanceMovements     CustomerBalanceMovement[]
   cashRegistersClosedBy CashRegister[]
-  weeklySlots          WorkerWeeklySlot[]
+  cashRegisterEdits    CashRegisterEdit[]
+  weeklySlots         WorkerWeeklySlot[]
   scheduleOverrides    WorkerScheduleOverride[]
   leaveBalances        WorkerLeaveBalance[]
   leaves               WorkerLeave[]
@@ -386,8 +387,33 @@ model CashRegister {
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
 
+  edits               CashRegisterEdit[]
+
   @@unique([clinicId, date])
   @@index([clinicId, date])
+}
+
+// Corrección de un cierre de caja ya hecho. Solo se puede corregir el día del
+// cierre y la caja no se reabre: se rehacen los importes declarados y esta fila
+// guarda cómo estaban antes y cómo han quedado, y quién lo hizo.
+model CashRegisterEdit {
+  id                    String       @id @default(cuid())
+  cashRegisterId        String
+  cashRegister          CashRegister @relation(fields: [cashRegisterId], references: [id], onDelete: Cascade)
+  editedByUserId        String
+  editedBy              User         @relation(fields: [editedByUserId], references: [id])
+  createdAt             DateTime     @default(now())
+
+  declaredBeforeCents   Int
+  declaredAfterCents    Int
+  keptBeforeCents       Int
+  keptAfterCents        Int
+  differenceBeforeCents Int
+  differenceAfterCents  Int
+  notesBefore           String?
+  notesAfter            String?
+
+  @@index([cashRegisterId])
 }
 
 // direction: OUTBOUND | INBOUND

@@ -1638,7 +1638,14 @@ export async function closeCashRegister(
     // El cierre lleva nombre: quien cuadra la caja responde del descuadre.
     const operator = await requireOperator()
 
-    const reg = await prisma.cashRegister.findUniqueOrThrow({ where: { id: registerId } })
+    const clinicId = await getActiveClinicId()
+    const importes = comprobarImportesDeCierre(closingDeclaredCents, closingKeptCents)
+    if (importes) return { ok: false, error: importes }
+
+    const reg = await prisma.cashRegister.findFirstOrThrow({ where: { id: registerId, clinicId } })
+    // Cerrar una caja ya cerrada pisaría los importes sin dejar rastro: para
+    // eso está editCashRegisterClosing, que sí apunta el antes y el después.
+    if (reg.status !== "OPEN") return { ok: false, error: "Esta caja ya está cerrada." }
     const expectedCash = reg.openingCashCents + reg.totalCashCents
     const differenceCents = closingDeclaredCents - expectedCash
 
@@ -1655,6 +1662,85 @@ export async function closeCashRegister(
       },
     })
     revalidatePath("/cash-register")
+    revalidatePath("/cash-registers")
+    revalidatePath("/dashboard")
+    return { ok: true }
+  } catch (e) {
+    return fallo(e)
+  }
+}
+
+function comprobarImportesDeCierre(declaredCents: number, keptCents: number): string | null {
+  for (const c of [declaredCents, keptCents]) {
+    if (!Number.isInteger(c) || c < 0) return "Los importes del cierre no pueden ser negativos."
+  }
+  return null
+}
+
+/**
+ * Corregir los importes de un cierre de caja, solo el mismo día.
+ *
+ * No reabre la caja: las ventas no vuelven a sumar. Lo que se rehace es lo que
+ * se contó y lo que se dejó, y la diferencia se recalcula aquí con la misma
+ * cuenta que al cerrar. Cualquier PIN vale, pero cada corrección guarda quién
+ * fue y cómo estaba antes (CashRegisterEdit): quien corrige un cuadre responde
+ * de él igual que quien lo hizo.
+ *
+ * Pasado el día no se toca: un cierre de ayer ya lo ha visto quien lleva las
+ * cuentas, y cambiarlo después sería reescribir un mes ya revisado.
+ */
+export async function editCashRegisterClosing(
+  registerId: string,
+  closingDeclaredCents: number,
+  closingKeptCents: number,
+  denominationNotes: string | null,
+): Promise<ActionResult> {
+  try {
+    const operator = await requireOperator()
+    const clinicId = await getActiveClinicId()
+    const importes = comprobarImportesDeCierre(closingDeclaredCents, closingKeptCents)
+    if (importes) return { ok: false, error: importes }
+    const notas = denominationNotes?.trim() || null
+
+    await prisma.$transaction(async (tx) => {
+      const reg = await tx.cashRegister.findFirstOrThrow({ where: { id: registerId, clinicId } })
+      if (reg.status !== "CLOSED") throw new Error("Solo se puede corregir una caja ya cerrada.")
+      if (reg.date !== hoy()) throw new Error("Un cierre solo se puede corregir el mismo día.")
+
+      const differenceCents = closingDeclaredCents - (reg.openingCashCents + reg.totalCashCents)
+      const sinCambios =
+        reg.closingDeclaredCents === closingDeclaredCents &&
+        reg.closingKeptCents === closingKeptCents &&
+        (reg.denominationNotes ?? null) === notas
+      if (sinCambios) throw new Error("No has cambiado ningún importe.")
+
+      await tx.cashRegisterEdit.create({
+        data: {
+          cashRegisterId: reg.id,
+          editedByUserId: operator.userId,
+          declaredBeforeCents: reg.closingDeclaredCents ?? 0,
+          declaredAfterCents: closingDeclaredCents,
+          keptBeforeCents: reg.closingKeptCents ?? 0,
+          keptAfterCents: closingKeptCents,
+          differenceBeforeCents: reg.differenceCents ?? 0,
+          differenceAfterCents: differenceCents,
+          notesBefore: reg.denominationNotes,
+          notesAfter: notas,
+        },
+      })
+      await tx.cashRegister.update({
+        where: { id: reg.id },
+        data: {
+          closingDeclaredCents,
+          closingKeptCents,
+          differenceCents,
+          denominationNotes: notas,
+        },
+      })
+    })
+
+    revalidatePath("/cash-register")
+    revalidatePath("/cash-registers")
     revalidatePath("/dashboard")
     return { ok: true }
   } catch (e) {

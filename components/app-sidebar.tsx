@@ -73,6 +73,7 @@ const GRUPOS_GESTION: { titulo: string; items: NavItem[] }[] = [
     items: [
       { icon: BarChart3,     label: "Informes",        href: "/reports" },
       { icon: ClipboardList, label: "Historial citas", href: "/appointments" },
+      { icon: Wallet,        label: "Cajas",           href: "/cash-registers" },
     ],
   },
   {

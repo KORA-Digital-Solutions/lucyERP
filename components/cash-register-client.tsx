@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { Wallet, Lock, Unlock, AlertTriangle } from "lucide-react"
+import { Wallet, Lock, Unlock, AlertTriangle, Pencil } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -12,7 +12,7 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog"
-import { openCashRegister, closeCashRegister, forgetOperator } from "@/lib/actions"
+import { openCashRegister, closeCashRegister, editCashRegisterClosing, forgetOperator } from "@/lib/actions"
 import { PinDialog } from "@/components/pin-dialog"
 
 type CashRegister = {
@@ -34,7 +34,8 @@ interface Props {
   /** Hay PINes repartidos, así que cerrar caja exige identificarse. */
   pinRequired: boolean
   todayRegister: CashRegister | null
-  history: CashRegister[]
+  /** La última corrección del cierre de hoy, si la hubo. */
+  lastEdit: { byName: string; at: string; count: number } | null
   suggestedOpeningCents: number
   today: string
 }
@@ -43,9 +44,11 @@ function fmt(cents: number) {
   return (cents / 100).toFixed(2) + " €"
 }
 
-export function CashRegisterClient({ todayRegister, history, suggestedOpeningCents, today, pinRequired }: Props) {
+export function CashRegisterClient({ todayRegister, lastEdit, suggestedOpeningCents, today, pinRequired }: Props) {
   const [showOpen, setShowOpen] = useState(false)
   const [showClose, setShowClose] = useState(false)
+  // El mismo diálogo sirve para cerrar y para corregir un cierre ya hecho.
+  const [editing, setEditing] = useState(false)
   const [openingInput, setOpeningInput] = useState((suggestedOpeningCents / 100).toFixed(2))
   const [declaredInput, setDeclaredInput] = useState("")
   const [keptInput, setKeptInput] = useState("")
@@ -69,6 +72,18 @@ export function CashRegisterClient({ todayRegister, history, suggestedOpeningCen
     else setError(res.error ?? "Error")
   }
 
+  function abrirCierre() {
+    setEditing(false); setError(""); setShowClose(true)
+  }
+
+  function abrirCorreccion() {
+    if (!todayRegister) return
+    setDeclaredInput(((todayRegister.closingDeclaredCents ?? 0) / 100).toFixed(2))
+    setKeptInput(((todayRegister.closingKeptCents ?? 0) / 100).toFixed(2))
+    setDenomInput(todayRegister.denominationNotes ?? "")
+    setEditing(true); setError(""); setShowClose(true)
+  }
+
   async function handleClose() {
     if (!todayRegister) return
     if (pinRequired) { setError(""); setPinOpen(true); return }
@@ -80,7 +95,8 @@ export function CashRegisterClient({ todayRegister, history, suggestedOpeningCen
     setLoading(true); setError("")
     const declared = Math.round(Number(declaredInput) * 100)
     const kept = Math.round(Number(keptInput) * 100)
-    const res = await closeCashRegister(todayRegister.id, declared, kept, denomInput || null)
+    const guardar = editing ? editCashRegisterClosing : closeCashRegister
+    const res = await guardar(todayRegister.id, declared, kept, denomInput || null)
     // La identificación muere con el cierre, igual que con cada venta.
     if (pinRequired) await forgetOperator()
     setLoading(false)
@@ -111,7 +127,7 @@ export function CashRegisterClient({ todayRegister, history, suggestedOpeningCen
           </Button>
         )}
         {todayRegister?.status === "OPEN" && (
-          <Button variant="outline" onClick={() => setShowClose(true)}>
+          <Button variant="outline" onClick={abrirCierre}>
             <Lock className="mr-2 h-4 w-4" /> Cerrar caja
           </Button>
         )}
@@ -125,10 +141,14 @@ export function CashRegisterClient({ todayRegister, history, suggestedOpeningCen
       <div className="p-8 space-y-6">
         {/* TODAY SUMMARY */}
         {todayRegister ? (
-          <div className="grid gap-4 md:grid-cols-4">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
             <Card className="border-primary/30 bg-primary/5">
               <CardHeader className="pb-1"><CardTitle className="text-sm font-medium text-muted-foreground">Total del día</CardTitle></CardHeader>
               <CardContent><p className="text-2xl font-bold text-primary">{fmt(todayTotal)}</p></CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="pb-1"><CardTitle className="text-sm font-medium text-muted-foreground">Efectivo al abrir</CardTitle></CardHeader>
+              <CardContent><p className="text-2xl font-semibold">{fmt(todayRegister.openingCashCents)}</p></CardContent>
             </Card>
             <Card>
               <CardHeader className="pb-1"><CardTitle className="text-sm font-medium text-muted-foreground">Pagos en efectivo</CardTitle></CardHeader>
@@ -170,53 +190,19 @@ export function CashRegisterClient({ todayRegister, history, suggestedOpeningCen
                 <p className="text-muted-foreground">Guardado en caja</p>
                 <p className="font-semibold text-lg">{fmt(todayRegister.closingKeptCents!)}</p>
               </div>
+              <div className="col-span-3 flex flex-wrap items-center justify-between gap-2 border-t pt-3">
+                <p className="text-xs text-muted-foreground">
+                  {lastEdit
+                    ? `Corregido por ${lastEdit.byName} a las ${new Date(lastEdit.at).toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" })}${lastEdit.count > 1 ? ` (${lastEdit.count} correcciones)` : ""}.`
+                    : "¿Te has equivocado al contar? Se puede corregir hoy."}
+                </p>
+                <Button variant="outline" size="sm" onClick={abrirCorreccion}>
+                  <Pencil className="mr-2 h-3.5 w-3.5" /> Corregir cierre
+                </Button>
+              </div>
             </CardContent>
           </Card>
         )}
-
-        {/* HISTORY */}
-        <div>
-          <h2 className="text-base font-semibold mb-3">Historial</h2>
-          <Card>
-            <CardContent className="p-0">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b text-muted-foreground">
-                    <th className="px-4 py-3 text-left font-medium">Fecha</th>
-                    <th className="px-4 py-3 text-right font-medium">Apertura</th>
-                    <th className="px-4 py-3 text-right font-medium">Efectivo</th>
-                    <th className="px-4 py-3 text-right font-medium">Tarjeta</th>
-                    <th className="px-4 py-3 text-right font-medium">Efectivo en caja al cierre</th>
-                    <th className="px-4 py-3 text-right font-medium">Diferencia de efectivo al cierre</th>
-                    <th className="px-4 py-3 text-left font-medium">Estado</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {history.length === 0 && (
-                    <tr><td colSpan={7} className="py-8 text-center text-muted-foreground">Sin historial.</td></tr>
-                  )}
-                  {history.map((r) => (
-                    <tr key={r.id} className="border-b last:border-0 hover:bg-muted/30 transition-colors">
-                      <td className="px-4 py-3">{new Date(r.date + "T12:00:00").toLocaleDateString("es-ES", { day: "2-digit", month: "short", year: "numeric" })}</td>
-                      <td className="px-4 py-3 text-right">{fmt(r.openingCashCents)}</td>
-                      <td className="px-4 py-3 text-right">{fmt(r.totalCashCents)}</td>
-                      <td className="px-4 py-3 text-right">{fmt(r.totalCardCents)}</td>
-                      <td className="px-4 py-3 text-right">{r.closingDeclaredCents !== null ? fmt(r.closingDeclaredCents) : "—"}</td>
-                      <td className={`px-4 py-3 text-right ${r.differenceCents && Math.abs(r.differenceCents) > 0 ? "text-orange-700 font-medium" : "text-green-700"}`}>
-                        {r.differenceCents !== null ? `${r.differenceCents > 0 ? "+" : ""}${fmt(r.differenceCents)}` : "—"}
-                      </td>
-                      <td className="px-4 py-3">
-                        <span className={`rounded-full border px-2 py-0.5 text-xs ${r.status === "CLOSED" ? "bg-gray-100 text-gray-600 border-gray-200" : "bg-green-100 text-green-700 border-green-200"}`}>
-                          {r.status === "CLOSED" ? "Cerrada" : "Abierta"}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </CardContent>
-          </Card>
-        </div>
 
         {/* OPEN DIALOG */}
         <Dialog open={showOpen} onOpenChange={setShowOpen}>
@@ -251,7 +237,7 @@ export function CashRegisterClient({ todayRegister, history, suggestedOpeningCen
         <Dialog open={showClose} onOpenChange={setShowClose}>
           <DialogContent style={{ maxWidth: "34rem" }} aria-describedby={undefined}>
             <DialogHeader>
-              <DialogTitle>Cerrar caja</DialogTitle>
+              <DialogTitle>{editing ? "Corregir el cierre de caja" : "Cerrar caja"}</DialogTitle>
             </DialogHeader>
             <div className="space-y-4 text-sm">
               <div className="rounded-lg bg-muted/40 border p-3 grid grid-cols-2 gap-2 text-xs">
@@ -317,7 +303,7 @@ export function CashRegisterClient({ todayRegister, history, suggestedOpeningCen
             <DialogFooter>
               <Button variant="outline" onClick={() => setShowClose(false)}>Cancelar</Button>
               <Button onClick={handleClose} disabled={loading || !declaredInput || !keptInput}>
-                {loading ? "Cerrando…" : "Cerrar caja"}
+                {editing ? (loading ? "Guardando…" : "Guardar corrección") : (loading ? "Cerrando…" : "Cerrar caja")}
               </Button>
             </DialogFooter>
           </DialogContent>
@@ -326,8 +312,8 @@ export function CashRegisterClient({ todayRegister, history, suggestedOpeningCen
         <PinDialog
           open={pinOpen}
           onOpenChange={setPinOpen}
-          title="¿Quién cierra la caja?"
-          description="Teclea tu PIN. El cierre quedará a tu nombre."
+          title={editing ? "¿Quién corrige el cierre?" : "¿Quién cierra la caja?"}
+          description={editing ? "Teclea tu PIN. La corrección quedará a tu nombre." : "Teclea tu PIN. El cierre quedará a tu nombre."}
           onIdentified={() => { setPinOpen(false); void cerrar() }}
         />
       </div>

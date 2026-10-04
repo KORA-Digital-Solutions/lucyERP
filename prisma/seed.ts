@@ -56,6 +56,15 @@ async function main() {
   // Ventas y caja van primero: las FK a Clinic/User/Customer son obligatorias y
   // sin `onDelete`, o sea Restrict, así que sembrar sobre una base con ventas
   // reventaba en `customer.deleteMany()` con media base ya borrada.
+  // Los bonos, antes que las líneas de venta y que los servicios: sus sesiones y
+  // sus bonos vendidos apuntan a las dos, sin `onDelete`. Esta siembra no crea
+  // bonos, pero la base de producción sí los trae (seed-produccion.ts) y sembrar
+  // la demo encima reventaba en `service.deleteMany()` con media base ya borrada.
+  await prisma.voucherSession.deleteMany()
+  await prisma.customerVoucherService.deleteMany()
+  await prisma.customerVoucher.deleteMany()
+  await prisma.voucherTemplateService.deleteMany()
+  await prisma.voucherTemplate.deleteMany()
   await prisma.customerBalanceMovement.deleteMany()
   await prisma.saleLine.deleteMany()
   await prisma.sale.deleteMany()

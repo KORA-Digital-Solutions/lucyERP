@@ -140,7 +140,7 @@ La aplicación tiene **dos puertas** y se entra distinto por cada una:
 | Puerta | Para qué | Cómo se entra |
 |---|---|---|
 | **Mostrador** | El día a día: agenda, clientes, TPV, caja, stock | Tecleando un **PIN de 6 dígitos** |
-| **Gestión del centro** | Usuarios, catálogo, horarios, configuración e informes | **Usuario y contraseña** |
+| **Gestión del centro** | Personal, catálogo, horarios, configuración e informes | **Usuario y contraseña** |
 
 La base de datos viene con **una sola usuaria**, Lucía Martínez
 (administradora), y con estas credenciales **de un solo uso**:
@@ -173,7 +173,7 @@ Todo esto se hace desde la aplicación, entrando por **gestión del centro**:
 
 1. **Configuración** — nombre del centro, eslogan, CIF, dirección, teléfono y
    correo. Es lo que se ve en la pantalla de inicio.
-2. **Usuarios** — dar de alta a las empleadas. Al crear cada una, la aplicación
+2. **Personal del centro** — dar de alta a las empleadas. Al crear cada una, la aplicación
    genera su PIN: apúntalo y dáselo, que ella se pondrá el suyo al entrar.
 3. **Horarios** — horario semanal del centro (viene puesto de lunes a viernes,
    de 9:00 a 20:00) y el de cada empleada.

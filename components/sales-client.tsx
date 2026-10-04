@@ -33,7 +33,7 @@ import { PinDialog } from "@/components/pin-dialog"
 import { QuickCustomerDialog } from "@/components/quick-customer-dialog"
 import { ClientProfileDialog } from "@/components/client-profile-dialog"
 import { QuickReminderDialog } from "@/components/quick-reminder-dialog"
-import { customerLabel, capitalizeFirst } from "@/lib/format"
+import { customerLabel, capitalizeFirst, matchesProductSearch } from "@/lib/format"
 import { GIFT_CARD_FAMILY, HOME_CARE_FAMILY, VOUCHER_FAMILY } from "@/lib/enums"
 import {
   reminderCompleteLabel, reminderCompletedMessage, REMINDER_ACCENT, REMINDER_TONE,
@@ -55,7 +55,8 @@ type Service  = {
   pricePerMinuteCents: number | null; durationMinutes: number
   familyId: string; familyName: string; familySortOrder: number
 }
-type Product  = { id: string; name: string; priceCents: number; stock: number }
+// name es el código del producto (XA27_140) y description su nombre completo.
+type Product  = { id: string; name: string; description: string | null; priceCents: number; stock: number }
 type SaleLine = {
   id: string; type: string; description: string; quantity: number
   unitPriceCents: number; discountPercent: number; totalCents: number
@@ -2154,7 +2155,7 @@ function AddLinePanel({ services, products, workers, currentUserId, customers, g
         || normalize(t.name).includes(q)
         || t.services.some((x) => normalize(x.name).includes(q)))
     }
-    return products.filter((p) => !q || normalize(p.name).includes(q))
+    return products.filter((p) => matchesProductSearch(p, query))
   }, [tab, query, services, products, voucherTemplates, familyId])
 
   // Sin familia elegida y sin teclear, el desplegable enseña las familias: es
@@ -2404,7 +2405,9 @@ function AddLinePanel({ services, products, workers, currentUserId, customers, g
                           })
                         } else {
                           onAdd({
-                            key: 0, type: "PRODUCT", itemId: p.id, description: p.name,
+                            // El ticket lleva el nombre completo, que es lo que lee la clienta;
+                            // el código queda en el producto, para stock e informes.
+                            key: 0, type: "PRODUCT", itemId: p.id, description: p.description || p.name,
                             workerId: defaultWorkerId, quantity: 1, unitPriceCents: p.priceCents, discountPercent: 0,
                             durationMinutes: null, notes: null, appointmentId: null,
                             voucherId: null, voucherRef: null,
@@ -2419,6 +2422,11 @@ function AddLinePanel({ services, products, workers, currentUserId, customers, g
                             se sabe de dónde ha salido. */}
                         {isService && !activeFamily && (
                           <span className="block text-xs text-muted-foreground">{s.familyName}</span>
+                        )}
+                        {/* En producto el nombre es el código: la descripción
+                            dice qué es y es lo que acaba en el ticket. */}
+                        {!isService && p.description && (
+                          <span className="block truncate text-xs text-muted-foreground">{p.description}</span>
                         )}
                       </span>
                       <span className="text-muted-foreground tabular-nums ml-3 shrink-0">

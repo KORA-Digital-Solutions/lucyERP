@@ -49,6 +49,8 @@ const CLIENT_SORTERS = {
   telefono: byText<ClientRow>((r) => r.phone),
   nacimiento: byDate<ClientRow>((r) => r.birthDate),
   whatsapp: byBoolean<ClientRow>((r) => r.whatsappOptIn),
+  // createdAt viaja como ISO, que ordena bien como cadena.
+  alta: byDate<ClientRow>((r) => r.createdAt),
   // lastAppointment es un texto ya localizado ("12 ago 2026"), que como cadena
   // ordenaría por nombre de mes. Se usa daysSinceLastAppt, que sí es numérico:
   // más días = cita más antigua, así que asc deja las más antiguas primero.
@@ -421,6 +423,7 @@ export function ClientsClient({
                   <SortableTableHead sortKey="telefono" sort={sort} onToggle={toggleSort}>Teléfono</SortableTableHead>
                   <SortableTableHead sortKey="nacimiento" sort={sort} onToggle={toggleSort}>Nacimiento</SortableTableHead>
                   <SortableTableHead sortKey="whatsapp" sort={sort} onToggle={toggleSort}>WhatsApp</SortableTableHead>
+                  <SortableTableHead sortKey="alta" sort={sort} onToggle={toggleSort}>Alta</SortableTableHead>
                   <SortableTableHead sortKey="ultimaCita" sort={sort} onToggle={toggleSort}>Última cita</SortableTableHead>
                   <SortableTableHead sortKey="bonos" sort={sort} onToggle={toggleSort}>Bonos</SortableTableHead>
                   <SortableTableHead sortKey="saldo" sort={sort} onToggle={toggleSort}>Saldo</SortableTableHead>
@@ -466,6 +469,9 @@ export function ClientsClient({
                         ) : (
                           <Badge variant="outline" className="gap-1 text-muted-foreground"><X className="h-3 w-3" /> No</Badge>
                         )}
+                      </TableCell>
+                      <TableCell className="text-muted-foreground">
+                        {new Date(r.createdAt).toLocaleDateString("es-ES", { day: "2-digit", month: "short", year: "numeric" })}
                       </TableCell>
                       <TableCell className="text-muted-foreground">
                         {r.lastAppointment ?? "—"}
@@ -517,7 +523,7 @@ export function ClientsClient({
                 })}
                 {sorted.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={10} className="py-8 text-center text-muted-foreground">Sin resultados.</TableCell>
+                    <TableCell colSpan={11} className="py-8 text-center text-muted-foreground">Sin resultados.</TableCell>
                   </TableRow>
                 )}
               </TableBody>

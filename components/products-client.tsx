@@ -17,7 +17,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { StockFilters, hayFiltros } from "@/components/stock-filters"
 import { saveProduct, saveSupplier, deleteSupplier, adjustStock } from "@/lib/actions"
-import { formatPrice } from "@/lib/format"
+import { formatPrice, matchesProductSearch } from "@/lib/format"
 
 /**
  * El catálogo de productos y proveedores, en la gestión del centro.
@@ -183,7 +183,7 @@ export function ProductsClient({ products, suppliers }: { products: ProductRow[]
   }
 
   const filteredProducts = products.filter((p) => {
-    if (search.trim() && !p.name.toLowerCase().includes(search.toLowerCase())) return false
+    if (!matchesProductSearch(p, search)) return false
     if (supplierFilter !== "ALL" && p.supplierId !== supplierFilter) return false
     if (stockDesde !== "" && p.stock < Number(stockDesde)) return false
     if (stockHasta !== "" && p.stock > Number(stockHasta)) return false
@@ -236,7 +236,7 @@ export function ProductsClient({ products, suppliers }: { products: ProductRow[]
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Producto</TableHead>
+                    <TableHead>Código y descripción</TableHead>
                     <TableHead>Proveedor</TableHead>
                     <TableHead>Precio venta</TableHead>
                     <TableHead>Coste</TableHead>
@@ -377,12 +377,22 @@ export function ProductsClient({ products, suppliers }: { products: ProductRow[]
             </DialogHeader>
             <form onSubmit={onProductSubmit} className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="name">Nombre</Label>
-                <Input id="name" name="name" defaultValue={editingProduct?.name} required />
+                <Label htmlFor="name">Código</Label>
+                <Input id="name" name="name" defaultValue={editingProduct?.name} placeholder="XA27_140" required />
+                {/* Mientras no haya lector, el código se arma a mano: siglas y
+                    número del producto, guion bajo y cantidad en ml. */}
+                <p className="text-xs text-muted-foreground">
+                  Sin código de barras: siglas y número del producto, y su cantidad en ml
+                  (por ejemplo, X.A.27 de 140 ml → XA27_140).
+                </p>
               </div>
               <div className="space-y-2">
-                <Label htmlFor="description">Descripción</Label>
-                <Input id="description" name="description" defaultValue={editingProduct?.description ?? ""} />
+                <Label htmlFor="description">Descripción (nombre completo)</Label>
+                <Input
+                  id="description" name="description" required
+                  defaultValue={editingProduct?.description ?? ""}
+                  placeholder="Limpiador Seborregulador Reparador X.A.27 HIGIENIZANT 140ml"
+                />
               </div>
               <div className="space-y-2">
                 <Label>Proveedor</Label>

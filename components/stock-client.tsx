@@ -14,6 +14,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { StockFilters, hayFiltros } from "@/components/stock-filters"
 import { addStockMovement, registerOrder } from "@/lib/actions"
+import { matchesProductSearch } from "@/lib/format"
 import type { ProductRow, SupplierRow } from "@/components/products-client"
 
 /**
@@ -100,7 +101,7 @@ function OrderPanel({ products, onClose, onDone }: OrderPanelProps) {
                 </SelectTrigger>
                 <SelectContent>
                   {available.map((p) => (
-                    <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                    <SelectItem key={p.id} value={p.id}>{p.name}{p.description ? ` — ${p.description}` : ""}</SelectItem>
                   ))}
                   {available.length === 0 && (
                     <SelectItem value="none" disabled>Todos los productos añadidos</SelectItem>
@@ -237,7 +238,7 @@ export function StockClient({ products, suppliers }: { products: ProductRow[]; s
 
   const lowStock = products.filter((p) => p.active && p.stockMin > 0 && p.stock <= p.stockMin)
   const filteredProducts = products.filter((p) => {
-    if (search.trim() && !p.name.toLowerCase().includes(search.toLowerCase())) return false
+    if (!matchesProductSearch(p, search)) return false
     if (supplierFilter !== "ALL" && p.supplierId !== supplierFilter) return false
     if (stockDesde !== "" && p.stock < Number(stockDesde)) return false
     if (stockHasta !== "" && p.stock > Number(stockHasta)) return false
@@ -263,7 +264,7 @@ export function StockClient({ products, suppliers }: { products: ProductRow[]; s
             <div className="flex flex-wrap gap-2">
               {lowStock.map((p) => (
                 <span key={p.id} className="text-xs rounded-md border border-destructive/30 bg-white px-2 py-1">
-                  {p.name} — <strong>{p.stock} ud</strong>
+                  {p.name}{p.description ? ` · ${p.description}` : ""} — <strong>{p.stock} ud</strong>
                 </span>
               ))}
             </div>
@@ -282,7 +283,7 @@ export function StockClient({ products, suppliers }: { products: ProductRow[]; s
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Producto</TableHead>
+                <TableHead>Código y descripción</TableHead>
                 <TableHead>Proveedor</TableHead>
                 <TableHead>Stock</TableHead>
                 <TableHead>Precio venta</TableHead>

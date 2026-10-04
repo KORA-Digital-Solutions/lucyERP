@@ -10,6 +10,22 @@ export function normalizeSearch(s: string): string {
     .trim()
 }
 
+/**
+ * Un producto se busca por su código ("XA27_140") o por cualquier palabra de su
+ * descripción ("seborregulador"): el código es lo que se teclea de memoria y la
+ * descripción, lo que se recuerda cuando no. Cada palabra escrita tiene que
+ * aparecer en alguno de los dos, sin importar acentos ni mayúsculas.
+ */
+export function matchesProductSearch(
+  p: { name: string; description: string | null },
+  query: string,
+): boolean {
+  const words = normalizeSearch(query).split(/\s+/).filter(Boolean)
+  if (words.length === 0) return true
+  const hay = normalizeSearch(`${p.name} ${p.description ?? ""}`)
+  return words.every((w) => hay.includes(w))
+}
+
 export function formatPrice(cents: number): string {
   return new Intl.NumberFormat("es-ES", {
     style: "currency",

@@ -48,10 +48,10 @@ export function StockFilters({
       <div className="relative">
         <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
         <Input
-          placeholder="Buscar producto…"
+          placeholder="Buscar por código o descripción…"
           value={search}
           onChange={(e) => onSearch(e.target.value)}
-          className="pl-8 w-56"
+          className="pl-8 w-72"
         />
       </div>
 

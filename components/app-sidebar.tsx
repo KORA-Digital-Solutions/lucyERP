@@ -78,7 +78,7 @@ const GRUPOS_GESTION: { titulo: string; items: NavItem[] }[] = [
   {
     titulo: "Equipo",
     items: [
-      { icon: UserCog, label: "Usuarios", href: "/workers" },
+      { icon: UserCog, label: "Personal del centro", href: "/workers" },
       { icon: Clock,   label: "Horarios", href: "/horarios" },
     ],
   },

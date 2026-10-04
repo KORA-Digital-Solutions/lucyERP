@@ -96,19 +96,19 @@ export function WorkersClient({
     <div>
       <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-card p-6">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Usuarios</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">Personal del centro</h1>
           <p className="text-muted-foreground">
-            {rows.length} usuarios · pulsa una fila para abrir su ficha
+            {rows.length} {rows.length === 1 ? "persona" : "personas"} · pulsa una fila para abrir su ficha
           </p>
         </div>
         <Button onClick={() => setNuevoOpen(true)}>
-          <Plus className="mr-2 h-4 w-4" /> Nuevo usuario
+          <Plus className="mr-2 h-4 w-4" /> Nueva persona
         </Button>
       </div>
 
       <div className="space-y-6 p-6">
         {rows.length === 0 && (
-          <Card className="p-8 text-center text-muted-foreground">Sin usuarios.</Card>
+          <Card className="p-8 text-center text-muted-foreground">Todavía no hay personal.</Card>
         )}
 
         {admins.length > 0 && (
@@ -151,14 +151,14 @@ export function WorkersClient({
       <Dialog open={nuevoOpen} onOpenChange={setNuevoOpen}>
         <DialogContent aria-describedby={undefined}>
           <DialogHeader>
-            <DialogTitle>Nuevo usuario</DialogTitle>
+            <DialogTitle>Nueva persona</DialogTitle>
           </DialogHeader>
           <WorkerForm
             worker={null}
             domain={domain}
             onDone={() => setNuevoOpen(false)}
             onCancel={() => setNuevoOpen(false)}
-            submitLabel="Crear usuario"
+            submitLabel="Crear"
           />
         </DialogContent>
       </Dialog>
